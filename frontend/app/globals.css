@@ -1,0 +1,602 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;0,800;1,400;1,600&family=Cinzel:wght@600;700;800&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Design Tokens ─────────────────────────── */
+:root {
+  --color-brand-crimson: #dc2626;
+  --color-brand-rose:    #e11d48;
+  --color-brand-gold:    #d97706;
+  --color-wedding-cream: #faf7f2;
+  --color-wedding-ivory: #fbf8f3;
+  color-scheme: light;
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* ─── Hide Development-Only UI / Floating Badges ── */
+[data-nextjs-toast],
+[data-next-badge],
+div[id^="__next-build-watcher"],
+button[aria-label="Open Next.js Dev Tools"],
+#next-logo,
+[data-nextjs-dialog] {
+  display: none !important;
+}
+
+/* ─── Base ────────────────────────────────────── */
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #f8fafc;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Custom Scrollbar ──────────────────────── */
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #dc2626 0%, #e11d48 100%);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover { background: #b91c1c; }
+
+/* ─── Font Utilities ────────────────────────── */
+.font-serif-wedding {
+  font-family: 'Playfair Display', Georgia, Cambria, 'Times New Roman', Times, serif;
+}
+.font-cinzel { font-family: 'Cinzel', serif; }
+
+/* ─── Form Resets ────────────────────────────── */
+button, input, select, textarea { font: inherit; }
+img { max-width: 100%; display: block; }
+* { box-sizing: border-box; }
+
+/* ─── Selection Color ────────────────────────── */
+::selection { background-color: #fee2e2; color: #991b1b; }
+
+/* ─── Keyframe Animations ────────────────────── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(28px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-10px); }
+}
+@keyframes heartbeat {
+  0%, 100% { transform: scale(1); }
+  14%       { transform: scale(1.2); }
+  28%       { transform: scale(1); }
+  42%       { transform: scale(1.15); }
+  70%       { transform: scale(1); }
+}
+@keyframes orb-pulse {
+  0%, 100% { opacity: 0.18; transform: scale(1); }
+  50%       { opacity: 0.28; transform: scale(1.08); }
+}
+
+/* ─── Animation Utility Classes ─────────────── */
+.animate-fade-in-up  { animation: fadeInUp 0.65s ease both; }
+.animate-fade-in     { animation: fadeIn 0.5s ease both; }
+.animate-scale-in    { animation: scaleIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.animate-float       { animation: float 4s ease-in-out infinite; }
+.animate-heartbeat   { animation: heartbeat 2s ease-in-out infinite; }
+.animate-orb-pulse   { animation: orb-pulse 5s ease-in-out infinite; }
+
+/* ─── Stagger Delays ─────────────────────────── */
+.delay-100 { animation-delay: 0.1s; }
+.delay-150 { animation-delay: 0.15s; }
+.delay-200 { animation-delay: 0.2s; }
+.delay-300 { animation-delay: 0.3s; }
+.delay-400 { animation-delay: 0.4s; }
+.delay-500 { animation-delay: 0.5s; }
+
+/* ─── Glassmorphism ─────────────────────────── */
+.glass {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+.glass-dark {
+  background: rgba(15, 23, 42, 0.70);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ─── Skeleton Shimmer ───────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ─── Card Hover Lift ────────────────────────── */
+.card-lift {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+}
+.card-lift:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 20px 40px rgba(220, 38, 38, 0.12), 0 8px 16px rgba(0,0,0,0.08);
+}
+
+/* ─── Gradient Text ──────────────────────────── */
+.text-gradient-crimson {
+  background: linear-gradient(135deg, #dc2626 0%, #e11d48 50%, #9f1239 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.text-gradient-gold {
+  background: linear-gradient(135deg, #d97706 0%, #f59e0b 50%, #b45309 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Pattern Background ─────────────────────── */
+.pattern-mandala {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='none' stroke='%23b8860b' stroke-width='0.5' opacity='0.07'%3E%3Ccircle cx='60' cy='60' r='16'/%3E%3Ccircle cx='60' cy='60' r='32'/%3E%3Ccircle cx='60' cy='60' r='48'/%3E%3C/g%3E%3C/svg%3E");
+  background-color: #faf7f2;
+}
+
+/* ─── Focus Ring ────────────────────────────── */
+input:focus-visible, select:focus-visible,
+textarea:focus-visible, button:focus-visible {
+  outline: 2px solid #dc2626;
+  outline-offset: 2px;
+}
+
+/* ─── Hero Search Bar ────────────────────────── */
+.hero-search-bar {
+  display: flex;
+  align-items: stretch;
+  background: #ffffff;
+  border-radius: 22px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.08),
+    0 2px 8px rgba(0, 0, 0, 0.04);
+  padding: 6px;
+  gap: 0;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  overflow: visible;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.hero-search-bar:focus-within {
+  box-shadow:
+    0 12px 40px rgba(220, 38, 38, 0.1),
+    0 4px 12px rgba(0, 0, 0, 0.06);
+  border-color: rgba(220, 38, 38, 0.15);
+}
+
+.hero-search-field {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hero-search-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.hero-search-select-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.hero-search-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  padding-right: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  cursor: pointer;
+  width: 100%;
+  min-width: 0;
+  line-height: 1.5;
+}
+.hero-search-select:focus {
+  outline: none;
+}
+.hero-search-select option {
+  font-weight: 500;
+}
+
+.hero-search-chevron {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.hero-search-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 10px 0;
+  background: #e2e8f0;
+  flex-shrink: 0;
+}
+
+.hero-search-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 28px;
+  background: linear-gradient(135deg, #E51F3E 0%, #dc2626 50%, #b91c1c 100%);
+  color: white;
+  border: none;
+  border-radius: 18px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+  box-shadow: 0 4px 16px rgba(220, 38, 38, 0.35);
+}
+.hero-search-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(220, 38, 38, 0.45);
+}
+.hero-search-btn:active {
+  transform: scale(0.97);
+}
+.hero-search-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+/* ─── Hero Search Responsive ─────────────────── */
+@media (max-width: 1024px) {
+  .hero-search-bar {
+    flex-wrap: wrap;
+    gap: 0;
+    border-radius: 18px;
+    padding: 8px;
+  }
+  .hero-search-field {
+    flex: 1 1 calc(33.33% - 1px);
+    min-width: 130px;
+  }
+  .hero-search-divider {
+    display: none;
+  }
+  .hero-search-btn {
+    width: 100%;
+    margin-top: 4px;
+    border-radius: 14px;
+    padding: 14px 28px;
+  }
+}
+
+@media (max-width: 640px) {
+  .hero-search-bar {
+    flex-direction: column;
+    border-radius: 16px;
+    padding: 12px;
+    gap: 2px;
+  }
+  .hero-search-field {
+    flex: none;
+    width: 100%;
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .hero-search-field:last-of-type {
+    border-bottom: none;
+  }
+  .hero-search-select {
+    font-size: 15px;
+    padding: 4px 24px 4px 0;
+  }
+  .hero-search-btn {
+    width: 100%;
+    padding: 16px;
+    border-radius: 14px;
+    font-size: 15px;
+    margin-top: 6px;
+  }
+}
+
+/* ─── Hero Image Entrance ────────────────────── */
+@keyframes heroImageIn {
+  from { opacity: 0; transform: scale(0.95) translateY(16px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-hero-image {
+  animation: heroImageIn 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
+}
+
+/* ─── Decorative Petals ──────────────────────── */
+.petal {
+  position: absolute;
+  width: 20px;
+  height: 24px;
+  opacity: 0.12;
+  pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 28'%3E%3Cpath d='M12 0C15 8 24 12 24 20C24 24.4 18.6 28 12 28C5.4 28 0 24.4 0 20C0 12 9 8 12 0Z' fill='%23E51F3E'/%3E%3C/svg%3E") center/contain no-repeat;
+  animation: float 6s ease-in-out infinite;
+}
+.petal:nth-child(2) { animation-delay: 1s; width: 16px; height: 20px; opacity: 0.08; }
+.petal:nth-child(3) { animation-delay: 2s; width: 14px; height: 18px; opacity: 0.1; }
+.petal:nth-child(4) { animation-delay: 3s; width: 18px; height: 22px; opacity: 0.06; }
+
+/* ─── Stats Section ──────────────────────────── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+}
+.stats-grid > div {
+  position: relative;
+  text-align: center;
+  padding: 24px 16px;
+}
+.stats-grid > div:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 20%;
+  height: 60%;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, #e2e8f0, transparent);
+}
+@media (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .stats-grid > div:nth-child(2)::after {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+  .stats-grid > div::after {
+    display: none;
+  }
+  .stats-grid > div {
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .stats-grid > div:last-child {
+    border-bottom: none;
+  }
+}
+
+/* ─── Button Press Utility ───────────────────── */
+.btn-press {
+  transition: transform 0.12s ease, box-shadow 0.2s ease;
+}
+.btn-press:active {
+  transform: scale(0.97);
+}
+
+/* ─── Hero Couple Composition ───────────────── */
+
+/* Outer wrapper: sets the reference frame for absolute children */
+.hero-couple-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 500px;
+  min-height: 440px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Layer 3 — Large pale peach circle (sits behind couple) */
+.hero-couple-circle-bg {
+  position: absolute;
+  width: 390px;
+  height: 390px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 45% 48%, #fdeddf 0%, #fde4d0 40%, #fdd8be 75%, #fecfae 100%);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  box-shadow:
+    0 0 50px rgba(253, 210, 170, 0.35),
+    0 0 100px rgba(253, 220, 190, 0.2);
+}
+
+/* Layer 4 — Thin golden/orange circle outline */
+.hero-couple-circle-outline {
+  position: absolute;
+  width: 418px;
+  height: 418px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(217, 119, 6, 0.4);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Inner decorative ring (dashed subtle gold) */
+.hero-couple-circle-inner-ring {
+  position: absolute;
+  width: 362px;
+  height: 362px;
+  border-radius: 50%;
+  border: 1px dashed rgba(217, 119, 6, 0.22);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Layer 5 — Couple transparent cutout image */
+.hero-couple-img-frame {
+  position: relative;
+  z-index: 5;
+  width: 440px;
+  margin-top: 10px;
+  filter: drop-shadow(0 14px 28px rgba(0, 0, 0, 0.09));
+  overflow: visible;
+  pointer-events: none;
+}
+
+.hero-couple-img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+
+/* ── Hero close-in petals ───────────────────── */
+.hero-petal {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  animation: float 5s ease-in-out infinite;
+}
+.hero-petal-1 {
+  top: 2%;
+  right: 2%;
+  transform: rotate(20deg);
+  animation-delay: 0s;
+  opacity: 0.75;
+}
+.hero-petal-2 {
+  top: 16%;
+  left: 0%;
+  transform: rotate(-25deg);
+  animation-delay: 0.9s;
+  opacity: 0.6;
+}
+.hero-petal-3 {
+  bottom: 14%;
+  right: 2%;
+  transform: rotate(40deg);
+  animation-delay: 1.8s;
+  opacity: 0.65;
+}
+.hero-petal-4 {
+  bottom: 4%;
+  left: 2%;
+  transform: rotate(-10deg);
+  animation-delay: 2.5s;
+  opacity: 0.55;
+}
+
+/* ── Mandala accent dots ─────────────────────── */
+.hero-couple-dot {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 3;
+}
+.hero-couple-dot-1 {
+  width: 10px;
+  height: 10px;
+  background: rgba(217, 119, 6, 0.35);
+  top: 8%;
+  right: 6%;
+  animation: orb-pulse 4s ease-in-out infinite;
+}
+.hero-couple-dot-2 {
+  width: 8px;
+  height: 8px;
+  background: rgba(240, 170, 100, 0.4);
+  bottom: 14%;
+  left: 4%;
+  animation: orb-pulse 5s ease-in-out infinite 1s;
+}
+.hero-couple-dot-3 {
+  width: 12px;
+  height: 12px;
+  background: rgba(253, 200, 140, 0.4);
+  bottom: 24%;
+  right: 0%;
+  animation: orb-pulse 6s ease-in-out infinite 2s;
+}
+
+/* ── Responsive adjustments ─────────────────── */
+@media (max-width: 1024px) {
+  .hero-couple-wrapper {
+    max-width: 400px;
+    min-height: 380px;
+  }
+  .hero-couple-circle-bg {
+    width: 320px;
+    height: 320px;
+  }
+  .hero-couple-circle-outline {
+    width: 344px;
+    height: 344px;
+  }
+  .hero-couple-circle-inner-ring {
+    width: 298px;
+    height: 298px;
+  }
+  .hero-couple-img-frame {
+    width: 360px;
+  }
+}
+
+@media (max-width: 640px) {
+  .hero-couple-wrapper {
+    max-width: 320px;
+    min-height: 320px;
+  }
+  .hero-couple-circle-bg {
+    width: 260px;
+    height: 260px;
+  }
+  .hero-couple-circle-outline {
+    width: 280px;
+    height: 280px;
+  }
+  .hero-couple-circle-inner-ring {
+    width: 240px;
+    height: 240px;
+  }
+  .hero-couple-img-frame {
+    width: 290px;
+  }
+}

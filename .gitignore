@@ -1,0 +1,55 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Next.js
+.next/
+out/
+
+# Build
+dist/
+build/
+
+# Environment
+.env
+.env.*
+*.local
+
+# SQL dumps and backups
+*.sql
+*.sql.gz
+*.dump
+
+# Password or credential files
+apppassword*
+*password*
+
+# Uploads and writable directories
+candidate_uploads/
+uploads/
+uploads_candidate/
+writable/
+public/uploads/
+
+# DO NOT UPLOAD markers and backups
+DO_NOT_UPLOAD_HERE
+*.bak
+*backup*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# npm cache
+.npm/
+.npmrc
+
+# IDEs
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log

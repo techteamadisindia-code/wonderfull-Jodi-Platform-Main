@@ -201,7 +201,7 @@ export function HeroSearchBar() {
         aria-label="Search profiles"
       >
         <Search className="w-4 h-4" aria-hidden="true" />
-        <span>{isSearching ? 'Searching…' : 'Search'}</span>
+        <span>{isSearching ? 'Searching…' : 'Find Matches'}</span>
       </button>
     </form>
   );

@@ -36,31 +36,35 @@ export function Navbar() {
     { href: '/contact', label: 'Help & Contact' },
   ];
 
+  if (pathname?.startsWith('/admin')) {
+    return null;
+  }
+
   return (
     <header
       className={`sticky top-0 z-50 w-full bg-white transition-all duration-300 ${
         scrolled
-          ? 'shadow-sm border-b border-rose-100/60 py-3.5'
-          : 'border-b border-rose-100/40 py-4 lg:py-[18px]'
-      }`}
+          ? 'shadow-xs border-b border-rose-100/70 h-[78px] sm:h-[80px]'
+          : 'border-b border-rose-100/40 h-[80px] sm:h-[84px]'
+      } flex items-center`}
     >
-      <div className="mx-auto flex w-full max-w-[1520px] items-center justify-between px-4 sm:px-8 lg:px-12">
+      <div className="w-[calc(100%-32px)] sm:w-[calc(100%-64px)] lg:w-[calc(100%-96px)] max-w-[1600px] mx-auto flex items-center justify-between">
         {/* Brand Logo */}
         <Link href="/" className="flex items-center gap-3 group select-none">
           <div className="relative">
-            <div className="w-11 h-11 rounded-[14px] bg-gradient-to-tr from-[#E51F3E] via-[#E82645] to-[#F03554] flex items-center justify-center text-white shadow-md shadow-red-500/25 transition-transform duration-300 group-hover:scale-105">
-              <Heart className="w-5 h-5 fill-white stroke-none" />
+            <div className="w-10 h-10 rounded-[12px] bg-gradient-to-tr from-[#E51F3E] via-[#E82645] to-[#F03554] flex items-center justify-center text-white shadow-sm shadow-red-500/25 transition-transform duration-300 group-hover:scale-105">
+              <Heart className="w-4.5 h-4.5 fill-white stroke-none" />
             </div>
-            <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[#D99A28] border-2 border-white flex items-center justify-center shadow-xs">
-              <Sparkles className="w-2.5 h-2.5 text-white fill-white" />
+            <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-[#D99A28] border-2 border-white flex items-center justify-center shadow-2xs">
+              <Sparkles className="w-2 h-2 text-white fill-white" />
             </div>
           </div>
           <div className="flex flex-col">
-            <div className="font-serif text-[26px] font-bold text-[#101828] tracking-tight leading-none">
+            <div className="font-serif text-[24px] font-bold text-[#101828] tracking-tight leading-none">
               <span>Wonderful </span>
               <span className="text-[#E51F3E]">Jodi</span>
             </div>
-            <span className="text-[9.5px] uppercase tracking-[0.24em] font-bold text-[#C99635] mt-1">
+            <span className="text-[9px] uppercase tracking-[0.24em] font-bold text-[#C99635] mt-1">
               Verified Matrimony
             </span>
           </div>
@@ -74,10 +78,10 @@ export function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
-                className={`px-5 py-2 rounded-full text-[15px] transition-all duration-200 relative ${
+                className={`px-5 py-2 rounded-full text-[15px] transition-all duration-200 relative border-0 outline-none ${
                   isActive
-                    ? 'text-[#E51F3E] bg-[#FCECEE] font-semibold'
-                    : 'text-[#334155] font-medium hover:text-[#E51F3E] hover:bg-slate-50/80'
+                    ? 'text-[#E9232E] bg-[#FFF0F3] font-semibold'
+                    : 'text-[#334155] font-medium hover:text-[#E9232E] hover:bg-slate-50/80'
                 }`}
               >
                 {link.label}
@@ -149,10 +153,10 @@ export function Navbar() {
                   key={link.href}
                   href={link.href}
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`px-4 py-3 rounded-xl text-base transition ${
+                  className={`px-4 py-3 rounded-xl text-base transition border-0 outline-none ${
                     isActive
-                      ? 'bg-[#FCECEE] text-[#E51F3E] font-bold'
-                      : 'text-slate-700 hover:bg-slate-50 hover:text-[#E51F3E]'
+                      ? 'bg-[#FFF0F3] text-[#E9232E] font-bold'
+                      : 'text-slate-700 hover:bg-slate-50 hover:text-[#E9232E]'
                   }`}
                 >
                   {link.label}

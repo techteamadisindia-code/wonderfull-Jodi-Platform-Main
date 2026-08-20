@@ -73,15 +73,15 @@ export function WeddingSearch() {
   ];
 
   return (
-    <section className="relative py-14 sm:py-16 px-4 sm:px-6 lg:px-8 overflow-hidden bg-gradient-to-b from-white via-[#FFF8F4] to-white border-b border-rose-100/60">
-      <div className="mx-auto max-w-6xl text-center relative z-10 space-y-10">
+    <section className="relative py-12 sm:py-14 lg:py-16 px-4 sm:px-6 lg:px-8 overflow-hidden bg-gradient-to-b from-white via-[#FFF8F4] to-white border-b border-rose-100/60">
+      <div className="w-[calc(100%-32px)] sm:w-[calc(100%-64px)] lg:w-[calc(100%-96px)] max-w-[1600px] mx-auto text-center relative z-10 space-y-9">
         {/* Main Heading */}
-        <div className="space-y-3 max-w-3xl mx-auto">
+        <div className="space-y-2.5 max-w-3xl mx-auto">
           <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-red-100/80 border border-red-200/80 text-[#E51F3E] text-xs font-bold uppercase tracking-wider shadow-2xs">
             <Sparkles className="w-3.5 h-3.5" />
             Simple 3-Step Matrimonial Journey
           </span>
-          <h2 className="font-serif text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight leading-tight">
+          <h2 className="font-serif text-2xl sm:text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight leading-tight">
             How Wonderful Jodi <span className="text-[#E51F3E]">Works For You</span>
           </h2>
           <p className="text-slate-600 text-xs sm:text-sm leading-relaxed max-w-2xl mx-auto">
@@ -90,11 +90,11 @@ export function WeddingSearch() {
         </div>
 
         {/* Steps Grid with Horizontal Connector Line on Desktop */}
-        <div className="relative pt-3">
+        <div className="relative pt-2">
           {/* Subtle Horizontal Connector Progression Line (Desktop only) */}
           <div className="hidden md:block absolute top-[52px] left-[15%] right-[15%] h-[2px] bg-gradient-to-r from-rose-200 via-rose-300 to-rose-200 z-0" />
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-7 relative z-10">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-7 relative z-10">
             {steps.map((item) => (
               <StepCard
                 key={item.step}
@@ -109,7 +109,7 @@ export function WeddingSearch() {
         </div>
 
         {/* Bottom Action */}
-        <div className="pt-2">
+        <div className="pt-1">
           <Link
             href="/register"
             className="inline-flex items-center gap-2 rounded-full bg-[#101828] hover:bg-slate-800 text-white px-7 py-3 text-sm font-semibold shadow-md hover:shadow-lg transition-all duration-200 hover:-translate-y-0.5"

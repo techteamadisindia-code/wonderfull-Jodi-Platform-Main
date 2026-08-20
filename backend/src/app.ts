@@ -14,6 +14,7 @@ import shortlistRoutes from './routes/shortlistRoutes';
 import notificationRoutes from './routes/notificationRoutes';
 import membershipRoutes from './routes/membershipRoutes';
 import adminRoutes from './routes/adminRoutes';
+import contactRoutes from './routes/contactRoutes';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -45,6 +46,7 @@ app.use('/api/shortlists', shortlistRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/memberships', membershipRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/contact', contactRoutes);
 
 app.use(errorHandler);
 

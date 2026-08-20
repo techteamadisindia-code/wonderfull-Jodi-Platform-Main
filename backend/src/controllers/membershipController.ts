@@ -5,10 +5,134 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { Subscription } from '../models/Subscription';
 import { Payment } from '../models/Payment';
 
-const plans = [
-  { key: 'FREE', name: 'Free', amount: 0, features: ['Create profile', 'Search profiles', 'Limited interests'] },
-  { key: 'PREMIUM', name: 'Premium', amount: 4999, features: ['Advanced search', 'More interests', 'Message access'] },
-  { key: 'PREMIUM_PLUS', name: 'Premium Plus', amount: 9999, features: ['Priority visibility', 'Premium recommendations', 'Premium support'] },
+export interface MembershipPlanConfig {
+  key: string;
+  planId: string;
+  name: string;
+  displayName: string;
+  amount: number;
+  price: string;
+  duration: string;
+  description: string;
+  badge?: string;
+  bestFor: string;
+  features: string[];
+  isPopular?: boolean;
+  isVip?: boolean;
+  isVvip?: boolean;
+  ctaText: string;
+  ctaAction: 'register' | 'order' | 'contact';
+  sortOrder: number;
+  active: boolean;
+}
+
+const plans: MembershipPlanConfig[] = [
+  {
+    key: 'FREE',
+    planId: 'plan_free',
+    name: 'Free Plan',
+    displayName: 'Explore & Build Your Profile',
+    amount: 0,
+    price: '₹0',
+    duration: 'Forever Free',
+    description: 'Create your professional doctor matrimonial profile and start discovering compatible matches.',
+    badge: 'FREE PLAN',
+    bestFor: 'Doctors who are just starting their search',
+    features: [
+      'Create detailed doctor matrimonial profile',
+      'Doctor/profession information',
+      'Upload up to 3 photos',
+      'Basic profile search',
+      'Basic match recommendations',
+      'Receive interest requests',
+      'Send limited interest requests',
+      'Profile privacy controls',
+      'Basic profile verification',
+    ],
+    ctaText: 'Create Your Free Profile',
+    ctaAction: 'register',
+    sortOrder: 1,
+    active: true,
+  },
+  {
+    key: 'PREMIUM',
+    planId: 'plan_premium',
+    name: 'Premium',
+    displayName: 'Connect With Compatible Doctors',
+    amount: 4999,
+    price: '₹4,999',
+    duration: '3 Months',
+    description: 'Everything you need to connect directly with compatible verified doctors and accelerate your search.',
+    badge: '⭐ MOST POPULAR',
+    bestFor: 'Doctors who are seriously looking for a life partner',
+    isPopular: true,
+    features: [
+      'View contact details of selected verified profiles',
+      'Unlimited interest requests',
+      'Direct messaging & Easy chat access',
+      'Respond directly to interested profiles',
+      'Advanced match recommendations & search filters',
+      'Specialization & City/Location filters',
+      'Priority customer support',
+      'Premium profile badge',
+    ],
+    ctaText: 'Start Connecting',
+    ctaAction: 'order',
+    sortOrder: 2,
+    active: true,
+  },
+  {
+    key: 'PREMIUM_VIP',
+    planId: 'plan_premium_vip',
+    name: 'Premium VIP',
+    displayName: 'Personalised Matchmaking',
+    amount: 9999,
+    price: '₹9,999',
+    duration: '6 Months',
+    description: 'Everything in Premium, plus personalised assistance and priority matchmaking support.',
+    badge: '👑 PREMIUM VIP',
+    bestFor: 'Doctors who value time & privacy',
+    isVip: true,
+    features: [
+      'Personal Relationship Manager',
+      'One-to-one matchmaking assistance',
+      'Unlimited contact access to eligible profiles',
+      'Priority introduction requests',
+      'Enhanced privacy & hide profile options',
+      'VIP profile badge & top placement',
+      'Priority WhatsApp/phone support',
+    ],
+    ctaText: 'Get Personalised Matchmaking',
+    ctaAction: 'order',
+    sortOrder: 3,
+    active: true,
+  },
+  {
+    key: 'VVIP',
+    planId: 'plan_vvip',
+    name: 'VVIP Concierge',
+    displayName: 'Exclusive Concierge Matchmaking',
+    amount: 0,
+    price: 'Custom',
+    duration: 'Tailored Concierge',
+    description: 'A discreet, high-touch matchmaking service combining dedicated human assistance, compatibility analysis and coordinated introductions.',
+    badge: '💎 VVIP',
+    bestFor: 'Doctors and families seeking a fully personalised matchmaking experience',
+    isVvip: true,
+    features: [
+      'Dedicated Senior Matchmaking Consultant',
+      'Personally curated match shortlist',
+      'AI + Human compatibility assessment',
+      'Face-to-face / Video introduction coordination',
+      'Enhanced background & profile verification assistance',
+      'Family-to-family meeting & intercity coordination',
+      'Discreet confidentiality handling',
+    ],
+    ctaText: 'Request VVIP Matchmaking',
+    ctaAction: 'contact',
+    sortOrder: 4,
+    active: true,
+  },
 ];
 
 export async function getMembershipPlans(req: AuthRequest, res: Response, next: NextFunction) {

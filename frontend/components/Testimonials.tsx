@@ -49,14 +49,14 @@ const stories: Story[] = [
 
 export function Testimonials() {
   return (
-    <section className="py-14 sm:py-16 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-slate-50 via-rose-50/20 to-white relative overflow-hidden">
-      <div className="mx-auto max-w-7xl relative z-10 space-y-10">
+    <section className="py-12 sm:py-14 lg:py-16 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-slate-50/70 via-rose-50/20 to-white relative overflow-hidden">
+      <div className="w-[calc(100%-32px)] sm:w-[calc(100%-64px)] lg:w-[calc(100%-96px)] max-w-[1600px] mx-auto relative z-10 space-y-9">
         {/* Section Header */}
-        <div className="text-center max-w-3xl mx-auto space-y-3">
+        <div className="text-center max-w-3xl mx-auto space-y-2.5">
           <span className="text-xs uppercase tracking-[0.22em] font-semibold text-[#E51F3E] bg-[#FCECEE] border border-[#F8CCD2] px-3.5 py-1 rounded-full inline-flex items-center gap-1.5 shadow-2xs">
             <Heart className="w-3.5 h-3.5 fill-[#E51F3E]" /> Real Matrimonial Stories
           </span>
-          <h2 className="font-serif text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          <h2 className="font-serif text-2xl sm:text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
             Thousands of <span className="text-[#E51F3E]">Happy Marriages</span>
           </h2>
           <p className="text-slate-600 text-xs sm:text-sm leading-relaxed max-w-2xl mx-auto">

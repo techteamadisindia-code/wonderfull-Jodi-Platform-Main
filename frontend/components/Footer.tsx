@@ -1,13 +1,20 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { Phone, Mail, MapPin, Heart } from 'lucide-react';
 
 export function Footer() {
+  const pathname = usePathname();
+
+  if (pathname?.startsWith('/admin')) {
+    return null;
+  }
+
   return (
     <footer className="bg-[#0B111E] text-slate-300 border-t border-slate-900">
       {/* Main Footer Links */}
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 sm:py-14 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10 lg:gap-8">
+      <div className="w-[calc(100%-32px)] sm:w-[calc(100%-64px)] lg:w-[calc(100%-96px)] max-w-[1600px] mx-auto py-12 sm:py-14 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10 lg:gap-8">
         {/* Brand Info */}
         <div className="space-y-3.5">
           <Link href="/" className="inline-flex items-center gap-2.5 font-serif text-2xl font-bold text-white tracking-wide">
@@ -79,7 +86,7 @@ export function Footer() {
 
       {/* Copyright & Disclaimer */}
       <div className="border-t border-slate-900 bg-[#070C16] py-5 px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-500">
-        <div className="mx-auto max-w-7xl flex flex-col md:flex-row items-center justify-between gap-3">
+        <div className="w-[calc(100%-32px)] sm:w-[calc(100%-64px)] lg:w-[calc(100%-96px)] max-w-[1600px] mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
           <p>© {new Date().getFullYear()} WonderfulJodi.com. All rights reserved. Designed for happy, lasting marriages.</p>
           <div className="flex items-center gap-5">
             <Link href="/about" className="hover:text-slate-300 transition">Privacy Policy</Link>

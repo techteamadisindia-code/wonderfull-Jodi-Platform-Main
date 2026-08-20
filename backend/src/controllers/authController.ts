@@ -13,8 +13,10 @@ const registerSchema = z.object({
 });
 
 const loginSchema = z.object({
-  emailOrMobile: z.string().min(5),
-  password: z.string().min(8),
+  emailOrMobile: z.string().optional(),
+  email: z.string().optional(),
+  mobile: z.string().optional(),
+  password: z.string().min(6),
 });
 
 const forgotPasswordSchema = z.object({ email: z.string().email() });
@@ -51,7 +53,15 @@ export async function registerUser(req: Request, res: Response, next: NextFuncti
       text: `Hello ${user.fullName}, welcome to Wonderful Jodi matrimonial platform.`,
     });
 
-    return res.status(201).json({ success: true, data: { token, user: { id: user._id, fullName: user.fullName, email: user.email, role: user.role } } });
+    return res.status(201).json({
+      success: true,
+      token,
+      data: {
+        token,
+        user: { _id: user._id, id: user._id, fullName: user.fullName, email: user.email, role: user.role },
+      },
+      user: { _id: user._id, id: user._id, fullName: user.fullName, email: user.email, role: user.role },
+    });
   } catch (error) {
     next(error);
   }
@@ -60,13 +70,37 @@ export async function registerUser(req: Request, res: Response, next: NextFuncti
 export async function loginUser(req: Request, res: Response, next: NextFunction) {
   try {
     const data = loginSchema.parse(req.body);
-    const user = await User.findOne({ $or: [{ email: data.emailOrMobile }, { mobile: data.emailOrMobile }] });
+    const identifier = data.emailOrMobile || data.email || data.mobile;
+    if (!identifier) {
+      return res.status(400).json({ success: false, message: 'Email or mobile number is required' });
+    }
+
+    const user = await User.findOne({
+      $or: [{ email: identifier.toLowerCase().trim() }, { mobile: identifier.trim() }],
+    });
+
     if (!user || !(await bcrypt.compare(data.password, user.password))) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
     const token = signToken(user._id.toString(), user.role);
-    return res.json({ success: true, data: { token, user: { id: user._id, fullName: user.fullName, email: user.email, role: user.role } } });
+    const userData = {
+      _id: user._id,
+      id: user._id,
+      fullName: user.fullName,
+      email: user.email,
+      mobile: user.mobile,
+      role: user.role,
+      verified: user.verified,
+      verificationStatus: user.verificationStatus,
+    };
+
+    return res.json({
+      success: true,
+      token,
+      user: userData,
+      data: { token, user: userData },
+    });
   } catch (error) {
     next(error);
   }

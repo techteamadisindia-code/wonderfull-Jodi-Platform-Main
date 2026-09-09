@@ -223,11 +223,11 @@ export function VvipModal({ isOpen, onClose }: VvipModalProps) {
               <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 gap-2">
                 <div className="flex items-center gap-1.5">
                   <Phone className="w-3.5 h-3.5 text-[#E51F3E]" />
-                  <span>Direct Hotline: <strong>+91 1800 200 9090</strong></span>
+                  <span>Direct Hotline: <a href="tel:+9109607559547" className="font-bold text-slate-700 hover:text-[#E51F3E] transition">+91 096075 59547</a></span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Mail className="w-3.5 h-3.5 text-[#E51F3E]" />
-                  <span>concierge@wonderfuljodi.com</span>
+                  <a href="mailto:support@wonderfuljodi.com" className="hover:text-[#E51F3E] transition">support@wonderfuljodi.com</a>
                 </div>
               </div>
             </form>

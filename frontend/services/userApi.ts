@@ -3,12 +3,17 @@ import apiClient from './api';
 export interface UserItem {
   _id: string;
   fullName: string;
+  displayName?: string;
+  profileId?: string;
+  profilePhoto?: string;
   email: string;
   mobile: string;
   role: 'user' | 'admin';
   verified: boolean;
   verificationStatus: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
   isActive: boolean;
+  membershipPlan?: string;
+  lastActiveAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -18,6 +23,7 @@ export interface UsersResponse {
   total: number;
   page: number;
   pages: number;
+  limit?: number;
 }
 
 export interface UserDetailResponse {
@@ -52,9 +58,10 @@ export async function fetchUserById(id: string): Promise<UserDetailResponse> {
   return response.data.data;
 }
 
-export async function updateUserStatus(id: string, isActive: boolean): Promise<UserItem> {
+export async function updateUserStatus(id: string, isActive: boolean, reason?: string): Promise<UserItem> {
   const response = await apiClient.put<{ success: boolean; data: UserItem }>(`/admin/users/${id}/status`, {
     isActive,
+    reason,
   });
   return response.data.data;
 }

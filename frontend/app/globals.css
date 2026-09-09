@@ -6,23 +6,34 @@
 
 /* ─── Design Tokens ─────────────────────────── */
 :root {
-  --color-brand-crimson: #dc2626;
+  --color-brand-crimson: #E51F3E;
   --color-brand-rose:    #e11d48;
   --color-brand-gold:    #d97706;
-  --color-wedding-cream: #faf7f2;
-  --color-wedding-ivory: #fbf8f3;
+  --color-wedding-cream: #FAF8F5;
+  --color-wedding-ivory: #FAF8F5;
+  --bg-app: #FAF8F5;
+  --border-card: rgba(180, 160, 150, 0.22);
   color-scheme: light;
   font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
-/* ─── Hide Development-Only UI / Floating Badges ── */
+/* ─── Hide Development-Only UI / Floating Badges / Unwanted Symbols ── */
 [data-nextjs-toast],
 [data-next-badge],
 div[id^="__next-build-watcher"],
 button[aria-label="Open Next.js Dev Tools"],
 #next-logo,
-[data-nextjs-dialog] {
+[data-nextjs-dialog],
+nextjs-portal,
+#nextjs-dev-tools,
+[data-nextjs-dev-tools-button],
+[data-nextjs-dev-tools],
+[data-nextjs-route-announcer],
+div[class*="next-dev-overlay"] {
   display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 /* ─── Base ────────────────────────────────────── */
@@ -31,10 +42,18 @@ html { scroll-behavior: smooth; }
 body {
   margin: 0;
   min-height: 100vh;
-  background: #fffaf7;
+  background: #FAF8F5;
   color: #0f172a;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Unified Card Standard ─────────────────── */
+.wj-card {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(180, 160, 150, 0.22);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03), 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 /* ─── Custom Scrollbar ──────────────────────── */
@@ -425,13 +444,13 @@ textarea:focus-visible, button:focus-visible {
   justify-content: center;
 }
 
-/* Layer — Couple transparent cutout image with soft ambient lighting */
+/* Layer — Couple transparent cutout image */
 .hero-couple-img-frame {
   position: relative;
   z-index: 5;
   width: 100%;
   max-width: 510px;
-  filter: drop-shadow(0 12px 28px rgba(180, 83, 9, 0.12));
+  filter: none;
   overflow: visible;
   pointer-events: auto;
 }

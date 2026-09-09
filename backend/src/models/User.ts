@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { CURRENT_TERMS_VERSION } from '../config/termsConfig';
 
 export interface IUser extends Document {
   fullName: string;
@@ -9,6 +10,9 @@ export interface IUser extends Document {
   verified: boolean;
   verificationStatus: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
   isActive: boolean;
+  termsAccepted: boolean;
+  termsVersion: string;
+  termsAcceptedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,7 +31,10 @@ const userSchema = new Schema<IUser>(
       default: 'UNVERIFIED',
       index: true,
     },
-    isActive: { type: Boolean, default: true },
+    isActive: { type: Boolean, default: true, index: true },
+    termsAccepted: { type: Boolean, default: false },
+    termsVersion: { type: String, default: CURRENT_TERMS_VERSION },
+    termsAcceptedAt: { type: Date },
   },
   { timestamps: true }
 );

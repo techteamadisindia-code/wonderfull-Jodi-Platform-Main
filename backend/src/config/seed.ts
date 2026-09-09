@@ -1,9 +1,14 @@
 import bcrypt from 'bcrypt';
 import { User } from '../models/User';
 import { Profile } from '../models/Profile';
+import { Registration } from '../models/Registration';
+import { seedMasterDataIfEmpty } from '../services/masterDataImporter';
 
 export async function seedInitialData() {
   try {
+    // Ensure all location & community master data is seeded and up to date
+    await seedMasterDataIfEmpty();
+
     const userCount = await User.countDocuments();
     let usersList: any[] = [];
     let createdUsers: any[] = [];
@@ -14,7 +19,7 @@ export async function seedInitialData() {
 
       const demoUsers = [
       {
-        fullName: 'Priya Sharma',
+        fullName: 'Dr. Priya Sharma',
         email: 'priya.sharma@example.com',
         mobile: '+919876543210',
         password: defaultPassword,
@@ -22,7 +27,7 @@ export async function seedInitialData() {
         verified: true,
         verificationStatus: 'VERIFIED' as const,
         profile: {
-          displayName: 'Priya Sharma',
+          displayName: 'Dr. Priya Sharma',
           gender: 'Female' as const,
           dob: new Date('1998-05-14'),
           height: `5' 6"`,
@@ -30,10 +35,10 @@ export async function seedInitialData() {
           motherTongue: 'Hindi',
           religion: 'Hindu',
           caste: 'Brahmin',
-          education: 'Master of Technology',
-          degree: 'M.Tech Computer Science (IIT Bombay)',
-          profession: 'Senior Software Engineer',
-          company: 'Google India',
+          education: 'MD / MS (Medical)',
+          degree: 'MBBS, MD Dermatology (AIIMS New Delhi)',
+          profession: 'Consultant Dermatologist',
+          company: 'Apollo Hospitals',
           workLocation: 'Bengaluru',
           annualIncome: '₹ 35 - 50 Lakhs',
           country: 'India',
@@ -41,7 +46,7 @@ export async function seedInitialData() {
           city: 'Bengaluru',
           familyType: 'Nuclear',
           foodPreference: 'Vegetarian',
-          about: 'Passionate tech enthusiast, loves classical music, traveling and exploring new cultures. Looking for an understanding partner who values family and ambition.',
+          about: 'Passionate dermatologist, loves classical music, traveling and exploring new cultures. Looking for an understanding doctor/professional partner who values family and ambition.',
           photos: [
             'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=600',
             'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=600',
@@ -51,7 +56,7 @@ export async function seedInitialData() {
         },
       },
       {
-        fullName: 'Rohan Mehta',
+        fullName: 'Dr. Rohan Mehta',
         email: 'rohan.mehta@example.com',
         mobile: '+919876543211',
         password: defaultPassword,
@@ -59,7 +64,7 @@ export async function seedInitialData() {
         verified: true,
         verificationStatus: 'VERIFIED' as const,
         profile: {
-          displayName: 'Rohan Mehta',
+          displayName: 'Dr. Rohan Mehta',
           gender: 'Male' as const,
           dob: new Date('1994-11-20'),
           height: `5' 11"`,
@@ -67,10 +72,10 @@ export async function seedInitialData() {
           motherTongue: 'Gujarati',
           religion: 'Hindu',
           caste: 'Vaishnav',
-          education: 'Master of Business Administration',
-          degree: 'MBA (IIM Ahmedabad)',
-          profession: 'Product Director',
-          company: 'Fintech Unicorn',
+          education: 'MBBS, MD / MS (Medical)',
+          degree: 'MBBS, MS General Surgery (KEM Hospital Mumbai)',
+          profession: 'General Surgeon',
+          company: 'Lilavati Hospital',
           workLocation: 'Mumbai',
           annualIncome: '₹ 45 - 60 Lakhs',
           country: 'India',
@@ -78,7 +83,7 @@ export async function seedInitialData() {
           city: 'Mumbai',
           familyType: 'Joint',
           foodPreference: 'Vegetarian',
-          about: 'Entrepreneurial mindset, fitness enthusiast, marathon runner. Seeking a life partner with shared values, kindness, and positivity.',
+          about: 'General surgeon, fitness enthusiast, marathon runner. Seeking a doctor life partner with shared values, kindness, and positivity.',
           photos: [
             'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=600',
           ],
@@ -103,7 +108,7 @@ export async function seedInitialData() {
           motherTongue: 'Hindi',
           religion: 'Hindu',
           caste: 'Kayastha',
-          education: 'Doctorate / Medical',
+          education: 'MD / MS (Medical)',
           degree: 'MBBS, MD Cardiology (AIIMS)',
           profession: 'Consultant Cardiologist',
           company: 'Apollo Hospitals',
@@ -123,7 +128,7 @@ export async function seedInitialData() {
         },
       },
       {
-        fullName: 'Vikramaditya Singh',
+        fullName: 'Dr. Vikramaditya Singh',
         email: 'vikram.singh@example.com',
         mobile: '+919876543213',
         password: defaultPassword,
@@ -131,7 +136,7 @@ export async function seedInitialData() {
         verified: true,
         verificationStatus: 'VERIFIED' as const,
         profile: {
-          displayName: 'Vikramaditya Singh',
+          displayName: 'Dr. Vikramaditya Singh',
           gender: 'Male' as const,
           dob: new Date('1992-03-17'),
           height: `6' 0"`,
@@ -139,10 +144,10 @@ export async function seedInitialData() {
           motherTongue: 'Hindi',
           religion: 'Hindu',
           caste: 'Rajput',
-          education: 'Bachelor of Architecture',
-          degree: 'B.Arch (SPA Delhi)',
-          profession: 'Principal Architect & Founder',
-          company: 'Design Atelier',
+          education: 'MBBS + MS',
+          degree: 'MBBS, MS Orthopedics (SMS Medical College)',
+          profession: 'Orthopedic Surgeon',
+          company: 'Fortis Hospital',
           workLocation: 'Jaipur',
           annualIncome: '₹ 50 - 75 Lakhs',
           country: 'India',
@@ -150,7 +155,7 @@ export async function seedInitialData() {
           city: 'Jaipur',
           familyType: 'Joint',
           foodPreference: 'Non-Vegetarian',
-          about: 'Passionate about sustainable architecture, heritage preservation and road trips. Seeking a creative, joyful partner to build a beautiful life with.',
+          about: 'Orthopedic surgeon passionate about sports medicine, heritage preservation and road trips. Seeking a doctor/professional partner to build a beautiful life with.',
           photos: [
             'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&q=80&w=600',
           ],
@@ -159,7 +164,43 @@ export async function seedInitialData() {
         },
       },
       {
-        fullName: 'Siddharth Nair',
+        fullName: 'Dr. Kavya Iyer',
+        email: 'kavya.iyer@example.com',
+        mobile: '+919876543215',
+        password: defaultPassword,
+        role: 'user' as const,
+        verified: true,
+        verificationStatus: 'VERIFIED' as const,
+        profile: {
+          displayName: 'Dr. Kavya Iyer',
+          gender: 'Female' as const,
+          dob: new Date('1997-04-12'),
+          height: `5' 6"`,
+          maritalStatus: 'Never Married',
+          motherTongue: 'Tamil',
+          religion: 'Hindu',
+          caste: 'Iyer',
+          education: 'MD / MS (Medical)',
+          degree: 'MBBS, MD Radiodiagnosis (Madras Medical College)',
+          profession: 'Consultant Radiologist',
+          company: 'Apollo Speciality Hospitals',
+          workLocation: 'Chennai',
+          annualIncome: '₹ 45 - 60 Lakhs',
+          country: 'India',
+          state: 'Tamil Nadu',
+          city: 'Chennai',
+          familyType: 'Nuclear',
+          foodPreference: 'Vegetarian',
+          about: 'Radiologist, classical Carnatic vocalist and yoga practitioner. Looking for an educated, ambitious, and respectful life partner.',
+          photos: [
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=600',
+          ],
+          primaryPhoto: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=600',
+          verificationStatus: 'VERIFIED' as const,
+        },
+      },
+      {
+        fullName: 'Dr. Siddharth Nair',
         email: 'siddharth.nair@example.com',
         mobile: '+919876543214',
         password: defaultPassword,
@@ -167,7 +208,7 @@ export async function seedInitialData() {
         verified: true,
         verificationStatus: 'VERIFIED' as const,
         profile: {
-          displayName: 'Siddharth Nair',
+          displayName: 'Dr. Siddharth Nair',
           gender: 'Male' as const,
           dob: new Date('1995-07-22'),
           height: `5' 10"`,
@@ -175,10 +216,10 @@ export async function seedInitialData() {
           motherTongue: 'Malayalam',
           religion: 'Hindu',
           caste: 'Nair',
-          education: 'Master of Science',
-          degree: 'MS Data Science (Columbia University)',
-          profession: 'AI Research Lead',
-          company: 'Tech Corp',
+          education: 'MD / MS (Medical)',
+          degree: 'MBBS, MD Anesthesiology (Govt Medical College Trivandrum)',
+          profession: 'Consultant Anesthesiologist',
+          company: 'Yashoda Hospitals',
           workLocation: 'Hyderabad',
           annualIncome: '₹ 45 - 65 Lakhs',
           country: 'India',
@@ -186,7 +227,7 @@ export async function seedInitialData() {
           city: 'Hyderabad',
           familyType: 'Nuclear',
           foodPreference: 'Non-Vegetarian',
-          about: 'AI researcher, avid badminton player and culinary enthusiast. Seeking an ambitious and warm-hearted life partner.',
+          about: 'Anesthesiologist, avid badminton player and culinary enthusiast. Seeking an ambitious and warm-hearted life partner.',
           photos: [
             'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=600',
           ],
@@ -421,7 +462,7 @@ export async function seedInitialData() {
       }
     ];
 
-    const createdUsers: any[] = [];
+    createdUsers = [];
     for (const item of demoUsers) {
       const user = await User.create({
         fullName: item.fullName,
@@ -449,6 +490,63 @@ export async function seedInitialData() {
   const adminUser = allUsers.find((u: any) => u.role === 'admin');
   const normalUsers = allUsers.filter((u: any) => u.role === 'user');
 
+  // Enrich demo Priya Sharma profile with doctor, horoscope, and lifestyle data
+  const priyaUser = allUsers.find((u: any) => u.email === 'priya.sharma@example.com');
+  if (priyaUser) {
+    await Profile.findOneAndUpdate(
+      { user: priyaUser._id },
+      {
+        $set: {
+          medicalCollege: 'AIIMS New Delhi',
+          medicalUniversity: 'All India Institute of Medical Sciences',
+          graduationYear: '2019',
+          additionalQualification: 'Fellowship in Dermatosurgery, 2021',
+          medicalCouncil: 'Karnataka Medical Council / MCI',
+          registrationState: 'Karnataka',
+          registrationYear: '2019',
+          medicalRegistrationNumber: 'KMC-2019-74892',
+          medicalExperience: '6+ Years Experience',
+          currentHospital: 'Apollo Hospitals, Bengaluru',
+          currentRole: 'Senior Consultant Dermatologist',
+          workType: 'Full-Time Consultant',
+          currentlyPracticing: true,
+          nativePlace: 'Jaipur, Rajasthan',
+          familyStatus: 'Upper Middle Class',
+          familyValues: 'Moderate',
+          familyLocation: 'Bengaluru / Jaipur',
+          fatherOccupation: 'Senior Administrative Officer (Retd.)',
+          motherOccupation: 'College Professor',
+          siblings: '1 Younger Brother (Radiologist)',
+          profileManagedBy: 'Self',
+          horoscope: {
+            timeOfBirth: '07:45 AM',
+            placeOfBirth: 'Jaipur, Rajasthan',
+            rashi: 'Tula (Libra)',
+            nakshatra: 'Chitra',
+            lagna: 'Vrishabha (Taurus)',
+            manglik: 'Non-Manglik',
+            gotra: 'Kashyap',
+            horoscopeDocument: '',
+          },
+          lifestyleInterests: {
+            diet: 'Vegetarian',
+            smoking: 'Non-Smoker',
+            alcohol: 'Non-Drinker',
+            exercise: 'Yoga & Morning Walks',
+            hobbies: ['Classical Music', 'Traveling', 'Photography', 'Reading'],
+            travel: ['Hill Stations', 'Historic Temples'],
+            music: ['Indian Classical', 'Sufi', 'Acoustic'],
+            reading: ['Medical Literature', 'Philosophy'],
+            sports: ['Badminton', 'Swimming'],
+            languages: ['English', 'Hindi', 'Marathi'],
+            pets: 'Cat Lover',
+            otherInterests: 'Art & Cultural Festivals',
+          },
+        },
+      }
+    );
+  }
+
     // 1. Seed Admin Document
     const { Admin } = await import('../models/Admin');
     if (adminUser) {
@@ -466,9 +564,9 @@ export async function seedInitialData() {
       {
         siteName: 'Wonderful Jodi',
         supportEmail: 'support@wonderfuljodi.com',
-        supportPhone: '+91 98765 43210',
-        tollFreeNumber: '+91 1800 200 9090',
-        officeAddress: 'Cyber City, Phase II, Gurugram, Haryana - 122002',
+        supportPhone: '+91 096075 59547',
+        tollFreeNumber: '+91 096075 59547',
+        officeAddress: 'A303, Gera Imperium Gateway, Nashik Phata, PCMC, Pune, Maharashtra 411034',
         maintenanceMode: false,
         allowNewRegistrations: true,
         requireEmailVerification: false,
@@ -488,31 +586,70 @@ export async function seedInitialData() {
       await Verification.create([
         {
           user: normalUsers[0]._id,
-          documentType: 'Aadhaar / National ID Card',
+          documentType: 'GOVERNMENT_ID',
+          documentName: 'Government Aadhaar Card (Masked)',
           documentUrl: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&q=80&w=800',
+          fileType: 'image/jpeg',
+          fileSize: 1024 * 450,
           status: 'APPROVED',
-          notes: 'Identity confirmed via Government ID card database.',
+          submittedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+          reviewedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+          reviewedByEmail: 'admin@wonderfuljodi.com',
+          adminNotes: 'Government ID card verified against official registrar.',
+          attemptNumber: 1,
         },
         {
           user: normalUsers[1]._id,
-          documentType: 'Passport & Work ID',
+          documentType: 'DEGREE',
+          documentName: 'MBA Post-Graduate Degree Certificate',
           documentUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?auto=format&fit=crop&q=80&w=800',
+          fileType: 'image/jpeg',
+          fileSize: 1024 * 820,
           status: 'APPROVED',
-          notes: 'Director position and corporate email verified.',
+          submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+          reviewedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+          reviewedByEmail: 'admin@wonderfuljodi.com',
+          adminNotes: 'University credentials and convocation degree verified.',
+          attemptNumber: 1,
         },
         {
           user: normalUsers[2]._id,
-          documentType: 'Medical Council Registration & MD Degree',
+          documentType: 'PROFESSIONAL',
+          documentName: 'State Medical Council Registration Certificate',
           documentUrl: 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&q=80&w=800',
+          fileType: 'image/jpeg',
+          fileSize: 1024 * 650,
           status: 'PENDING',
-          notes: 'National Medical Commission registry verification under review.',
+          submittedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+          adminNotes: 'Medical registration certificate pending administrator audit.',
+          attemptNumber: 1,
         },
         {
           user: normalUsers[3]._id,
-          documentType: 'Council of Architecture License',
+          documentType: 'GOVERNMENT_ID',
+          documentName: 'Passport Copy (Pages 1 & 2)',
           documentUrl: 'https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&q=80&w=800',
+          fileType: 'image/jpeg',
+          fileSize: 1024 * 910,
           status: 'PENDING',
-          notes: 'Submitted for expedited verification.',
+          submittedAt: new Date(Date.now() - 12 * 60 * 60 * 1000),
+          adminNotes: 'Submitted for expedited KYC verification.',
+          attemptNumber: 1,
+        },
+        {
+          user: normalUsers[4]._id,
+          documentType: 'EMPLOYMENT',
+          documentName: 'Corporate Work ID & Salary Slip',
+          documentUrl: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&q=80&w=800',
+          fileType: 'image/jpeg',
+          fileSize: 1024 * 512,
+          status: 'REJECTED',
+          submittedAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000),
+          reviewedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+          reviewedByEmail: 'admin@wonderfuljodi.com',
+          rejectionReason: 'Document copy unclear or blurry',
+          adminNotes: 'Document scan is too blurry to read employee ID and company seal.',
+          attemptNumber: 1,
         },
       ]);
     }
@@ -625,10 +762,135 @@ export async function seedInitialData() {
       const profile1 = await Profile.findOne({ user: normalUsers[1]._id });
       const profile2 = await Profile.findOne({ user: normalUsers[2]._id });
       if (profile1) {
-        await Shortlist.create({ user: normalUsers[0]._id, shortlistedProfile: profile1._id });
+        await Shortlist.create({ user: normalUsers[0]._id, profile: profile1._id });
       }
       if (profile2) {
-        await Shortlist.create({ user: normalUsers[0]._id, shortlistedProfile: profile2._id });
+        await Shortlist.create({ user: normalUsers[0]._id, profile: profile2._id });
+      }
+    }
+
+    // 7. Seed Conversations & Messages
+    const { Conversation } = await import('../models/Conversation');
+    const { Message } = await import('../models/Message');
+    if (normalUsers.length >= 2 && (await Conversation.countDocuments()) === 0) {
+      const conv1 = await Conversation.create({
+        participants: [normalUsers[0]._id, normalUsers[1]._id],
+        lastMessage: 'Hello Priya! Glad to connect on Wonderful Jodi.',
+        messageCount: 3,
+        status: 'ACTIVE',
+        complianceStatus: 'SAFE',
+        lastActivityAt: new Date(Date.now() - 1000 * 60 * 30),
+      });
+
+      await Message.create([
+        {
+          conversation: conv1._id,
+          sender: normalUsers[1]._id,
+          receiver: normalUsers[0]._id,
+          content: 'Namaste Priya, saw your profile. Your achievements in tech are truly inspiring!',
+          read: true,
+          moderationStatus: 'SAFE',
+          createdAt: new Date(Date.now() - 1000 * 60 * 120),
+        },
+        {
+          conversation: conv1._id,
+          sender: normalUsers[0]._id,
+          receiver: normalUsers[1]._id,
+          content: 'Hello Rohan! Thank you so much. Would love to know more about your work and hobbies.',
+          read: true,
+          moderationStatus: 'SAFE',
+          createdAt: new Date(Date.now() - 1000 * 60 * 60),
+        },
+        {
+          conversation: conv1._id,
+          sender: normalUsers[1]._id,
+          receiver: normalUsers[0]._id,
+          content: 'Hello Priya! Glad to connect on Wonderful Jodi.',
+          read: false,
+          moderationStatus: 'SAFE',
+          createdAt: new Date(Date.now() - 1000 * 60 * 30),
+        },
+      ]);
+
+      if (normalUsers.length >= 4) {
+        const conv2 = await Conversation.create({
+          participants: [normalUsers[2]._id, normalUsers[3]._id],
+          lastMessage: 'Sure, looking forward to discussing our family backgrounds.',
+          messageCount: 2,
+          status: 'ACTIVE',
+          complianceStatus: 'SAFE',
+          lastActivityAt: new Date(Date.now() - 1000 * 60 * 90),
+        });
+
+        await Message.create([
+          {
+            conversation: conv2._id,
+            sender: normalUsers[2]._id,
+            receiver: normalUsers[3]._id,
+            content: 'Hi Dr. Ananya, your pediatric work in Mumbai is wonderful!',
+            read: true,
+            moderationStatus: 'SAFE',
+            createdAt: new Date(Date.now() - 1000 * 60 * 180),
+          },
+          {
+            conversation: conv2._id,
+            sender: normalUsers[3]._id,
+            receiver: normalUsers[2]._id,
+            content: 'Sure, looking forward to discussing our family backgrounds.',
+            read: true,
+            moderationStatus: 'SAFE',
+            moderationCategory: 'NONE',
+            moderationConfidence: 'NONE',
+            createdAt: new Date(Date.now() - 1000 * 60 * 90),
+          },
+        ]);
+
+        const conv3 = await Conversation.create({
+          participants: [normalUsers[0]._id, normalUsers[2]._id],
+          lastMessage: 'You can call me at 98765 43210',
+          messageCount: 3,
+          status: 'ACTIVE',
+          complianceStatus: 'FLAGGED',
+          lastActivityAt: new Date(Date.now() - 1000 * 60 * 15),
+        });
+
+        await Message.create([
+          {
+            conversation: conv3._id,
+            sender: normalUsers[0]._id,
+            receiver: normalUsers[2]._id,
+            content: 'Hello Vikram, nice to connect with you.',
+            read: true,
+            moderationStatus: 'SAFE',
+            moderationCategory: 'NONE',
+            moderationConfidence: 'NONE',
+            createdAt: new Date(Date.now() - 1000 * 60 * 45),
+          },
+          {
+            conversation: conv3._id,
+            sender: normalUsers[2]._id,
+            receiver: normalUsers[0]._id,
+            content: 'Hello Priya, wonderful profile!',
+            read: true,
+            moderationStatus: 'SAFE',
+            moderationCategory: 'NONE',
+            moderationConfidence: 'NONE',
+            createdAt: new Date(Date.now() - 1000 * 60 * 30),
+          },
+          {
+            conversation: conv3._id,
+            sender: normalUsers[2]._id,
+            receiver: normalUsers[0]._id,
+            content: 'You can call me at 98765 43210',
+            read: false,
+            moderationStatus: 'FLAGGED',
+            moderationCategory: 'PHONE_NUMBER',
+            moderationConfidence: 'HIGH',
+            moderationScore: 0.99,
+            flaggedReason: 'Phone number detected (Indian Mobile Format)',
+            createdAt: new Date(Date.now() - 1000 * 60 * 15),
+          },
+        ]);
       }
     }
 
@@ -687,7 +949,203 @@ export async function seedInitialData() {
       ]);
     }
 
-    console.log(`Successfully verified and seeded ${allUsers.length} users, profiles, subscriptions, verifications, and platform settings!`);
+    // 9. Seed Daily User Visits (Historical Activity Analytics)
+    const { DailyUserVisit } = await import('../models/DailyUserVisit');
+    const { getFormattedVisitDate } = await import('../services/visitTrackingService');
+    if (normalUsers.length >= 4 && (await DailyUserVisit.countDocuments()) === 0) {
+      const now = new Date();
+      const visitDocs = [];
+
+      // Seed realistic visit distributions across the past 14 days
+      for (let dayOffset = 13; dayOffset >= 0; dayOffset--) {
+        const visitDateObj = new Date(now.getTime() - dayOffset * 24 * 60 * 60 * 1000);
+        const visitDateStr = getFormattedVisitDate(visitDateObj);
+
+        // Select a realistic subset of users active on that day
+        // For weekend / weekdays variation
+        const dayOfWeek = visitDateObj.getDay();
+        const activeUserIndices =
+          dayOfWeek === 0 || dayOfWeek === 6
+            ? [0, 1, 2, 3, 4] // Higher activity on weekends
+            : dayOffset % 2 === 0
+            ? [0, 1, 3]
+            : [1, 2, 3, 4];
+
+        for (const userIdx of activeUserIndices) {
+          if (normalUsers[userIdx]) {
+            const firstVisitedAt = new Date(visitDateObj.getTime() + (9 * 60 + userIdx * 35) * 60 * 1000);
+            const lastVisitedAt = new Date(firstVisitedAt.getTime() + (userIdx * 45 + 30) * 60 * 1000);
+
+            visitDocs.push({
+              user: normalUsers[userIdx]._id,
+              visitDate: visitDateStr,
+              firstVisitedAt,
+              lastVisitedAt,
+              visitCount: 2 + (userIdx % 4),
+              ipAddress: `192.168.1.${10 + userIdx}`,
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/128.0.0.0 Safari/537.36',
+            });
+          }
+        }
+      }
+
+      await DailyUserVisit.insertMany(visitDocs, { ordered: false });
+    }
+
+    // Seed realistic demo incomplete registration candidates if none exist
+    const regCount = await Registration.countDocuments();
+    if (regCount === 0) {
+      console.log('Seeding initial demo incomplete registration candidates...');
+      const now = new Date();
+      const defaultPasswordHash = await bcrypt.hash('Password123!', 12);
+
+      const demoRegistrations = [
+        {
+          registrationId: 'REG-20260901-A8F92K',
+          status: 'IN_PROGRESS' as const,
+          currentStep: 2,
+          totalSteps: 4,
+          completionPercentage: 45,
+          candidateName: 'Rahul Sharma',
+          email: 'rahul.sharma99@example.com',
+          mobile: '9876543220',
+          gender: 'Male',
+          stepData: {
+            basicInfo: {
+              fullName: 'Rahul Sharma',
+              email: 'rahul.sharma99@example.com',
+              mobile: '9876543220',
+              passwordHash: defaultPasswordHash,
+              gender: 'Male',
+              dob: '1995-08-20',
+              lookingFor: 'Female',
+              agreeTerms: true,
+            },
+            personalInfo: {
+              maritalStatus: 'Never Married',
+              motherTongue: 'Hindi',
+              religion: 'Hindu',
+              caste: 'Brahmin',
+              height: `5' 11"`,
+              city: 'Mumbai',
+              state: 'Maharashtra',
+              country: 'India',
+            },
+            educationProfession: {},
+            familyDetails: {},
+            preferences: {},
+            photos: {},
+            rawFormData: {
+              fullName: 'Rahul Sharma',
+              email: 'rahul.sharma99@example.com',
+              mobile: '9876543220',
+              city: 'Mumbai',
+            },
+          },
+          startedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000), // 2 hours ago
+          lastActiveAt: new Date(now.getTime() - 15 * 60 * 1000), // 15 mins ago
+          ipAddress: '192.168.1.45',
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0',
+        },
+        {
+          registrationId: 'REG-20260901-B3X77M',
+          status: 'IN_PROGRESS' as const,
+          currentStep: 3,
+          totalSteps: 4,
+          completionPercentage: 70,
+          candidateName: 'Neha Kulkarni',
+          email: 'neha.kulkarni@example.com',
+          mobile: '9822334455',
+          gender: 'Female',
+          stepData: {
+            basicInfo: {
+              fullName: 'Neha Kulkarni',
+              email: 'neha.kulkarni@example.com',
+              mobile: '9822334455',
+              passwordHash: defaultPasswordHash,
+              gender: 'Female',
+              dob: '1997-03-12',
+              lookingFor: 'Male',
+              agreeTerms: true,
+            },
+            personalInfo: {
+              maritalStatus: 'Never Married',
+              motherTongue: 'Marathi',
+              religion: 'Hindu',
+              caste: 'Maratha',
+              height: `5' 5"`,
+              city: 'Pune',
+              state: 'Maharashtra',
+              country: 'India',
+              foodPreference: 'Vegetarian',
+            },
+            educationProfession: {
+              education: 'MBA / PGDM (IIM / Top B-School)',
+              degree: 'MBA in Marketing',
+              profession: 'Product Director / Manager',
+              company: 'Fintech Solutions Ltd',
+              workLocation: 'Pune',
+              annualIncome: '₹ 20 - 30 Lakhs',
+            },
+            familyDetails: {},
+            preferences: {},
+            photos: {},
+            rawFormData: {
+              fullName: 'Neha Kulkarni',
+              email: 'neha.kulkarni@example.com',
+              mobile: '9822334455',
+              city: 'Pune',
+              profession: 'Product Director / Manager',
+            },
+          },
+          startedAt: new Date(now.getTime() - 24 * 60 * 60 * 1000), // 1 day ago
+          lastActiveAt: new Date(now.getTime() - 45 * 60 * 1000), // 45 mins ago
+          ipAddress: '192.168.1.88',
+          userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15',
+        },
+        {
+          registrationId: 'REG-20260901-C9Q14P',
+          status: 'STARTED' as const,
+          currentStep: 1,
+          totalSteps: 4,
+          completionPercentage: 25,
+          candidateName: 'Aditya Kapoor',
+          email: 'aditya.kapoor@example.com',
+          mobile: '9811223344',
+          gender: 'Male',
+          stepData: {
+            basicInfo: {
+              fullName: 'Aditya Kapoor',
+              email: 'aditya.kapoor@example.com',
+              mobile: '9811223344',
+              passwordHash: defaultPasswordHash,
+              gender: 'Male',
+              dob: '1994-11-05',
+              lookingFor: 'Female',
+              agreeTerms: true,
+            },
+            personalInfo: {},
+            educationProfession: {},
+            familyDetails: {},
+            preferences: {},
+            photos: {},
+            rawFormData: {
+              fullName: 'Aditya Kapoor',
+              email: 'aditya.kapoor@example.com',
+              mobile: '9811223344',
+            },
+          },
+          startedAt: new Date(now.getTime() - 5 * 60 * 60 * 1000),
+          lastActiveAt: new Date(now.getTime() - 3 * 60 * 60 * 1000),
+          ipAddress: '192.168.1.102',
+          userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        },
+      ];
+
+      await Registration.insertMany(demoRegistrations, { ordered: false });
+    }
+
+    console.log(`Successfully verified and seeded ${allUsers.length} users, profiles, subscriptions, verifications, daily visits, and platform settings!`);
     console.log('Demo Login Credentials:');
     console.log('  User:  priya.sharma@example.com / Password123!');
     console.log('  User:  rohan.mehta@example.com  / Password123!');

@@ -17,6 +17,7 @@ build/
 .env
 .env.*
 *.local
+!.env.example
 
 # SQL dumps and backups
 *.sql
@@ -25,7 +26,8 @@ build/
 
 # Password or credential files
 apppassword*
-*password*
+*credentials*.txt
+*password*.txt
 
 # Uploads and writable directories
 candidate_uploads/

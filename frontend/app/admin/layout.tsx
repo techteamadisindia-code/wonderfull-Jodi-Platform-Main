@@ -7,44 +7,62 @@ import { AdminSidebar } from '../../components/admin/AdminSidebar';
 import { AdminHeader } from '../../components/admin/AdminHeader';
 import { fetchVerifications } from '../../services/verificationApi';
 import { fetchReports } from '../../services/reportApi';
+import { fetchIncompleteRegistrationsCount } from '../../services/adminApi';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isLoginPage = pathname === '/admin/login';
+  const isPublicAuthPage =
+    pathname === '/admin/login' ||
+    pathname === '/admin/forgot-password' ||
+    pathname === '/admin/reset-password';
 
   const [pendingVerifCount, setPendingVerifCount] = useState(0);
   const [pendingReportsCount, setPendingReportsCount] = useState(0);
+  const [incompleteCount, setIncompleteCount] = useState(0);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    if (!isLoginPage) {
+    if (!isPublicAuthPage) {
       // Fetch counters for sidebar badges
-      fetchVerifications('PENDING')
-        .then((items) => setPendingVerifCount(items?.length || 0))
+      fetchVerifications({ status: 'PENDING' })
+        .then((res) => setPendingVerifCount(res?.data?.length || res?.pagination?.total || 0))
         .catch(() => {});
 
       fetchReports('PENDING')
         .then((items) => setPendingReportsCount(items?.length || 0))
         .catch(() => {});
-    }
-  }, [pathname, isLoginPage]);
 
-  if (isLoginPage) {
-    return <div className="min-h-screen bg-slate-950">{children}</div>;
+      fetchIncompleteRegistrationsCount()
+        .then((count) => setIncompleteCount(count || 0))
+        .catch(() => {});
+    }
+  }, [pathname, isPublicAuthPage]);
+
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  if (isPublicAuthPage) {
+    return <div className="min-h-screen bg-[#070C16]">{children}</div>;
   }
 
   return (
     <AdminLayoutGuard>
       <div className="min-h-screen flex bg-slate-50 text-slate-900 font-sans">
-        {/* Collapsible Sidebar */}
+        {/* Sidebar (Fixed on desktop, drawer on mobile) */}
         <AdminSidebar
           pendingCount={pendingVerifCount}
           reportsCount={pendingReportsCount}
+          incompleteCount={incompleteCount}
+          mobileOpen={mobileOpen}
+          onCloseMobile={() => setMobileOpen(false)}
         />
 
-        {/* Main Area */}
+        {/* Main Workspace Area */}
         <div className="flex-1 flex flex-col min-w-0">
-          <AdminHeader />
-          <main className="flex-1 p-6 sm:p-8 lg:p-10 max-w-[1700px] w-full mx-auto">
+          <AdminHeader onOpenMobileMenu={() => setMobileOpen(true)} />
+          <main className="flex-1 p-3 sm:p-[18px] lg:p-6 max-w-[1700px] w-full mx-auto">
             {children}
           </main>
         </div>

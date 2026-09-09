@@ -67,7 +67,7 @@ export default function ContactPage() {
     {
       question: 'How do I contact a relationship manager?',
       answer:
-        'Premium VIP and VVIP members receive a dedicated Relationship Manager. You can also reach our matrimonial assistance desk directly at +91 1800 200 9090.',
+        'Premium VIP and VVIP members receive a dedicated Relationship Manager. You can also reach our matrimonial assistance desk directly at +91 096075 59547.',
     },
     {
       question: 'How long does customer support take to respond?',
@@ -224,10 +224,10 @@ export default function ContactPage() {
                     Toll Free Helpline
                   </span>
                   <a
-                    href="tel:+9118002009090"
+                    href="tel:+9109607559547"
                     className="font-bold text-white text-base hover:text-[#FF758F] transition inline-block mt-0.5"
                   >
-                    +91 1800 200 9090
+                    +91 096075 59547
                   </a>
                   <span className="text-[10px] text-emerald-400 block mt-0.5 font-medium">
                     ● 24/7 Priority Support
@@ -263,7 +263,9 @@ export default function ContactPage() {
                     Headquarters
                   </span>
                   <span className="text-slate-200 text-xs leading-relaxed block mt-0.5">
-                    Cyber City, Phase II, Gurugram, India
+                    A303, Gera Imperium Gateway,<br />
+                    Nashik Phata, PCMC,<br />
+                    Pune, Maharashtra 411034
                   </span>
                 </div>
               </div>
@@ -275,7 +277,7 @@ export default function ContactPage() {
                 Office Hours
               </span>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Monday – Sunday: 9:00 AM – 8:00 PM IST
+                Monday – Saturday: 10:00 AM – 6:00 PM IST
               </p>
               <p className="text-[11px] text-slate-400 pt-1">
                 Emergency escalation support available 24/7.
@@ -554,11 +556,11 @@ export default function ContactPage() {
               <span>Book Matchmaking Assistance →</span>
             </button>
             <a
-              href="tel:+9118002009090"
+              href="tel:+9109607559547"
               className="inline-flex items-center justify-center gap-1.5 rounded-full border border-slate-300 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition shadow-2xs"
             >
               <Phone className="w-3.5 h-3.5 text-[#E51F3E]" />
-              <span>Call +91 1800 200 9090</span>
+              <span>Call +91 096075 59547</span>
             </a>
           </div>
         </div>

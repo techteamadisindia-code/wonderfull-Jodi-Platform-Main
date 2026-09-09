@@ -2,64 +2,40 @@
 
 import React, { useEffect, useState, Suspense, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
   Search,
-  Filter,
-  ShieldCheck,
-  RefreshCw,
-  Globe,
-  MessageCircle,
-  Sliders,
-  X,
-  ChevronDown,
-  ChevronUp,
-  Heart,
-  Sparkles,
-  Lock,
-  Phone,
-  ArrowRight,
   SlidersHorizontal,
   Bookmark,
-  Check,
   CheckCircle2,
-  Info,
 } from 'lucide-react';
-import { SearchResult, ProfileCard as ProfileCardType } from '../../types/profile';
+import { SearchResult } from '../../types/profile';
 import { ProfileCard } from '../../components/ProfileCard';
-import { searchProfiles, getAuthToken } from '../../lib/api';
+import { searchProfiles } from '../../lib/api';
 
-const SPECIALIZATIONS = [
+import {
+  DOCTOR_QUALIFICATIONS,
+  DOCTOR_SPECIALIZATIONS,
+} from '../../lib/doctorConstants';
+
+const PROFESSIONS = [
   'All',
-  'Cardiology',
-  'Dermatology',
-  'General Surgery',
-  'Internal Medicine',
-  'Pediatrics',
-  'Orthopedics',
-  'Gynecology & Obstetrics',
-  'Neurology',
-  'Ophthalmology',
-  'Radiology',
-  'Anesthesiology',
-  'Dentistry / MDS',
-  'Psychiatry',
-  'ENT / Otorhinolaryngology',
-  'Pathology',
+  ...DOCTOR_SPECIALIZATIONS,
 ];
 
-const DEGREES = ['All', 'MBBS', 'MD', 'MS', 'DNB', 'DM', 'MCh', 'BDS', 'MDS', 'PhD (Medical)'];
+const QUALIFICATIONS = [
+  'All',
+  ...DOCTOR_QUALIFICATIONS,
+];
 
 const CITIES = [
   'All',
-  'Mumbai',
-  'Delhi NCR',
   'New Delhi',
+  'Mumbai',
   'Bengaluru',
-  'Pune',
   'Hyderabad',
   'Chennai',
   'Jaipur',
+  'Pune',
   'Kolkata',
   'Ahmedabad',
   'Chandigarh',
@@ -94,24 +70,39 @@ function SearchContent() {
   const [loading, setLoading] = useState(true);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [savedSearchToast, setSavedSearchToast] = useState(false);
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    specialization: true,
-    location: true,
-    education: true,
-    lifestyle: false,
-    religion: false,
-    status: true,
-  });
 
   // Filter Form State
-  const [gender, setGender] = useState(searchParams.get('gender') || 'All');
-  const [minAge, setMinAge] = useState(searchParams.get('minAge') || '21');
-  const [maxAge, setMaxAge] = useState(searchParams.get('maxAge') || '45');
-  const [city, setCity] = useState(searchParams.get('city') || 'All');
-  const [specialization, setSpecialization] = useState(searchParams.get('specialization') || 'All');
+  const parseGender = (val: string | null) => {
+    if (!val) return 'All';
+    const lower = val.toLowerCase();
+    if (lower === 'female' || lower === 'bride') return 'Female';
+    if (lower === 'male' || lower === 'groom') return 'Male';
+    return val === 'any' ? 'All' : val;
+  };
+
+  const parseParam = (val: string | null, fallback = 'All') => {
+    if (!val || val === 'any' || val === 'All') return fallback;
+    return val;
+  };
+
+  const [gender, setGender] = useState(() =>
+    parseGender(searchParams.get('gender') || searchParams.get('lookingFor'))
+  );
+  const [minAge, setMinAge] = useState(
+    searchParams.get('ageFrom') || searchParams.get('minAge') || searchParams.get('ageMin') || '21'
+  );
+  const [maxAge, setMaxAge] = useState(
+    searchParams.get('ageTo') || searchParams.get('maxAge') || searchParams.get('ageMax') || '45'
+  );
+  const [city, setCity] = useState(() =>
+    parseParam(searchParams.get('location') || searchParams.get('city'), 'All')
+  );
+  const [profession, setProfession] = useState(searchParams.get('profession') || 'All');
   const [education, setEducation] = useState(searchParams.get('education') || 'All');
   const [maritalStatus, setMaritalStatus] = useState(searchParams.get('maritalStatus') || 'All');
-  const [religion, setReligion] = useState(searchParams.get('religion') || 'All');
+  const [religion, setReligion] = useState(() =>
+    parseParam(searchParams.get('religion'), 'All')
+  );
   const [motherTongue, setMotherTongue] = useState(searchParams.get('motherTongue') || 'All');
   const [diet, setDiet] = useState(searchParams.get('diet') || 'All');
   const [verifiedOnly, setVerifiedOnly] = useState(searchParams.get('verified') === 'true');
@@ -121,14 +112,18 @@ function SearchContent() {
 
   // Sync state from searchParams on load/navigation
   useEffect(() => {
-    setGender(searchParams.get('gender') || 'All');
-    setMinAge(searchParams.get('minAge') || '21');
-    setMaxAge(searchParams.get('maxAge') || '45');
-    setCity(searchParams.get('city') || 'All');
-    setSpecialization(searchParams.get('specialization') || 'All');
+    setGender(parseGender(searchParams.get('gender') || searchParams.get('lookingFor')));
+    setMinAge(
+      searchParams.get('ageFrom') || searchParams.get('minAge') || searchParams.get('ageMin') || '21'
+    );
+    setMaxAge(
+      searchParams.get('ageTo') || searchParams.get('maxAge') || searchParams.get('ageMax') || '45'
+    );
+    setCity(parseParam(searchParams.get('location') || searchParams.get('city'), 'All'));
+    setProfession(searchParams.get('profession') || 'All');
     setEducation(searchParams.get('education') || 'All');
     setMaritalStatus(searchParams.get('maritalStatus') || 'All');
-    setReligion(searchParams.get('religion') || 'All');
+    setReligion(parseParam(searchParams.get('religion'), 'All'));
     setMotherTongue(searchParams.get('motherTongue') || 'All');
     setDiet(searchParams.get('diet') || 'All');
     setVerifiedOnly(searchParams.get('verified') === 'true');
@@ -145,7 +140,7 @@ function SearchContent() {
     if (minAge && minAge !== '21') params.set('minAge', minAge);
     if (maxAge && maxAge !== '45') params.set('maxAge', maxAge);
     if (city && city !== 'All') params.set('city', city);
-    if (specialization && specialization !== 'All') params.set('specialization', specialization);
+    if (profession && profession !== 'All') params.set('profession', profession);
     if (education && education !== 'All') params.set('education', education);
     if (maritalStatus && maritalStatus !== 'All') params.set('maritalStatus', maritalStatus);
     if (religion && religion !== 'All') params.set('religion', religion);
@@ -178,7 +173,7 @@ function SearchContent() {
     minAge,
     maxAge,
     city,
-    specialization,
+    profession,
     education,
     maritalStatus,
     religion,
@@ -204,7 +199,7 @@ function SearchContent() {
     if (minAge && minAge !== '21') params.set('minAge', minAge);
     if (maxAge && maxAge !== '45') params.set('maxAge', maxAge);
     if (city && city !== 'All') params.set('city', city);
-    if (specialization && specialization !== 'All') params.set('specialization', specialization);
+    if (profession && profession !== 'All') params.set('profession', profession);
     if (education && education !== 'All') params.set('education', education);
     if (maritalStatus && maritalStatus !== 'All') params.set('maritalStatus', maritalStatus);
     if (religion && religion !== 'All') params.set('religion', religion);
@@ -224,7 +219,7 @@ function SearchContent() {
     setMinAge('21');
     setMaxAge('45');
     setCity('All');
-    setSpecialization('All');
+    setProfession('All');
     setEducation('All');
     setMaritalStatus('All');
     setReligion('All');
@@ -237,16 +232,12 @@ function SearchContent() {
     router.push('/search');
   };
 
-  const toggleSection = (key: string) => {
-    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
   // Count active applied filters
   const activeFiltersCount = [
     gender !== 'All',
     minAge !== '21' || maxAge !== '45',
     city !== 'All',
-    specialization !== 'All',
+    profession !== 'All',
     education !== 'All',
     maritalStatus !== 'All',
     religion !== 'All',
@@ -266,87 +257,73 @@ function SearchContent() {
   const limit = data?.limit || 12;
   const totalPages = Math.ceil(total / limit) || 1;
 
+  const showingStart = total > 0 ? (page - 1) * limit + 1 : 0;
+  const showingEnd = Math.min(page * limit, total);
+
   return (
-    <main className="min-h-screen bg-[#F8FAFC] text-[#15213A] pb-16">
+    <main className="min-h-screen bg-[#FAF7F4] text-[#15213A] pb-14">
       {/* Save Search Toast */}
       {savedSearchToast && (
-        <div className="fixed top-24 right-6 z-50 rounded-2xl bg-[#101728] text-white p-4 shadow-2xl border border-rose-500/30 flex items-center gap-3 animate-fade-in">
-          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+        <div className="fixed top-20 right-5 z-50 rounded-xl bg-[#101728] text-white p-3.5 shadow-xl border border-rose-500/30 flex items-center gap-2.5 animate-fade-in">
+          <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400 shrink-0" />
           <div className="text-xs">
-            <p className="font-bold text-sm">Search Criteria Saved</p>
-            <p className="text-slate-300">You will receive new doctor match notifications.</p>
+            <p className="font-bold text-[13px]">Search Criteria Saved</p>
+            <p className="text-slate-300">You will receive match notifications for new verified candidates.</p>
           </div>
         </div>
       )}
 
-      {/* 1. Search Hero (~250–300px) */}
-      <section className="relative pt-[50px] pb-[30px] px-4 sm:px-6 lg:px-8 border-b border-rose-100/50 bg-gradient-to-b from-[#FFF5F7]/80 via-[#FFF9FA]/40 to-[#F8FAFC]">
-        <div className="max-w-4xl mx-auto text-center space-y-3">
-          {/* Small Red Uppercase Label */}
-          <span className="text-xs uppercase font-extrabold text-[#E51F3E] tracking-widest block">
-            DOCTOR MATRIMONIAL SEARCH
+      {/* ── 1. Top Candidate Count Section ── */}
+      <section className="max-w-[1400px] mx-auto px-4 sm:px-6 pt-4 sm:pt-5">
+        <div className="rounded-xl bg-white border border-[#E8E1DB] px-4 sm:px-6 py-2.5 min-h-[48px] shadow-2xs flex items-center justify-between">
+          <span className="text-xs sm:text-[13px] font-semibold text-slate-700">
+            {loading ? (
+              'Searching verified candidates...'
+            ) : total > 0 ? (
+              `Showing ${showingStart}–${showingEnd} of ${total} verified candidates.`
+            ) : (
+              'No verified candidates found matching your criteria.'
+            )}
           </span>
 
-          {/* Main Heading */}
-          <h1 className="font-serif text-3xl sm:text-4xl lg:text-[44px] font-extrabold text-[#101728] tracking-tight leading-tight">
-            Find Your Perfect <span className="text-[#E51F3E]">Doctor Match</span>
-          </h1>
-
-          {/* Subtitle */}
-          <p className="text-slate-600 text-xs sm:text-sm max-w-2xl mx-auto leading-relaxed">
-            Discover verified doctors based on profession, specialization, location, education, lifestyle and family preferences.
-          </p>
-
-          {/* Compact Trust Row */}
-          <div className="pt-2 flex flex-wrap items-center justify-center gap-3 sm:gap-6 text-xs text-slate-500 font-medium">
-            <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
-              <ShieldCheck className="w-4 h-4 text-[#0BAA70]" />
-              Verified Doctor Profiles
-            </span>
-            <span className="hidden sm:inline text-slate-300">•</span>
-            <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
-              <Lock className="w-3.5 h-3.5 text-[#E51F3E]" />
-              Confidential & Private
-            </span>
-            <span className="hidden sm:inline text-slate-300">•</span>
-            <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
-              <Heart className="w-3.5 h-3.5 text-[#E51F3E]" />
-              Personalised Matchmaking
-            </span>
+          <div className="hidden sm:flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Real-time Verified Database</span>
           </div>
         </div>
       </section>
 
-      {/* 2. Quick Search Panel */}
-      <section className="max-w-[1560px] mx-auto px-4 sm:px-6 lg:px-8 -mt-5 z-20 relative">
-        <div className="bg-white rounded-2xl sm:rounded-3xl border border-[#F5D9DD] p-5 sm:p-6 shadow-md shadow-rose-900/5 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 sm:gap-4 items-end">
-            {/* Looking For (Bride / Groom) */}
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
+      {/* ── 2. Search & Filter Panel ── */}
+      <section className="max-w-[1400px] mx-auto px-4 sm:px-6 mt-3 sm:mt-4">
+        <div className="bg-white rounded-xl sm:rounded-2xl border border-[#E8E1DB] px-4 sm:px-6 pt-4 sm:pt-5 pb-3.5 sm:pb-4 shadow-xs">
+          {/* Row 1: Filter Fields with Proportional Widths and Consistent 40px Height */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.2fr_1.15fr_1.1fr_1fr_1fr] gap-3 sm:gap-3.5 items-end">
+            {/* Looking For (~24%) */}
+            <div className="w-full">
+              <label className="text-[10.5px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
                 Looking For
               </label>
               <select
                 value={gender}
                 onChange={(e) => setGender(e.target.value)}
-                className="w-full h-12 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E] focus:ring-2 focus:ring-[#E51F3E]/20"
+                className="w-full h-9 sm:h-10 min-h-[38px] rounded-lg sm:rounded-xl border border-[#E8E1DB] bg-[#FAF7F4]/40 px-3 text-xs sm:text-[13px] font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E] focus:ring-2 focus:ring-[#E51F3E]/20"
               >
                 <option value="All">Bride or Groom (All)</option>
-                <option value="Female">Bride (Female Doctors)</option>
-                <option value="Male">Groom (Male Doctors)</option>
+                <option value="Female">Bride (Female)</option>
+                <option value="Male">Groom (Male)</option>
               </select>
             </div>
 
-            {/* Age Range */}
-            <div>
+            {/* Age Range (~20%) with centered 'To' */}
+            <div className="w-full">
               <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
                 Age Range
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="flex items-center gap-1.5">
                 <select
                   value={minAge}
                   onChange={(e) => setMinAge(e.target.value)}
-                  className="h-12 rounded-xl border border-slate-200 bg-[#F8FAFC] px-2.5 text-xs sm:text-sm font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E]"
+                  className="w-full h-9 sm:h-10 min-h-[38px] rounded-lg sm:rounded-xl border border-[#E8E1DB] bg-[#FAF7F4]/40 px-2 text-xs sm:text-[13px] font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E]"
                 >
                   {[21, 23, 25, 27, 29, 31, 33, 35, 38, 40].map((a) => (
                     <option key={a} value={a}>
@@ -354,10 +331,11 @@ function SearchContent() {
                     </option>
                   ))}
                 </select>
+                <span className="text-[11px] font-semibold text-slate-400 shrink-0">To</span>
                 <select
                   value={maxAge}
                   onChange={(e) => setMaxAge(e.target.value)}
-                  className="h-12 rounded-xl border border-slate-200 bg-[#F8FAFC] px-2.5 text-xs sm:text-sm font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E]"
+                  className="w-full h-9 sm:h-10 min-h-[38px] rounded-lg sm:rounded-xl border border-[#E8E1DB] bg-[#FAF7F4]/40 px-2 text-xs sm:text-[13px] font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E]"
                 >
                   {[26, 28, 30, 32, 35, 38, 42, 45, 50, 60].map((a) => (
                     <option key={a} value={a}>
@@ -368,63 +346,66 @@ function SearchContent() {
               </div>
             </div>
 
-            {/* City Selection */}
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
-                Practice City
+            {/* Location / City (~22%) */}
+            <div className="w-full">
+              <label className="text-[10.5px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                Location / City
               </label>
               <select
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                className="w-full h-12 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E] focus:ring-2 focus:ring-[#E51F3E]/20"
+                className="w-full h-9 sm:h-10 min-h-[38px] rounded-lg sm:rounded-xl border border-[#E8E1DB] bg-[#FAF7F4]/40 px-3 text-xs sm:text-[13px] font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E] focus:ring-2 focus:ring-[#E51F3E]/20"
               >
                 {CITIES.map((c) => (
                   <option key={c} value={c}>
-                    {c === 'All' ? 'All Cities (Pan India)' : c}
+                    {c === 'All' ? 'All Locations (Pan India)' : c}
                   </option>
                 ))}
               </select>
             </div>
 
-            {/* Specialization */}
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
-                Specialization
+            {/* Profession (~20%) */}
+            <div className="w-full">
+              <label className="text-[10.5px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                Profession
               </label>
               <select
-                value={specialization}
-                onChange={(e) => setSpecialization(e.target.value)}
-                className="w-full h-12 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E] focus:ring-2 focus:ring-[#E51F3E]/20"
+                value={profession}
+                onChange={(e) => setProfession(e.target.value)}
+                className="w-full h-9 sm:h-10 min-h-[38px] rounded-lg sm:rounded-xl border border-[#E8E1DB] bg-[#FAF7F4]/40 px-3 text-xs sm:text-[13px] font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E] focus:ring-2 focus:ring-[#E51F3E]/20"
               >
-                {SPECIALIZATIONS.map((s) => (
-                  <option key={s} value={s}>
-                    {s === 'All' ? 'All Specializations' : s}
+                {PROFESSIONS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
                   </option>
                 ))}
               </select>
             </div>
 
-            {/* Search Button */}
-            <div>
+            {/* Search Matches Button (~20% with max-width: 310px, min-height: 38px) */}
+            <div className="w-full flex justify-start lg:justify-end">
               <button
                 onClick={() => applyFiltersAndPushUrl(1)}
-                className="w-full h-12 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#E51F3E] via-[#E82645] to-[#F03554] px-5 text-sm font-bold text-white shadow-md shadow-red-500/25 hover:shadow-lg hover:from-[#d11735] hover:to-[#e0203f] hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
+                className="w-full max-w-[310px] h-9 sm:h-10 min-h-[38px] inline-flex items-center justify-center gap-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-[#E51F3E] via-[#E21838] to-[#CC1432] px-4 text-xs sm:text-[13.5px] font-bold text-white shadow-sm shadow-red-600/20 hover:shadow-md hover:from-[#d11735] hover:to-[#b91c1c] hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 shrink-0"
               >
-                <Search className="w-4 h-4" />
-                <span>Search Profiles →</span>
+                <Search className="w-3.5 h-3.5" />
+                <span>Search Matches →</span>
               </button>
             </div>
           </div>
 
-          {/* Quick Filters Footer Bar */}
-          <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-3">
+          {/* Divider with clean spacing (margin: 20px 0 16px) */}
+          <div className="mt-5 mb-4 border-t border-slate-100" />
+
+          {/* Row 2: Quick Filters & Sort Aligned on Horizontal Line */}
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-5">
               <button
                 onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
                 className="inline-flex items-center gap-1.5 font-bold text-slate-700 hover:text-[#E51F3E] transition"
               >
                 <SlidersHorizontal className="w-3.5 h-3.5 text-[#E51F3E]" />
-                <span>{showAdvancedFilters ? 'Hide Advanced Filters' : 'Advanced Filters'}</span>
+                <span>{showAdvancedFilters ? 'Hide Advanced Filters' : 'More Filters'}</span>
                 {activeFiltersCount > 0 && (
                   <span className="w-5 h-5 rounded-full bg-[#E51F3E] text-white text-[10px] flex items-center justify-center font-bold">
                     {activeFiltersCount}
@@ -432,57 +413,79 @@ function SearchContent() {
                 )}
               </button>
 
-              <label className="hidden sm:inline-flex items-center gap-1.5 text-slate-600 font-medium cursor-pointer select-none">
+              <label className="hidden sm:inline-flex items-center gap-2 text-slate-600 font-medium cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={verifiedOnly}
-                  onChange={(e) => {
-                    setVerifiedOnly(e.target.checked);
-                  }}
+                  onChange={(e) => setVerifiedOnly(e.target.checked)}
                   className="rounded border-slate-300 text-[#E51F3E] focus:ring-[#E51F3E]"
                 />
-                <span>Doctor Verified Only</span>
+                <span>Verified Candidates Only</span>
               </label>
 
-              <label className="hidden sm:inline-flex items-center gap-1.5 text-slate-600 font-medium cursor-pointer select-none">
+              <label className="hidden sm:inline-flex items-center gap-2 text-slate-600 font-medium cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={hasPhoto}
-                  onChange={(e) => {
-                    setHasPhoto(e.target.checked);
-                  }}
+                  onChange={(e) => setHasPhoto(e.target.checked)}
                   className="rounded border-slate-300 text-[#E51F3E] focus:ring-[#E51F3E]"
                 />
                 <span>With Photos</span>
               </label>
             </div>
 
-            {activeFiltersCount > 0 && (
-              <button
-                onClick={handleClearAllFilters}
-                className="text-xs font-semibold text-rose-600 hover:text-rose-800 transition underline"
-              >
-                Clear All Filters
-              </button>
-            )}
+            <div className="flex items-center gap-3 ml-auto">
+              {activeFiltersCount > 0 && (
+                <button
+                  onClick={handleClearAllFilters}
+                  className="text-xs font-semibold text-rose-600 hover:text-rose-800 transition underline"
+                >
+                  Clear All Filters
+                </button>
+              )}
+
+              {/* Sort Dropdown aligned to far right (width: 175px, height: 40px) */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider hidden sm:inline">
+                  Sort:
+                </span>
+                <select
+                  value={sort}
+                  onChange={(e) => {
+                    setSort(e.target.value);
+                    const params = new URLSearchParams(searchParams.toString());
+                    params.set('sort', e.target.value);
+                    params.set('page', '1');
+                    router.push(`/search?${params.toString()}`);
+                  }}
+                  className="w-[175px] h-10 min-h-[40px] rounded-xl border border-slate-200 bg-[#F8FAFC] px-3 text-xs font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E]"
+                >
+                  <option value="bestMatch">Best Match</option>
+                  <option value="recentlyActive">Recently Active</option>
+                  <option value="newest">Newest Profiles</option>
+                  <option value="ageAsc">Age: Low to High</option>
+                  <option value="ageDesc">Age: High to Low</option>
+                </select>
+              </div>
+            </div>
           </div>
 
           {/* Advanced Filter Collapsible Drawer Inside Card */}
           {showAdvancedFilters && (
-            <div className="pt-4 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in bg-slate-50/70 p-4 rounded-2xl">
-              {/* Medical Degree */}
+            <div className="mt-3.5 pt-3.5 border-t border-[#E8E1DB] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 animate-fade-in bg-[#FAF7F4] p-3.5 rounded-xl border border-[#E8E1DB]">
+              {/* Education */}
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                  Medical Qualification / Degree
+                <label className="text-[10.5px] font-bold text-slate-600 block mb-1">
+                  Education / Degree
                 </label>
                 <select
                   value={education}
                   onChange={(e) => setEducation(e.target.value)}
-                  className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]"
+                  className="w-full h-9 min-h-[38px] rounded-lg border border-[#E8E1DB] bg-white px-3 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]"
                 >
-                  {DEGREES.map((d) => (
+                  {QUALIFICATIONS.map((d) => (
                     <option key={d} value={d}>
-                      {d === 'All' ? 'All Degrees' : d}
+                      {d}
                     </option>
                   ))}
                 </select>
@@ -490,13 +493,13 @@ function SearchContent() {
 
               {/* Marital Status */}
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-[10.5px] font-bold text-slate-600 block mb-1">
                   Marital Status
                 </label>
                 <select
                   value={maritalStatus}
                   onChange={(e) => setMaritalStatus(e.target.value)}
-                  className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]"
+                  className="w-full h-9 min-h-[38px] rounded-lg border border-[#E8E1DB] bg-white px-3 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]"
                 >
                   {MARITAL_STATUSES.map((m) => (
                     <option key={m} value={m}>
@@ -508,13 +511,13 @@ function SearchContent() {
 
               {/* Religion */}
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-[10.5px] font-bold text-slate-600 block mb-1">
                   Religion
                 </label>
                 <select
                   value={religion}
                   onChange={(e) => setReligion(e.target.value)}
-                  className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]"
+                  className="w-full h-9 min-h-[38px] rounded-lg border border-[#E8E1DB] bg-white px-3 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]"
                 >
                   {RELIGIONS.map((r) => (
                     <option key={r} value={r}>
@@ -526,13 +529,13 @@ function SearchContent() {
 
               {/* Mother Tongue */}
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-[10.5px] font-bold text-slate-600 block mb-1">
                   Mother Tongue
                 </label>
                 <select
                   value={motherTongue}
                   onChange={(e) => setMotherTongue(e.target.value)}
-                  className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]"
+                  className="w-full h-9 min-h-[38px] rounded-lg border border-[#E8E1DB] bg-white px-3 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]"
                 >
                   {MOTHER_TONGUES.map((t) => (
                     <option key={t} value={t}>
@@ -542,15 +545,15 @@ function SearchContent() {
                 </select>
               </div>
 
-              {/* Diet / Lifestyle */}
+              {/* Diet */}
               <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                <label className="text-[10.5px] font-bold text-slate-600 block mb-1">
                   Diet Preference
                 </label>
                 <select
                   value={diet}
                   onChange={(e) => setDiet(e.target.value)}
-                  className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]"
+                  className="w-full h-9 min-h-[38px] rounded-lg border border-[#E8E1DB] bg-white px-3 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]"
                 >
                   {DIETS.map((d) => (
                     <option key={d} value={d}>
@@ -560,36 +563,16 @@ function SearchContent() {
                 </select>
               </div>
 
-              {/* Checkbox controls on mobile */}
-              <div className="sm:hidden flex flex-col gap-2 pt-2">
-                <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={verifiedOnly}
-                    onChange={(e) => setVerifiedOnly(e.target.checked)}
-                  />
-                  <span>Doctor Verified Only</span>
-                </label>
-                <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={hasPhoto}
-                    onChange={(e) => setHasPhoto(e.target.checked)}
-                  />
-                  <span>With Photos</span>
-                </label>
-              </div>
-
-              <div className="lg:col-span-3 flex items-end justify-end gap-2.5 pt-2">
+              <div className="lg:col-span-3 flex items-end justify-end gap-2.5 pt-1.5">
                 <button
                   onClick={handleClearAllFilters}
-                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
+                  className="rounded-lg border border-[#E8E1DB] bg-white px-3.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
                 >
                   Clear Filters
                 </button>
                 <button
                   onClick={() => applyFiltersAndPushUrl(1)}
-                  className="rounded-xl bg-[#101728] px-5 py-2 text-xs font-bold text-white hover:bg-slate-800 transition"
+                  className="rounded-lg bg-[#101728] px-4 py-1.5 text-xs font-bold text-white hover:bg-slate-800 transition"
                 >
                   Apply Filters
                 </button>
@@ -599,104 +582,49 @@ function SearchContent() {
         </div>
       </section>
 
-      {/* 3. Search Results Header */}
-      <section className="max-w-[1560px] mx-auto px-4 sm:px-6 lg:px-8 mt-10">
-        <div className="rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-6 border border-[#F5D9DD] shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h2 className="font-serif text-2xl sm:text-3xl font-bold text-[#101728]">
-                Verified Doctor Matches
-              </h2>
-              {activeFiltersCount > 0 && (
-                <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-rose-50 text-[#E51F3E] border border-rose-200">
-                  {activeFiltersCount} {activeFiltersCount === 1 ? 'Filter' : 'Filters'} Applied
-                </span>
-              )}
-            </div>
-            <p className="mt-1 text-xs sm:text-sm text-slate-600">
-              {loading
-                ? 'Searching doctor database...'
-                : total > 0
-                ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} verified candidates matching your criteria.`
-                : 'Showing 0 profiles matching your criteria.'}
-            </p>
-          </div>
-
-          {/* Right Controls: Sort & Save Search */}
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Save Search */}
-            <button
-              onClick={handleSaveSearch}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/60 px-3.5 py-2 text-xs font-bold text-[#E51F3E] hover:bg-rose-100 transition shadow-2xs"
-            >
-              <Bookmark className="w-3.5 h-3.5" />
-              <span>Save Search</span>
-            </button>
-
-            {/* Sort Dropdown */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider hidden sm:inline">
-                Sort By:
-              </span>
-              <select
-                value={sort}
-                onChange={(e) => {
-                  setSort(e.target.value);
-                  const params = new URLSearchParams(searchParams.toString());
-                  params.set('sort', e.target.value);
-                  params.set('page', '1');
-                  router.push(`/search?${params.toString()}`);
-                }}
-                className="h-9.5 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3 text-xs font-semibold text-[#101728] focus:outline-none focus:border-[#E51F3E]"
-              >
-                <option value="bestMatch">Best Match</option>
-                <option value="recentlyActive">Recently Active</option>
-                <option value="newest">Newest Profiles</option>
-                <option value="ageAsc">Age: Low to High</option>
-                <option value="ageDesc">Age: High to Low</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* 4. Profile Grid (4 Columns on Desktop) */}
-      <section className="max-w-[1560px] mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+      {/* ── 3. Profile Grid (Responsive 4 cards / 3 cards / 2 cards / 1 card) ── */}
+      <section className="max-w-[1400px] mx-auto px-4 sm:px-6 mt-6 sm:mt-7">
         {loading ? (
-          /* Loading Skeletons */
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 xl:gap-7">
+          /* Loading Skeletons matching exact responsive layout */
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5 justify-items-center">
             {Array.from({ length: 8 }).map((_, idx) => (
               <div
                 key={idx}
-                className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4 animate-pulse h-[460px]"
+                className="w-full max-w-[280px] rounded-xl border border-[#E8E1DB] bg-white overflow-hidden animate-pulse flex flex-col"
               >
-                <div className="h-[280px] rounded-xl bg-slate-200" />
-                <div className="space-y-2">
-                  <div className="h-4 bg-slate-200 rounded w-3/4" />
-                  <div className="h-3 bg-slate-100 rounded w-1/2" />
+                <div className="w-full h-[205px] sm:h-[220px] bg-slate-200 shrink-0" />
+                <div className="p-3 flex-1 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="h-4 bg-slate-200 rounded w-3/4" />
+                    <div className="h-3 bg-slate-100 rounded w-1/2" />
+                    <div className="h-3 bg-slate-100 rounded w-4/5 pt-1" />
+                    <div className="h-3 bg-slate-100 rounded w-2/3" />
+                  </div>
+                  <div className="h-[36px] bg-slate-200 rounded-lg w-full mt-3" />
                 </div>
-                <div className="h-10 bg-slate-200 rounded-xl" />
               </div>
             ))}
           </div>
         ) : profiles.length > 0 ? (
-          /* Profile Cards */
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 xl:gap-7 items-stretch">
+          /* Real Database Profile Cards in Responsive Grid */
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5 justify-items-center">
             {profiles.map((profile: any) => (
-              <ProfileCard key={profile._id} profile={profile} />
+              <div key={profile._id} className="w-full max-w-[280px] flex flex-col">
+                <ProfileCard profile={profile} />
+              </div>
             ))}
           </div>
         ) : (
           /* Empty State */
-          <div className="rounded-3xl bg-white border border-[#F5D9DD] p-12 text-center max-w-2xl mx-auto space-y-4 shadow-sm">
+          <div className="rounded-2xl bg-white border border-slate-200/80 p-12 text-center max-w-xl mx-auto space-y-4 shadow-sm">
             <div className="w-16 h-16 rounded-full bg-rose-50 text-[#E51F3E] flex items-center justify-center mx-auto text-2xl">
               🔎
             </div>
             <h3 className="font-serif text-2xl font-bold text-[#101728]">
-              No Compatible Profiles Found
+              No profiles found
             </h3>
             <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
-              Try adjusting your medical qualification filters, expanding age preferences, or broadening your city search.
+              Try changing your search filters to find more matches.
             </p>
             <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
               <button
@@ -705,25 +633,15 @@ function SearchContent() {
               >
                 Clear All Filters
               </button>
-              <button
-                onClick={() => {
-                  setCity('All');
-                  setSpecialization('All');
-                  applyFiltersAndPushUrl(1);
-                }}
-                className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
-              >
-                Expand Search (Pan India)
-              </button>
             </div>
           </div>
         )}
 
-        {/* 5. Pagination Controls */}
+        {/* ── Pagination Controls ── */}
         {!loading && totalPages > 1 && (
           <div className="mt-12 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-200 pt-6">
             <span className="text-xs font-medium text-slate-600">
-              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total} doctor profiles
+              Showing {showingStart}–{showingEnd} of {total} verified candidates
             </span>
 
             <div className="flex items-center gap-2">
@@ -766,109 +684,6 @@ function SearchContent() {
           </div>
         )}
       </section>
-
-      {/* 6. Doctor Trust Strip (~90–110px) */}
-      <section className="max-w-[1560px] mx-auto px-4 sm:px-6 lg:px-8 mt-16">
-        <div className="rounded-3xl bg-white border border-slate-200/80 p-5 sm:p-6 shadow-xs">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center items-center">
-            <div className="flex items-center justify-center gap-3 p-2">
-              <div className="w-10 h-10 rounded-2xl bg-rose-50 text-[#E51F3E] flex items-center justify-center shrink-0">
-                <ShieldCheck className="w-5 h-5" />
-              </div>
-              <div className="text-left">
-                <span className="text-xs font-bold text-[#101728] block">Verified Doctor Profiles</span>
-                <span className="text-[10px] text-slate-500">Medical Council Screened</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-center gap-3 p-2">
-              <div className="w-10 h-10 rounded-2xl bg-rose-50 text-[#E51F3E] flex items-center justify-center shrink-0">
-                <Lock className="w-5 h-5" />
-              </div>
-              <div className="text-left">
-                <span className="text-xs font-bold text-[#101728] block">Privacy First</span>
-                <span className="text-[10px] text-slate-500">Photo & Contact Controls</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-center gap-3 p-2">
-              <div className="w-10 h-10 rounded-2xl bg-rose-50 text-[#E51F3E] flex items-center justify-center shrink-0">
-                <Heart className="w-5 h-5" />
-              </div>
-              <div className="text-left">
-                <span className="text-xs font-bold text-[#101728] block">Compatibility Focused</span>
-                <span className="text-[10px] text-slate-500">Clinical & Family Alignment</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-center gap-3 p-2">
-              <div className="w-10 h-10 rounded-2xl bg-rose-50 text-[#E51F3E] flex items-center justify-center shrink-0">
-                <Phone className="w-5 h-5" />
-              </div>
-              <div className="text-left">
-                <span className="text-xs font-bold text-[#101728] block">Relationship Manager</span>
-                <span className="text-[10px] text-slate-500">Toll-Free 24/7 Helpline</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* 7. Why Choose Wonderful Jodi Section (Positioned After Results) */}
-      <section className="max-w-[1560px] mx-auto px-4 sm:px-6 lg:px-8 mt-14">
-        <div className="text-center space-y-2 max-w-2xl mx-auto mb-8">
-          <span className="text-xs font-extrabold uppercase tracking-widest text-[#E51F3E]">
-            Premium Matrimonial Features
-          </span>
-          <h2 className="font-serif text-2xl sm:text-3xl font-bold text-[#101728]">
-            Why Choose Wonderful Jodi
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-600">
-            Everything medical professionals and esteemed families need to discover their ideal life partner.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Search Worldwide */}
-          <div className="bg-white border border-[#f1e5e5] rounded-3xl p-7 shadow-xs hover:shadow-md transition-all duration-300 hover:-translate-y-1 flex flex-col gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center text-[#E51F3E]">
-              <Globe className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="font-serif text-xl font-bold text-[#101728] mb-2">Search Worldwide</h3>
-              <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
-                Discover compatible doctors across India and worldwide NRI communities without geographical limitations.
-              </p>
-            </div>
-          </div>
-
-          {/* Easy Chat */}
-          <div className="bg-white border border-[#f1e5e5] rounded-3xl p-7 shadow-xs hover:shadow-md transition-all duration-300 hover:-translate-y-1 flex flex-col gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center text-[#E51F3E]">
-              <MessageCircle className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="font-serif text-xl font-bold text-[#101728] mb-2">Easy Chat</h3>
-              <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
-                Connect with compatible matches, exchange preferences and communicate securely before taking the next step.
-              </p>
-            </div>
-          </div>
-
-          {/* Personalised Filter */}
-          <div className="bg-white border border-[#f1e5e5] rounded-3xl p-7 shadow-xs hover:shadow-md transition-all duration-300 hover:-translate-y-1 flex flex-col gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center text-[#E51F3E]">
-              <Sliders className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="font-serif text-xl font-bold text-[#101728] mb-2">Personalised Filter</h3>
-              <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
-                Find relevant matches using specialization, location, education, lifestyle and family preferences.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
     </main>
   );
 }
@@ -878,7 +693,7 @@ export default function SearchPage() {
     <Suspense
       fallback={
         <div className="min-h-[400px] flex items-center justify-center text-xs font-semibold text-slate-500">
-          Loading doctor search engine...
+          Loading matrimonial candidate search...
         </div>
       }
     >

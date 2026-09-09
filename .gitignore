@@ -17,6 +17,7 @@ build/
 .env
 .env.*
 *.local
+!.env.example
 
 # SQL dumps and backups
 *.sql

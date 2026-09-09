@@ -36,6 +36,9 @@ module.exports = {
           gold: '#C9A227',
         }
       },
+      screens: {
+        'xs': '360px',
+      },
       fontFamily: {
         serif: ['Playfair Display', 'Georgia', 'serif'],
         cinzel: ['Cinzel', 'serif'],

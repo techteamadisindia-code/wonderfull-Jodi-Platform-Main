@@ -3,6 +3,7 @@ export interface ProfileCard {
   displayName: string;
   gender: string;
   dob: string;
+<<<<<<< HEAD
   height?: string;
   city: string;
   state?: string;
@@ -22,6 +23,13 @@ export interface ProfileCard {
   verificationStatus: string;
   membershipBadge?: 'PREMIUM' | 'VIP' | 'VVIP';
   lastActiveAt?: string;
+=======
+  city: string;
+  education: string;
+  profession: string;
+  primaryPhoto?: string;
+  verificationStatus: string;
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 }
 
 export interface SearchResult {
@@ -30,6 +38,7 @@ export interface SearchResult {
   limit: number;
   profiles: ProfileCard[];
 }
+<<<<<<< HEAD
 
 export interface FullUserProfile {
   _id: string;
@@ -136,3 +145,5 @@ export interface FullUserProfile {
     verificationStatus?: string;
   };
 }
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1

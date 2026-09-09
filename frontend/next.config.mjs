@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+<<<<<<< HEAD
   devIndicators: false,
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   images: {
     remotePatterns: [
       {
@@ -18,13 +21,19 @@ const nextConfig = {
         source: '/api/:path*',
         destination: `${backendUrl}/api/:path*`,
       },
+<<<<<<< HEAD
       {
         source: '/uploads/:path*',
         destination: `${backendUrl}/uploads/:path*`,
       },
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     ];
   },
 };
 
 export default nextConfig;
+<<<<<<< HEAD
 
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1

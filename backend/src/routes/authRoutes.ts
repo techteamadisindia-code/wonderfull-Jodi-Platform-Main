@@ -1,4 +1,5 @@
 import { Router } from 'express';
+<<<<<<< HEAD
 import {
   registerUser,
   loginUser,
@@ -32,5 +33,15 @@ router.post('/reset-password', passwordResetLimiter, resetPassword);
 router.get('/me', requireAuth, getCurrentUser);
 router.post('/change-password', requireAuth, changePassword);
 router.post('/logout-all', requireAuth, logoutAllDevices);
+=======
+import { registerUser, loginUser, forgotPassword, resetPassword } from '../controllers/authController';
+
+const router = Router();
+
+router.post('/register', registerUser);
+router.post('/login', loginUser);
+router.post('/forgot-password', forgotPassword);
+router.post('/reset-password', resetPassword);
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 
 export default router;

@@ -1,8 +1,13 @@
+<<<<<<< HEAD
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+=======
+import axios from 'axios';
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 import { SearchResult } from '../types/profile';
 
 const AUTH_TOKEN_KEY = 'wonderfuljodi_token';
 
+<<<<<<< HEAD
 /**
  * Dynamically resolves the API base URL for LAN & client access
  */
@@ -39,6 +44,15 @@ const api = axios.create({
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (typeof window !== 'undefined') {
     config.baseURL = getApiBaseUrl();
+=======
+const api = axios.create({
+  baseURL: '/api',
+  withCredentials: true,
+});
+
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     const token = localStorage.getItem(AUTH_TOKEN_KEY);
     if (token) {
       config.headers = config.headers ?? {};
@@ -48,6 +62,7 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
+<<<<<<< HEAD
 // Response interceptor: Automatic session refresh on 401 Unauthorized
 let isRefreshing = false;
 let failedQueue: Array<{
@@ -123,6 +138,8 @@ api.interceptors.response.use(
   }
 );
 
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 export function setAuthToken(token: string) {
   if (typeof window !== 'undefined') {
     localStorage.setItem(AUTH_TOKEN_KEY, token);
@@ -142,6 +159,7 @@ export function clearAuthToken() {
   }
 }
 
+<<<<<<< HEAD
 export async function searchProfiles(query: string = '') {
   const cleanQuery = query.startsWith('?') ? query.slice(1) : query;
   const endpoint = cleanQuery ? `/search?${cleanQuery}` : '/search';
@@ -219,4 +237,11 @@ export async function unblockUser(blockedUserId: string) {
   return response.data;
 }
 
+=======
+export async function searchProfiles(query: string) {
+  const response = await api.get<{ success: boolean; data: SearchResult }>(`/search?${query}`);
+  return response.data.data;
+}
+
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 export default api;

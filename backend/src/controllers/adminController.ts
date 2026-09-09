@@ -1,11 +1,16 @@
+<<<<<<< HEAD
 import { Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
 import { AuthRequest } from '../middleware/authMiddleware';
+=======
+import { Request, Response, NextFunction } from 'express';
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 import { User } from '../models/User';
 import { Profile } from '../models/Profile';
 import { Subscription } from '../models/Subscription';
 import { Payment } from '../models/Payment';
 import { Report } from '../models/Report';
+<<<<<<< HEAD
 import { Verification } from '../models/Verification';
 import { Interest } from '../models/Interest';
 import { Shortlist } from '../models/Shortlist';
@@ -133,12 +138,24 @@ export async function getDashboardStats(req: AuthRequest, res: Response, next: N
       isActive: u.isActive,
       createdAt: u.createdAt,
     }));
+=======
+
+export async function getDashboardStats(req: Request, res: Response, next: NextFunction) {
+  try {
+    const totalUsers = await User.countDocuments();
+    const activeUsers = await User.countDocuments({ isActive: true });
+    const verifiedProfiles = await Profile.countDocuments({ verificationStatus: 'VERIFIED' });
+    const premiumUsers = await Subscription.countDocuments({ status: 'ACTIVE', plan: { $ne: 'FREE' } });
+    const revenue = await Payment.aggregate([{ $match: { status: 'SUCCESS' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
+    const newRegistrations = await User.countDocuments({ createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 
     res.json({
       success: true,
       data: {
         totalUsers,
         activeUsers,
+<<<<<<< HEAD
         inactiveUsers,
         verifiedProfiles,
         pendingVerification,
@@ -161,6 +178,12 @@ export async function getDashboardStats(req: AuthRequest, res: Response, next: N
         recentPayments,
         recentVerifications,
         maintenanceMode: maintenanceConfig.enabled,
+=======
+        verifiedProfiles,
+        premiumUsers,
+        revenue: revenue[0]?.total || 0,
+        newRegistrations,
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
       },
     });
   } catch (error) {
@@ -168,6 +191,7 @@ export async function getDashboardStats(req: AuthRequest, res: Response, next: N
   }
 }
 
+<<<<<<< HEAD
 // 1b. Daily Visited Users Analytics (GET /api/admin/analytics/daily-visits)
 export async function getDailyVisitsAnalytics(req: AuthRequest, res: Response, next: NextFunction) {
   try {
@@ -308,11 +332,18 @@ export async function getDailyVisitsAnalytics(req: AuthRequest, res: Response, n
         data: timelineData,
       },
     });
+=======
+export async function getUsers(req: Request, res: Response, next: NextFunction) {
+  try {
+    const users = await User.find().sort({ createdAt: -1 }).limit(100);
+    res.json({ success: true, data: users });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 export async function getDashboardVerifications(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const verifications = await Verification.find()
@@ -618,12 +649,22 @@ export async function updateUserRole(req: AuthRequest, res: Response, next: Next
       String(user._id)
     );
 
+=======
+export async function updateUserStatus(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { status } = req.body;
+    const user = await User.findByIdAndUpdate(req.params.id, { isActive: status === 'active' }, { new: true });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     res.json({ success: true, data: user });
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 export async function deleteUser(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const user = await User.findById(req.params.id);
@@ -648,11 +689,18 @@ export async function deleteUser(req: AuthRequest, res: Response, next: NextFunc
     );
 
     res.json({ success: true, message: 'User and all related records deleted successfully' });
+=======
+export async function getPendingVerifications(req: Request, res: Response, next: NextFunction) {
+  try {
+    const verifications = await Profile.find({ verificationStatus: 'PENDING' }).populate('user', 'fullName email mobile');
+    res.json({ success: true, data: verifications });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 // 3. Matrimonial Profile Management
 export async function getProfiles(req: AuthRequest, res: Response, next: NextFunction) {
   try {
@@ -2966,6 +3014,15 @@ export async function getAuditLogs(req: AuthRequest, res: Response, next: NextFu
   try {
     const logs = await AuditLog.find().sort({ createdAt: -1 }).limit(100);
     res.json({ success: true, data: logs });
+=======
+export async function resolveReport(req: Request, res: Response, next: NextFunction) {
+  try {
+    const report = await Report.findByIdAndUpdate(req.params.id, { status: 'RESOLVED' }, { new: true });
+    if (!report) {
+      return res.status(404).json({ success: false, message: 'Report not found' });
+    }
+    res.json({ success: true, data: report });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }

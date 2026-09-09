@@ -27,6 +27,7 @@ module.exports = {
           softpink: '#fdf2f2',
           gold: '#d97706',
           darkgold: '#b45309',
+<<<<<<< HEAD
         },
         jodi: {
           red: '#E51F3E',
@@ -39,6 +40,10 @@ module.exports = {
       screens: {
         'xs': '360px',
       },
+=======
+        }
+      },
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
       fontFamily: {
         serif: ['Playfair Display', 'Georgia', 'serif'],
         cinzel: ['Cinzel', 'serif'],

@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
+<<<<<<< HEAD
 import { ZodError } from 'zod';
 
 export function errorHandler(err: any, _req: Request, res: Response, _next: NextFunction) {
@@ -55,4 +56,12 @@ export function errorHandler(err: any, _req: Request, res: Response, _next: Next
     message: safeMessage,
     ...(isProduction ? {} : { stack: err.stack }),
   });
+=======
+
+export function errorHandler(err: any, _req: Request, res: Response, _next: NextFunction) {
+  console.error(err);
+  const status = err.status || 500;
+  const message = err.message || 'Internal Server Error';
+  res.status(status).json({ success: false, message });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 }

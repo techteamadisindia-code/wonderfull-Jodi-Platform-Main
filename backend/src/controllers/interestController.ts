@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { Interest } from '../models/Interest';
@@ -224,11 +225,31 @@ export async function createInterest(req: AuthRequest, res: Response, next: Next
       message: 'Interest sent successfully',
       data: interest,
     });
+=======
+import { Request, Response, NextFunction } from 'express';
+import { Interest } from '../models/Interest';
+import { AuthRequest } from '../middleware/authMiddleware';
+
+export async function createInterest(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { receiverId } = req.body;
+    if (!receiverId) {
+      return res.status(400).json({ success: false, message: 'Receiver is required' });
+    }
+    const existing = await Interest.findOne({ sender: req.user?.userId, receiver: receiverId });
+    if (existing) {
+      return res.status(400).json({ success: false, message: 'Interest already sent' });
+    }
+
+    const interest = await Interest.create({ sender: req.user?.userId, receiver: receiverId });
+    res.status(201).json({ success: true, data: interest });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 /**
  * Check interest status between authenticated user and target profile/user
  */
@@ -502,11 +523,27 @@ export async function updateInterest(req: AuthRequest, res: Response, next: Next
       return res.json({ success: true, data: interest });
     }
     return res.status(400).json({ success: false, message: 'Invalid status' });
+=======
+export async function updateInterest(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { status } = req.body;
+    const interest = await Interest.findById(req.params.id);
+    if (!interest) {
+      return res.status(404).json({ success: false, message: 'Interest not found' });
+    }
+    if (interest.receiver.toString() !== req.user?.userId && interest.sender.toString() !== req.user?.userId) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+    if (status) interest.status = status;
+    await interest.save();
+    res.json({ success: true, data: interest });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 /**
  * Get Sent Interests
  */
@@ -534,11 +571,18 @@ export async function getSentInterests(req: AuthRequest, res: Response, next: Ne
     }));
 
     res.json({ success: true, data: enriched });
+=======
+export async function getSentInterests(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const interests = await Interest.find({ sender: req.user?.userId }).populate('receiver', 'fullName');
+    res.json({ success: true, data: interests });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 /**
  * Get Received Interests
  */
@@ -566,6 +610,12 @@ export async function getReceivedInterests(req: AuthRequest, res: Response, next
     }));
 
     res.json({ success: true, data: enriched });
+=======
+export async function getReceivedInterests(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const interests = await Interest.find({ receiver: req.user?.userId }).populate('sender', 'fullName');
+    res.json({ success: true, data: interests });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }

@@ -3,6 +3,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 export interface IReport extends Document {
   reporter: mongoose.Types.ObjectId;
   reportedUser: mongoose.Types.ObjectId;
+<<<<<<< HEAD
   reportedProfile?: mongoose.Types.ObjectId;
   reason: string;
   details?: string;
@@ -14,6 +15,11 @@ export interface IReport extends Document {
   targetType?: 'PROFILE' | 'MESSAGE' | 'USER' | 'OTHER';
   messageSnippet?: string;
   resolvedAt?: Date;
+=======
+  reason: string;
+  details?: string;
+  status: 'PENDING' | 'RESOLVED' | 'REJECTED';
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   createdAt: Date;
   updatedAt: Date;
 }
@@ -22,6 +28,7 @@ const reportSchema = new Schema<IReport>(
   {
     reporter: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     reportedUser: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+<<<<<<< HEAD
     reportedProfile: { type: Schema.Types.ObjectId, ref: 'Profile', index: true },
     reason: { type: String, required: true, trim: true, index: true },
     details: { type: String, trim: true },
@@ -46,6 +53,11 @@ const reportSchema = new Schema<IReport>(
     },
     messageSnippet: { type: String, trim: true },
     resolvedAt: { type: Date },
+=======
+    reason: { type: String, required: true, trim: true },
+    details: { type: String, trim: true },
+    status: { type: String, enum: ['PENDING', 'RESOLVED', 'REJECTED'], default: 'PENDING', index: true },
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   },
   { timestamps: true }
 );

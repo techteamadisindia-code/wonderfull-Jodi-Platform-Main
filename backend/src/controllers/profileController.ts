@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { Profile } from '../models/Profile';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { User } from '../models/User';
+<<<<<<< HEAD
 import { ContactRequest } from '../models/ContactRequest';
 import { z } from 'zod';
 import {
@@ -220,11 +221,43 @@ export async function getMyProfile(req: AuthRequest, res: Response, next: NextFu
       success: true,
       data: serializePrivateProfile(profile, user),
     });
+=======
+import { z } from 'zod';
+
+const profileSchema = z.object({
+  displayName: z.string().min(2),
+  gender: z.enum(['Male', 'Female', 'Other']),
+  dob: z.string().min(10),
+  height: z.string().min(1),
+  maritalStatus: z.string().min(1),
+  motherTongue: z.string().min(1),
+  religion: z.string().min(1),
+  caste: z.string().min(1),
+  education: z.string().min(1),
+  degree: z.string().min(1),
+  profession: z.string().min(1),
+  country: z.string().min(1),
+  state: z.string().min(1),
+  city: z.string().min(1),
+  about: z.string().optional(),
+  photos: z.array(z.string()).optional(),
+  primaryPhoto: z.string().optional(),
+});
+
+export async function getMyProfile(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const profile = await Profile.findOne({ user: req.user?.userId }).populate('user', 'fullName email mobile');
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+    res.json({ success: true, data: profile });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 /**
  * Update authenticated user's own profile
  */
@@ -422,11 +455,21 @@ export async function getProfile(req: Request, res: Response, next: NextFunction
         isAdmin: isCallerAdmin,
       }),
     });
+=======
+export async function getProfile(req: Request, res: Response, next: NextFunction) {
+  try {
+    const profile = await Profile.findById(req.params.id).populate('user', 'fullName email mobile');
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+    res.json({ success: true, data: profile });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 /**
  * Create initial profile for authenticated user
  */
@@ -439,12 +482,19 @@ export async function createProfile(req: AuthRequest, res: Response, next: NextF
 
     const data = profileSchema.parse(req.body);
     const existing = await Profile.findOne({ user: userId });
+=======
+export async function createProfile(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const data = profileSchema.parse(req.body);
+    const existing = await Profile.findOne({ user: req.user?.userId });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     if (existing) {
       return res.status(400).json({ success: false, message: 'Profile already exists' });
     }
 
     const profile = await Profile.create({
       ...data,
+<<<<<<< HEAD
       dob: new Date(data.dob),
       user: userId,
       photos: data.photos ?? [],
@@ -457,11 +507,19 @@ export async function createProfile(req: AuthRequest, res: Response, next: NextF
       success: true,
       data: serializePrivateProfile(profile, user),
     });
+=======
+      user: req.user?.userId,
+      photos: data.photos ?? [],
+      primaryPhoto: data.primaryPhoto,
+    });
+    res.status(201).json({ success: true, data: profile });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 /**
  * Update profile by ID with strict ownership authorization
  */
@@ -497,11 +555,24 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
       success: true,
       data: isOwner || isAdmin ? serializePrivateProfile(profile, user) : serializePublicProfile(profile),
     });
+=======
+export async function updateProfile(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const profile = await Profile.findById(req.params.id);
+    if (!profile || profile.user.toString() !== req.user?.userId) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+    const data = profileSchema.partial().parse(req.body);
+    Object.assign(profile, data);
+    await profile.save();
+    res.json({ success: true, data: profile });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 /**
  * Delete profile by ID with strict ownership authorization
  */
@@ -529,6 +600,17 @@ export async function deleteProfile(req: AuthRequest, res: Response, next: NextF
     await User.findByIdAndUpdate(profile.user, { isActive: false });
 
     res.json({ success: true, message: 'Profile deleted successfully' });
+=======
+export async function deleteProfile(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const profile = await Profile.findById(req.params.id);
+    if (!profile || profile.user.toString() !== req.user?.userId) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+    await profile.remove();
+    await User.findByIdAndUpdate(req.user?.userId, { isActive: false });
+    res.json({ success: true, message: 'Profile deleted' });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }

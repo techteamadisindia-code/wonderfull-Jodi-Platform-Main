@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middleware/authMiddleware';
+<<<<<<< HEAD
 import {
   getDashboardStats,
   getDailyVisitsAnalytics,
@@ -185,5 +186,17 @@ router.put('/inquiries/:id/status', updateInquiryStatus);
 
 // 13. Audit Trail
 router.get('/audit-logs', getAuditLogs);
+=======
+import { getDashboardStats, getUsers, updateUserStatus, getPendingVerifications, resolveReport } from '../controllers/adminController';
+
+const router = Router();
+
+router.use(requireAuth, requireRole('admin'));
+router.get('/dashboard', getDashboardStats);
+router.get('/users', getUsers);
+router.put('/users/:id/status', updateUserStatus);
+router.get('/verifications', getPendingVerifications);
+router.put('/reports/:id/resolve', resolveReport);
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 
 export default router;

@@ -11,13 +11,19 @@ out/
 # Build
 dist/
 build/
+<<<<<<< HEAD
 *.tsbuildinfo
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 
 # Environment
 .env
 .env.*
 *.local
+<<<<<<< HEAD
 !.env.example
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 
 # SQL dumps and backups
 *.sql

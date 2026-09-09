@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
+<<<<<<< HEAD
 export type PaymentStatus =
   | 'PENDING'
   | 'SUCCESS'
@@ -15,10 +16,16 @@ export interface IPayment extends Document {
   subscription?: mongoose.Types.ObjectId;
   orderId?: string;
   paymentId?: string;
+=======
+export interface IPayment extends Document {
+  user: mongoose.Types.ObjectId;
+  subscription: mongoose.Types.ObjectId;
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   provider: string;
   providerPaymentId: string;
   amount: number;
   currency: string;
+<<<<<<< HEAD
   planId?: string;
   planName?: string;
   paymentMethod?: string;
@@ -32,6 +39,9 @@ export interface IPayment extends Document {
   refundReason?: string;
   refundedAt?: Date;
   isSimulated?: boolean;
+=======
+  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'REFUNDED';
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   metadata?: Record<string, any>;
   createdAt: Date;
   updatedAt: Date;
@@ -40,6 +50,7 @@ export interface IPayment extends Document {
 const paymentSchema = new Schema<IPayment>(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+<<<<<<< HEAD
     subscription: { type: Schema.Types.ObjectId, ref: 'Subscription', index: true },
     orderId: { type: String, trim: true, index: true },
     paymentId: { type: String, trim: true, index: true },
@@ -70,13 +81,25 @@ const paymentSchema = new Schema<IPayment>(
     refundReason: { type: String },
     refundedAt: { type: Date },
     isSimulated: { type: Boolean, default: false },
+=======
+    subscription: { type: Schema.Types.ObjectId, ref: 'Subscription', required: true, index: true },
+    provider: { type: String, required: true },
+    providerPaymentId: { type: String, required: true },
+    amount: { type: Number, required: true },
+    currency: { type: String, required: true, default: 'INR' },
+    status: { type: String, enum: ['PENDING', 'SUCCESS', 'FAILED', 'REFUNDED'], default: 'PENDING', index: true },
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     metadata: { type: Schema.Types.Mixed },
   },
   { timestamps: true }
 );
 
+<<<<<<< HEAD
 paymentSchema.index({ createdAt: -1 });
 paymentSchema.index({ status: 1, createdAt: -1 });
 
 export const Payment = mongoose.models.Payment || mongoose.model<IPayment>('Payment', paymentSchema);
 
+=======
+export const Payment = mongoose.models.Payment || mongoose.model<IPayment>('Payment', paymentSchema);
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1

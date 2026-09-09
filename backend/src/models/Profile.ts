@@ -31,6 +31,7 @@ export interface IProfile extends Document {
   about?: string;
   photos: string[];
   primaryPhoto?: string;
+<<<<<<< HEAD
   medicalRegistrationNumber?: string;
   medicalCouncil?: string;
   registrationState?: string;
@@ -135,6 +136,8 @@ export interface IProfile extends Document {
     birthPlaceVisibility?: 'all' | 'members_only' | 'hidden';
     kundaliVisibility?: 'all' | 'members_only' | 'hidden';
   };
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   verificationStatus: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
   lastActiveAt: Date;
   createdAt: Date;
@@ -162,6 +165,7 @@ const profileSchema = new Schema<IProfile>(
     country: { type: String, required: true, index: true },
     state: { type: String, required: true, index: true },
     city: { type: String, required: true, index: true },
+<<<<<<< HEAD
     medicalRegistrationNumber: { type: String, trim: true },
     medicalCouncil: { type: String, trim: true },
     registrationState: { type: String, trim: true },
@@ -306,6 +310,8 @@ const profileSchema = new Schema<IProfile>(
         default: 'all',
       },
     },
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     fatherOccupation: { type: String, trim: true },
     motherOccupation: { type: String, trim: true },
     siblings: { type: String, trim: true },

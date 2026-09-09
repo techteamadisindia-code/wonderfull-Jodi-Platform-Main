@@ -11,7 +11,10 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+<<<<<<< HEAD
     "@types/pdfkit": "^0.17.6",
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     "bcrypt": "^5.1.0",
     "cloudinary": "^1.32.0",
     "cookie-parser": "^1.4.6",
@@ -24,20 +27,29 @@
     "mongoose": "^7.8.4",
     "morgan": "^1.10.0",
     "nodemailer": "^6.9.4",
+<<<<<<< HEAD
     "pdfkit": "^0.20.2",
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     "razorpay": "^2.8.0",
     "socket.io": "^4.8.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.0",
+<<<<<<< HEAD
     "@types/cookie-parser": "^1.4.10",
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     "@types/cors": "^2.8.18",
     "@types/express": "^4.17.18",
     "@types/jsonwebtoken": "^9.0.2",
     "@types/morgan": "^1.9.4",
     "@types/node": "^20.13.2",
+<<<<<<< HEAD
     "@types/nodemailer": "^8.0.1",
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^8.57.0",

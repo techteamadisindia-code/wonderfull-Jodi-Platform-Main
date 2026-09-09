@@ -6,12 +6,15 @@ export interface IMessage extends Document {
   receiver: mongoose.Types.ObjectId;
   content: string;
   read: boolean;
+<<<<<<< HEAD
   moderationStatus: 'SAFE' | 'FLAGGED' | 'UNDER_REVIEW' | 'BLOCKED';
   moderationCategory?: 'PHONE_NUMBER' | 'EMAIL' | 'SOCIAL_MEDIA' | 'OTHER_CONTACT' | 'NONE';
   moderationConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
   moderationScore?: number;
   flaggedReason?: string;
   moderatedAt?: Date;
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   createdAt: Date;
   updatedAt: Date;
 }
@@ -23,6 +26,7 @@ const messageSchema = new Schema<IMessage>(
     receiver: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     content: { type: String, required: true, trim: true },
     read: { type: Boolean, default: false },
+<<<<<<< HEAD
     moderationStatus: {
       type: String,
       enum: ['SAFE', 'FLAGGED', 'UNDER_REVIEW', 'BLOCKED'],
@@ -43,12 +47,17 @@ const messageSchema = new Schema<IMessage>(
     moderationScore: { type: Number, default: 0 },
     flaggedReason: { type: String, trim: true },
     moderatedAt: { type: Date, default: Date.now },
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   },
   { timestamps: true }
 );
 
+<<<<<<< HEAD
 messageSchema.index({ conversation: 1, createdAt: 1 });
 messageSchema.index({ sender: 1, receiver: 1 });
 messageSchema.index({ moderationStatus: 1, moderationCategory: 1 });
 
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 export const Message = mongoose.models.Message || mongoose.model<IMessage>('Message', messageSchema);

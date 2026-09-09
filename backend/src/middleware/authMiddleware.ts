@@ -4,8 +4,11 @@ import jwt from 'jsonwebtoken';
 interface JwtPayloadWithRole {
   userId: string;
   role: string;
+<<<<<<< HEAD
   email?: string;
   sessionId?: string;
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
 }
 
 export interface AuthRequest extends Request {
@@ -13,6 +16,7 @@ export interface AuthRequest extends Request {
 }
 
 export function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
+<<<<<<< HEAD
   // 1. Check Bearer Authorization Header
   const authHeader = req.headers.authorization;
   let token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
@@ -50,17 +54,38 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
       });
     }
     return res.status(401).json({ success: false, message: 'Invalid or expired authentication token' });
+=======
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  try {
+    const secret = process.env.JWT_SECRET ?? 'secret';
+    const payload = jwt.verify(token, secret) as JwtPayloadWithRole;
+    req.user = payload;
+    next();
+  } catch (error) {
+    return res.status(401).json({ success: false, message: 'Invalid or expired token' });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   }
 }
 
 export function requireRole(role: string) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user || req.user.role !== role) {
+<<<<<<< HEAD
       return res.status(403).json({ success: false, message: 'Access denied: insufficient permissions' });
+=======
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     }
     next();
   };
 }
+<<<<<<< HEAD
 
 export function requireAdminAuth(req: AuthRequest, res: Response, next: NextFunction) {
   requireAuth(req, res, () => {
@@ -101,3 +126,5 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
   next();
 }
 
+=======
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1

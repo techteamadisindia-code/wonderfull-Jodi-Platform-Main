@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+<<<<<<< HEAD
 import { Search, ChevronDown, Sparkles } from 'lucide-react';
 
 const options = {
@@ -19,6 +20,22 @@ interface SearchFormProps {
 }
 
 export function SearchForm({ layout = 'grid' }: SearchFormProps) {
+=======
+import { Search, UserCheck } from 'lucide-react';
+
+const options = {
+  lookingFor: [
+    { label: 'Bride (Woman)', value: 'Female' },
+    { label: 'Groom (Man)', value: 'Male' },
+  ],
+  religions: ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Jain', 'Other'],
+  cities: ['Mumbai', 'Delhi NCR', 'Bengaluru', 'Pune', 'Chennai', 'Hyderabad', 'Kolkata'],
+  education: ['B.Tech / B.E.', 'MBBS / MD', 'MBA / PGDM', 'CA / CS', 'M.Tech / MS', 'Graduate Degree'],
+  professions: ['Software Professional', 'Doctor / Healthcare', 'Business Owner / Entrepreneur', 'Civil Services', 'Banker / Finance', 'Lawyer'],
+};
+
+export function SearchForm() {
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   const router = useRouter();
   const [filters, setFilters] = useState({
     gender: 'Female',
@@ -27,6 +44,10 @@ export function SearchForm({ layout = 'grid' }: SearchFormProps) {
     religion: '',
     city: '',
     education: '',
+<<<<<<< HEAD
+=======
+    profession: '',
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   });
 
   const onChange = (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -35,6 +56,7 @@ export function SearchForm({ layout = 'grid' }: SearchFormProps) {
 
   const onSubmit = (event: React.FormEvent) => {
     event.preventDefault();
+<<<<<<< HEAD
     const cleanFilters: Record<string, string> = {};
     Object.entries(filters).forEach(([key, val]) => {
       if (val && val !== 'All Religions') cleanFilters[key] = val;
@@ -177,20 +199,39 @@ export function SearchForm({ layout = 'grid' }: SearchFormProps) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
         <div>
           <label className="mb-1 block text-xs font-bold text-slate-700">Looking For</label>
+=======
+    const query = new URLSearchParams(filters as Record<string, string>);
+    router.push(`/search?${query.toString()}`);
+  };
+
+  return (
+    <form onSubmit={onSubmit} className="mt-6 space-y-4">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600">I am looking for</label>
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
           <select
             name="gender"
             value={filters.gender}
             onChange={onChange}
+<<<<<<< HEAD
             className="w-full h-[44px] rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 text-sm text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] font-medium"
           >
             {options.lookingFor.map((item) => (
               <option key={item.value} value={item.value}>
                 {item.label}
               </option>
+=======
+            className="w-full rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500 font-medium"
+          >
+            {options.lookingFor.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
             ))}
           </select>
         </div>
 
+<<<<<<< HEAD
         <div>
           <label className="mb-1 block text-xs font-bold text-slate-700">Religion</label>
           <select
@@ -228,16 +269,57 @@ export function SearchForm({ layout = 'grid' }: SearchFormProps) {
               value={filters.ageMax}
               onChange={onChange}
               className="w-full h-[44px] rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 text-sm text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
+=======
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600">Age From</label>
+            <input
+              type="number"
+              name="ageMin"
+              value={filters.ageMin}
+              onChange={onChange}
+              className="w-full rounded-2xl border border-rose-200 bg-white px-3 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600">Age To</label>
+            <input
+              type="number"
+              name="ageMax"
+              value={filters.ageMax}
+              onChange={onChange}
+              className="w-full rounded-2xl border border-rose-200 bg-white px-3 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500"
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
             />
           </div>
         </div>
 
         <div>
+<<<<<<< HEAD
           <label className="mb-1 block text-xs font-bold text-slate-700">City / Location</label>
+=======
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600">Religion</label>
+          <select
+            name="religion"
+            value={filters.religion}
+            onChange={onChange}
+            className="w-full rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500"
+          >
+            <option value="">All Religions</option>
+            {options.religions.map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600">City / Location</label>
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
           <select
             name="city"
             value={filters.city}
             onChange={onChange}
+<<<<<<< HEAD
             className="w-full h-[44px] rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 text-sm text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] font-medium"
           >
             <option value="">Any Location</option>
@@ -245,11 +327,49 @@ export function SearchForm({ layout = 'grid' }: SearchFormProps) {
               <option key={item} value={item}>
                 {item}
               </option>
+=======
+            className="w-full rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500"
+          >
+            <option value="">All Cities</option>
+            {options.cities.map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600">Education</label>
+          <select
+            name="education"
+            value={filters.education}
+            onChange={onChange}
+            className="w-full rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500"
+          >
+            <option value="">Any Qualification</option>
+            {options.education.map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600">Profession</label>
+          <select
+            name="profession"
+            value={filters.profession}
+            onChange={onChange}
+            className="w-full rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500"
+          >
+            <option value="">Any Profession</option>
+            {options.professions.map((item) => (
+              <option key={item} value={item}>{item}</option>
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
             ))}
           </select>
         </div>
       </div>
 
+<<<<<<< HEAD
       <button
         type="submit"
         className="w-full h-[46px] inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#E51F3E] to-[#CE102F] text-sm font-bold text-white shadow-md shadow-red-600/25 hover:shadow-lg transition-all duration-200"
@@ -257,6 +377,17 @@ export function SearchForm({ layout = 'grid' }: SearchFormProps) {
         <Search className="w-4 h-4" />
         Search Matching Profiles
       </button>
+=======
+      <div className="pt-2">
+        <button
+          type="submit"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg hover:from-red-700 hover:to-rose-700 transition transform active:scale-95"
+        >
+          <Search className="w-4 h-4" />
+          Find Suitable Matches
+        </button>
+      </div>
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     </form>
   );
 }

@@ -132,6 +132,7 @@ function SearchContent() {
     setPage(Number(searchParams.get('page')) || 1);
   }, [searchParams]);
 
+  const fetchResults = useCallback(() => {
     const params = new URLSearchParams();
     if (gender && gender !== 'All') params.set('gender', gender);
     if (minAge && minAge !== '21') params.set('minAge', minAge);
@@ -146,7 +147,7 @@ function SearchContent() {
     if (verifiedOnly) params.set('verified', 'true');
     if (hasPhoto) params.set('hasPhoto', 'true');
     if (sort && sort !== 'bestMatch') params.set('sort', sort);
-    if (targetPage > 1) params.set('page', String(targetPage));
+    if (page > 1) params.set('page', String(page));
 
     const queryString = params.toString();
     setLoading(true);

@@ -164,68 +164,6 @@ export default function AdminReportsPage() {
     }
   }, [page, activeTab, debouncedSearch]);
 
-  const handleTabChange = (tab: 'ALL' | 'PENDING' | 'RESOLVED' | 'DISMISSED') => {
-    setActiveTab(tab);
-    setPage(1);
-    setActionMenuOpenId(null);
-  };
-
-  const handleClearAllFilters = () => {
-    setSearchQuery('');
-    setDebouncedSearch('');
-    setSelectedReason('ALL');
-    setFromDate('');
-    setToDate('');
-    setSortBy('createdAt');
-    setSortOrder('desc');
-    setPage(1);
-  };
-
-  const hasActiveFilters =
-    debouncedSearch !== '' ||
-    selectedReason !== 'ALL' ||
-    fromDate !== '' ||
-    toDate !== '' ||
-    sortBy !== 'createdAt' ||
-    sortOrder !== 'desc';
-
-  // Main Data Fetcher
-  const loadData = useCallback(
-    async (isSilent = false) => {
-      if (!isSilent) setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetchAdminReports({
-          page,
-          limit: pageSize,
-          status: activeTab,
-          search: debouncedSearch,
-          reason: selectedReason,
-          from: fromDate || undefined,
-          to: toDate || undefined,
-          sortBy,
-          sortOrder,
-        });
-
-        setReports(response.reports || []);
-        setPagination(response.pagination);
-        if (response.counts) {
-          setCounts(response.counts);
-        }
-        if (response.filters?.reasons?.length) {
-          setFilterOptions(response.filters);
-        }
-      } catch (err: any) {
-        console.error('Failed to load reports:', err);
-        setError(err?.response?.data?.message || 'Unable to load abuse reports. Please check server connection.');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [page, pageSize, activeTab, debouncedSearch, selectedReason, fromDate, toDate, sortBy, sortOrder]
-  );
-
   useEffect(() => {
     loadData();
   }, [loadData]);
@@ -664,9 +602,9 @@ export default function AdminReportsPage() {
         {!loading && pagination.total > 0 && (
           <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
             <div>
-              Showing <span className="font-bold text-slate-800">{(page - 1) * pageSize + 1}</span> to{' '}
+              Showing <span className="font-bold text-slate-800">{(page - 1) * pagination.limit + 1}</span> to{' '}
               <span className="font-bold text-slate-800">
-                {Math.min(page * pageSize, pagination.total)}
+                {Math.min(page * pagination.limit, pagination.total)}
               </span>{' '}
               of <span className="font-bold text-slate-800">{pagination.total}</span> reports
             </div>

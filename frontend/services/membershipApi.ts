@@ -207,43 +207,4 @@ export async function fetchMySubscription(): Promise<UserSubscriptionDetails> {
   return response.data.data;
 }
 
-export interface UserSubscriptionDetails {
-  id: string;
-  userId: string;
-  plan: string;
-  planKey: string;
-  slug: string;
-  planId: string;
-  status: 'ACTIVE' | 'PENDING' | 'EXPIRED' | 'CANCELLED';
-  price: string;
-  duration: string;
-  startDate: string;
-  expiryDate?: string | null;
-  contactRequestsUsed: number;
-  contactRequestsRemaining: number;
-  contactRequestLimit: number;
-  isUnlimitedContact: boolean;
-  fairUsageEnabled?: boolean;
-  isPopular?: boolean;
-  badge?: string | null;
-  isExpired?: boolean;
-}
-
-/**
- * Fetch the logged-in user's subscription and remaining contact credits
- */
-export async function fetchMySubscription(): Promise<UserSubscriptionDetails> {
-  const response = await apiClient.get<{ success: boolean; data: UserSubscriptionDetails }>(
-    '/subscription/me'
-  );
-  return response.data.data;
-}
-
-/**
- * Fetch all active membership plans
- */
-export async function fetchPublicMembershipPlans(): Promise<any[]> {
-  const response = await apiClient.get<{ success: boolean; data: any[] }>('/membership-plans');
-  return response.data.data;
-}
 

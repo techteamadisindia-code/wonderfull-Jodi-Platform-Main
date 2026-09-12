@@ -487,6 +487,52 @@ export default function AdminVerificationPage() {
             <span>Refresh</span>
           </button>
         </div>
+
+        {/* Pagination Footer */}
+        <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
+          <div>
+            Showing {(pagination.page - 1) * pagination.limit + (verifications.length > 0 ? 1 : 0)} to{' '}
+            {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total} records
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <span>Per page:</span>
+              <select
+                value={limit}
+                onChange={(e) => {
+                  setLimit(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none"
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="px-2 font-bold text-slate-800">
+                {page} / {pagination.totalPages || 1}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                disabled={page >= pagination.totalPages}
+                className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Search & Filter Bar */}

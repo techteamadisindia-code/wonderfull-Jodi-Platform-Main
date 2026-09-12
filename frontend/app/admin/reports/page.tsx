@@ -164,6 +164,68 @@ export default function AdminReportsPage() {
     }
   }, [page, activeTab, debouncedSearch]);
 
+  const handleTabChange = (tab: 'ALL' | 'PENDING' | 'RESOLVED' | 'DISMISSED') => {
+    setActiveTab(tab);
+    setPage(1);
+    setActionMenuOpenId(null);
+  };
+
+  const handleClearAllFilters = () => {
+    setSearchQuery('');
+    setDebouncedSearch('');
+    setSelectedReason('ALL');
+    setFromDate('');
+    setToDate('');
+    setSortBy('createdAt');
+    setSortOrder('desc');
+    setPage(1);
+  };
+
+  const hasActiveFilters =
+    debouncedSearch !== '' ||
+    selectedReason !== 'ALL' ||
+    fromDate !== '' ||
+    toDate !== '' ||
+    sortBy !== 'createdAt' ||
+    sortOrder !== 'desc';
+
+  // Main Data Fetcher
+  const loadData = useCallback(
+    async (isSilent = false) => {
+      if (!isSilent) setLoading(true);
+      setError(null);
+
+      try {
+        const response = await fetchAdminReports({
+          page,
+          limit: pageSize,
+          status: activeTab,
+          search: debouncedSearch,
+          reason: selectedReason,
+          from: fromDate || undefined,
+          to: toDate || undefined,
+          sortBy,
+          sortOrder,
+        });
+
+        setReports(response.reports || []);
+        setPagination(response.pagination);
+        if (response.counts) {
+          setCounts(response.counts);
+        }
+        if (response.filters?.reasons?.length) {
+          setFilterOptions(response.filters);
+        }
+      } catch (err: any) {
+        console.error('Failed to load reports:', err);
+        setError(err?.response?.data?.message || 'Unable to load abuse reports. Please check server connection.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [page, pageSize, activeTab, debouncedSearch, selectedReason, fromDate, toDate, sortBy, sortOrder]
+  );
+
   useEffect(() => {
     loadData();
   }, [loadData]);
@@ -597,6 +659,58 @@ export default function AdminReportsPage() {
             Showing {groupedProfiles.length} of {pagination.total} reported candidates
           </div>
         </div>
+
+        {/* Pagination Footer */}
+        {!loading && pagination.total > 0 && (
+          <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+            <div>
+              Showing <span className="font-bold text-slate-800">{(page - 1) * pageSize + 1}</span> to{' '}
+              <span className="font-bold text-slate-800">
+                {Math.min(page * pageSize, pagination.total)}
+              </span>{' '}
+              of <span className="font-bold text-slate-800">{pagination.total}</span> reports
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none transition cursor-pointer shadow-xs"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+
+              {Array.from({ length: pagination.totalPages }, (_, i) => i + 1)
+                .filter((p) => p === 1 || p === pagination.totalPages || Math.abs(p - page) <= 1)
+                .map((p, index, array) => {
+                  const showEllipsis = index > 0 && p - array[index - 1] > 1;
+                  return (
+                    <React.Fragment key={p}>
+                      {showEllipsis && <span className="px-1 text-slate-400">...</span>}
+                      <button
+                        onClick={() => setPage(p)}
+                        className={`min-w-[32px] h-8 px-2 rounded-lg font-bold transition text-xs shadow-xs cursor-pointer ${
+                          page === p
+                            ? 'bg-[#E51F3E] text-white border border-[#E51F3E]'
+                            : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
+
+              <button
+                disabled={page >= pagination.totalPages}
+                onClick={() => setPage((prev) => Math.min(pagination.totalPages, prev + 1))}
+                className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none transition cursor-pointer shadow-xs"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Main Grouped Profile Reports List ── */}

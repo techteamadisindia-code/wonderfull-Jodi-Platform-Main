@@ -646,12 +646,22 @@ export async function updateUserRole(req: AuthRequest, res: Response, next: Next
       String(user._id)
     );
 
+=======
+export async function updateUserStatus(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { status } = req.body;
+    const user = await User.findByIdAndUpdate(req.params.id, { isActive: status === 'active' }, { new: true });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
     res.json({ success: true, data: user });
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 export async function deleteUser(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const user = await User.findById(req.params.id);
@@ -676,11 +686,18 @@ export async function deleteUser(req: AuthRequest, res: Response, next: NextFunc
     );
 
     res.json({ success: true, message: 'User and all related records deleted successfully' });
+=======
+export async function getPendingVerifications(req: Request, res: Response, next: NextFunction) {
+  try {
+    const verifications = await Profile.find({ verificationStatus: 'PENDING' }).populate('user', 'fullName email mobile');
+    res.json({ success: true, data: verifications });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }
 }
 
+<<<<<<< HEAD
 // 3. Matrimonial Profile Management
 export async function getProfiles(req: AuthRequest, res: Response, next: NextFunction) {
   try {
@@ -4262,6 +4279,15 @@ export async function getAuditLogs(req: AuthRequest, res: Response, next: NextFu
   try {
     const logs = await AuditLog.find().sort({ createdAt: -1 }).limit(100);
     res.json({ success: true, data: logs });
+=======
+export async function resolveReport(req: Request, res: Response, next: NextFunction) {
+  try {
+    const report = await Report.findByIdAndUpdate(req.params.id, { status: 'RESOLVED' }, { new: true });
+    if (!report) {
+      return res.status(404).json({ success: false, message: 'Report not found' });
+    }
+    res.json({ success: true, data: report });
+>>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
   } catch (error) {
     next(error);
   }

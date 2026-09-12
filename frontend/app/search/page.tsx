@@ -132,10 +132,7 @@ function SearchContent() {
     setPage(Number(searchParams.get('page')) || 1);
   }, [searchParams]);
 
-  // Fetch search results from backend API
-  const fetchResults = useCallback(() => {
     const params = new URLSearchParams();
-
     if (gender && gender !== 'All') params.set('gender', gender);
     if (minAge && minAge !== '21') params.set('minAge', minAge);
     if (maxAge && maxAge !== '45') params.set('maxAge', maxAge);
@@ -148,9 +145,8 @@ function SearchContent() {
     if (diet && diet !== 'All') params.set('diet', diet);
     if (verifiedOnly) params.set('verified', 'true');
     if (hasPhoto) params.set('hasPhoto', 'true');
-    if (sort) params.set('sort', sort);
-    if (page > 1) params.set('page', String(page));
-    params.set('limit', '12');
+    if (sort && sort !== 'bestMatch') params.set('sort', sort);
+    if (targetPage > 1) params.set('page', String(targetPage));
 
     const queryString = params.toString();
     setLoading(true);

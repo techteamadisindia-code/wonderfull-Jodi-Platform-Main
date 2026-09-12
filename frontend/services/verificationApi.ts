@@ -190,3 +190,27 @@ export async function rejectAllUserVerifications(
   );
   return response.data;
 }
+
+/**
+ * Submit user document for verification
+ */
+export async function submitUserVerification(data: {
+  documentType: string;
+  documentName?: string;
+  file: string;
+  filename?: string;
+}): Promise<{ success: boolean; message: string; data: VerificationItem }> {
+  const response = await apiClient.post<{ success: boolean; message: string; data: VerificationItem }>(
+    '/verifications',
+    data
+  );
+  return response.data;
+}
+
+/**
+ * Fetch user's own verification records and category summary
+ */
+export async function fetchUserVerifications(): Promise<UserVerificationSummaryResponse> {
+  const response = await apiClient.get<UserVerificationSummaryResponse>('/verifications/me');
+  return response.data;
+}

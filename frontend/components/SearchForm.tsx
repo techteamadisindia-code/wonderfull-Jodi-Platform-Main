@@ -228,33 +228,11 @@ export function SearchForm({ layout = 'grid' }: SearchFormProps) {
               value={filters.ageMax}
               onChange={onChange}
               className="w-full h-[44px] rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 text-sm text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
-=======
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600">Age From</label>
-            <input
-              type="number"
-              name="ageMin"
-              value={filters.ageMin}
-              onChange={onChange}
-              className="w-full rounded-2xl border border-rose-200 bg-white px-3 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600">Age To</label>
-            <input
-              type="number"
-              name="ageMax"
-              value={filters.ageMax}
-              onChange={onChange}
-              className="w-full rounded-2xl border border-rose-200 bg-white px-3 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500"
->>>>>>> 671859ed9c6f908469f6e883b8706986e566fad1
             />
           </div>
         </div>
 
         <div>
-<<<<<<< HEAD
           <label className="mb-1 block text-xs font-bold text-slate-700">City / Location</label>
           <select
             name="city"

@@ -124,8 +124,8 @@ export function AdminSidebar({
         },
         {
           href: '/admin/reports',
-          label: 'Abuse & Reports',
-          icon: AlertTriangle,
+          label: 'Reports & Safety',
+          icon: ShieldAlert,
           badge: reportsCount > 0 ? String(reportsCount) : undefined,
           badgeColor: 'bg-rose-500 text-white font-bold',
         },

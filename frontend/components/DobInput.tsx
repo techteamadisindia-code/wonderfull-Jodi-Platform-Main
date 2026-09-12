@@ -80,11 +80,33 @@ export function DobInput({
     }
 
     if (cleanDay.length === 2 && cleanMonth.length === 2 && cleanYear.length === 4) {
-      const isoStr = `${cleanYear}-${cleanMonth.padStart(2, '0')}-${cleanDay.padStart(2, '0')}`;
-      const validation = validateDateOfBirth(isoStr);
+      const dNum = parseInt(cleanDay, 10);
+      const mNum = parseInt(cleanMonth, 10);
+      const yNum = parseInt(cleanYear, 10);
 
+      if (dNum < 1 || dNum > 31 || mNum < 1 || mNum > 12) {
+        setLocalError('Please enter a valid date of birth.');
+        onChange('', false);
+        return;
+      }
+
+      const isoStr = `${cleanYear}-${cleanMonth.padStart(2, '0')}-${cleanDay.padStart(2, '0')}`;
+      const parsedDate = new Date(isoStr);
+      if (isNaN(parsedDate.getTime())) {
+        setLocalError('Please enter a valid date of birth.');
+        onChange('', false);
+        return;
+      }
+
+      if (parsedDate > new Date()) {
+        setLocalError('Date of birth cannot be in the future.');
+        onChange('', false);
+        return;
+      }
+
+      const validation = validateDateOfBirth(isoStr);
       if (!validation.isValid) {
-        setLocalError(validation.error || 'Invalid date of birth.');
+        setLocalError(validation.error || 'Please enter a valid date of birth.');
         onChange('', false);
       } else {
         setLocalError(null);
@@ -243,13 +265,24 @@ export function DobInput({
       {displayError ? (
         <p className="text-xs font-semibold text-rose-600 flex items-center gap-1.5 pt-0.5">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-          <span>{displayError}</span>
+          <span>✕ {displayError}</span>
         </p>
       ) : isCompleteAndValid ? (
         <p className="text-xs font-semibold text-emerald-600 flex items-center gap-1.5 pt-0.5">
           <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
           <span>
-            Valid Date of Birth ({maxYear - parseInt(year, 10)} years old)
+            ✓ Valid Date of Birth ({(() => {
+              const d = parseInt(day, 10);
+              const m = parseInt(month, 10);
+              const y = parseInt(year, 10);
+              const today = new Date();
+              let age = today.getFullYear() - y;
+              const monthDiff = (today.getMonth() + 1) - m;
+              if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < d)) {
+                age--;
+              }
+              return age;
+            })()} years old)
           </span>
         </p>
       ) : helperText ? (

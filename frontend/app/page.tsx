@@ -197,13 +197,13 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Right Column - Traditional Indian Wedding Couple Image */}
-            <div className="lg:col-span-6 flex justify-center lg:justify-end items-center relative mt-3 lg:mt-0">
-              <div className="relative z-10 w-full flex items-center justify-center lg:justify-end">
+            {/* Right Column - Traditional Indian Wedding Couple Image (Clean Transparent Cutout - No Shadows) */}
+            <div className="lg:col-span-6 flex justify-center lg:justify-end items-center relative mt-3 lg:mt-0 bg-transparent shadow-none drop-shadow-none">
+              <div className="relative z-10 w-full flex items-center justify-center lg:justify-end bg-transparent shadow-none drop-shadow-none [filter:none]">
                 <img
                   src="/images/hero-couple-wedding.png"
                   alt="Wonderful Jodi Traditional Indian Wedding Couple"
-                  className="w-full h-auto max-w-[380px] sm:max-w-[460px] md:max-w-[500px] lg:max-w-[580px] xl:max-w-[620px] object-contain select-none"
+                  className="w-full h-auto max-w-[380px] sm:max-w-[460px] md:max-w-[500px] lg:max-w-[580px] xl:max-w-[620px] object-contain select-none bg-transparent shadow-none drop-shadow-none [filter:none]"
                   loading="eager"
                   fetchPriority="high"
                 />

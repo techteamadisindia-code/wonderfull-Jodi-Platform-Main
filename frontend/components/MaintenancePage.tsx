@@ -59,7 +59,7 @@ export function MaintenancePage() {
 
       {/* Header with Brand */}
       <header className="w-full max-w-5xl mx-auto px-6 py-8 relative z-10 flex items-center justify-between">
-        <Logo size="md" subtitle="Verified Matrimony" />
+        <Logo size="md" subtitle="Doctor Matrimony" />
 
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-800 text-xs font-bold tracking-tight">
           <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>

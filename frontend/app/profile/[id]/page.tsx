@@ -28,6 +28,10 @@ import {
   Award,
   Home,
   Compass,
+  Flag,
+  Ban,
+  ShieldAlert,
+  X,
 } from 'lucide-react';
 import { addShortlist, removeShortlist, getAuthToken, getMyProfile } from '../../../lib/api';
 import apiClient from '../../../services/api';
@@ -45,6 +49,8 @@ import {
   declineContactRequest,
   ContactAccessStatus,
 } from '../../../services/contactRequestApi';
+import { submitPublicUserReport } from '../../../services/reportApi';
+import { blockProfile, unblockProfile, fetchBlockedProfiles } from '../../../services/blockApi';
 import { DoctorAvatar } from '../../../components/DoctorAvatar';
 import { Phone, Mail, MessageCircle, PhoneCall } from 'lucide-react';
 
@@ -56,6 +62,19 @@ function getAge(dob?: string | Date) {
   const ageDate = new Date(diff);
   return Math.abs(ageDate.getUTCFullYear() - 1970);
 }
+
+const REPORT_REASONS = [
+  'Fake Profile',
+  'Fake Doctor Information',
+  'Fake Qualification or Documents',
+  'Incorrect Personal Information',
+  'Harassment or Inappropriate Behaviour',
+  'Spam',
+  'Fraud or Scam',
+  'Inappropriate Photos or Content',
+  'Duplicate Profile',
+  'Other',
+];
 
 export default function ProfileDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -80,6 +99,17 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
   const [interestActionLoading, setInterestActionLoading] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [isMyOwnProfile, setIsMyOwnProfile] = useState(false);
+
+  // Safety: Report & Block States
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [blockModalOpen, setBlockModalOpen] = useState(false);
+  const [selectedReportReason, setSelectedReportReason] = useState('');
+  const [reportDescription, setReportDescription] = useState('');
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportSuccess, setReportSuccess] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [blockLoading, setBlockLoading] = useState(false);
 
   // Mutual Interest + Contact Privacy & Credits State
   const [contactAccess, setContactAccess] = useState<ContactAccessStatus>({
@@ -106,7 +136,7 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
         setProfile(profileData);
         setSelectedPhoto(profileData.primaryPhoto || (profileData.photos && profileData.photos[0]) || '');
 
-        // If authenticated, check own profile, interest status and contact access status
+        // If authenticated, check own profile, interest status, contact access, and block status
         const token = getAuthToken();
         if (token) {
           try {
@@ -121,12 +151,21 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
             if (isOwn) {
               setIsMyOwnProfile(true);
             } else {
-              const [statusRes, accessRes] = await Promise.all([
+              const [statusRes, accessRes, blockedRes] = await Promise.all([
                 checkInterestStatus(id).catch(() => null),
                 fetchContactAccessStatus(id).catch(() => null),
+                fetchBlockedProfiles().catch(() => []),
               ]);
               if (statusRes) setInterestStatus(statusRes);
               if (accessRes) setContactAccess(accessRes);
+              if (Array.isArray(blockedRes)) {
+                const blocked = blockedRes.some(
+                  (b: any) =>
+                    String(b.profile?._id) === String(id) ||
+                    String(b.blockedUser?._id) === String(targetUserId)
+                );
+                setIsBlocked(blocked);
+              }
             }
           } catch {
             // Ignore status check errors
@@ -256,6 +295,97 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
       }
     } catch (e) {
       console.error('Error updating shortlist:', e);
+    }
+  };
+
+  // ── Safety Handlers: Block & Report ──
+  const handleBlockProfile = async () => {
+    const token = getAuthToken();
+    if (!token) {
+      router.push(`/login?redirect=/profile/${id}`);
+      return;
+    }
+    setBlockLoading(true);
+    try {
+      const res = await blockProfile(id);
+      if (res.success) {
+        setIsBlocked(true);
+        setBlockModalOpen(false);
+        setFeedbackMessage({
+          type: 'success',
+          text: 'Profile blocked successfully. They will no longer appear in your search results or recommendations, and messaging is disabled.',
+        });
+      }
+    } catch (err: any) {
+      setFeedbackMessage({
+        type: 'error',
+        text: err.response?.data?.message || 'Failed to block profile.',
+      });
+    } finally {
+      setBlockLoading(false);
+    }
+  };
+
+  const handleUnblockProfile = async () => {
+    setBlockLoading(true);
+    try {
+      const res = await unblockProfile(id);
+      if (res.success) {
+        setIsBlocked(false);
+        setFeedbackMessage({
+          type: 'success',
+          text: 'Profile has been unblocked.',
+        });
+      }
+    } catch (err: any) {
+      setFeedbackMessage({
+        type: 'error',
+        text: err.response?.data?.message || 'Failed to unblock profile.',
+      });
+    } finally {
+      setBlockLoading(false);
+    }
+  };
+
+  const handleSubmitReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedReportReason) {
+      setReportError('Please select a reason for reporting.');
+      return;
+    }
+    const token = getAuthToken();
+    if (!token) {
+      router.push(`/login?redirect=/profile/${id}`);
+      return;
+    }
+    setReportSubmitting(true);
+    setReportError(null);
+    try {
+      const res = await submitPublicUserReport({
+        reportedUserId: profile.user?._id || profile.user?.id || profile.user,
+        profileId: id,
+        reason: selectedReportReason,
+        description: reportDescription,
+        details: reportDescription,
+        targetType: 'PROFILE',
+      });
+      if (res.success) {
+        setReportSuccess(true);
+        setTimeout(() => {
+          setReportModalOpen(false);
+          setReportSuccess(false);
+          setSelectedReportReason('');
+          setReportDescription('');
+          setFeedbackMessage({
+            type: 'success',
+            text: 'Your report has been submitted to Trust & Safety. Your identity is 100% confidential.',
+          });
+        }, 1800);
+      }
+    } catch (err: any) {
+      setReportError(err.response?.data?.message || 'Failed to submit report. Please try again.');
+    } finally {
+      setReportSubmitting(false);
     }
   };
 
@@ -717,6 +847,48 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                   <Sparkles className="w-4 h-4 text-[#E51F3E]" />
                   <span>{isShortlisted ? 'Shortlisted' : 'Shortlist Profile'}</span>
                 </button>
+
+                {/* Safety Actions: Block & Report */}
+                {!isMyOwnProfile && (
+                  <div className="flex items-center gap-2">
+                    {isBlocked ? (
+                      <button
+                        type="button"
+                        disabled={blockLoading}
+                        onClick={handleUnblockProfile}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-full border border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-700 px-4 py-3 text-xs sm:text-sm font-bold transition cursor-pointer"
+                        title="Unblock this profile"
+                      >
+                        {blockLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
+                        <span>Unblock</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setBlockModalOpen(true)}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 px-4 py-3 text-xs sm:text-sm font-semibold transition cursor-pointer"
+                        title="Block this profile"
+                      >
+                        <Ban className="w-4 h-4 text-slate-400" />
+                        <span>Block Profile</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReportError(null);
+                        setReportSuccess(false);
+                        setReportModalOpen(true);
+                      }}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-slate-600 hover:text-[#E51F3E] px-4 py-3 text-xs sm:text-sm font-semibold transition cursor-pointer"
+                      title="Report this profile confidentially"
+                    >
+                      <Flag className="w-4 h-4 text-slate-400" />
+                      <span>Report Profile</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1138,6 +1310,190 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
           </div>
         </div>
       </div>
+
+      {/* ── Report Profile Modal ── */}
+      {reportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-rose-100 overflow-hidden my-8 animate-in fade-in zoom-in duration-150 text-left">
+            {/* Modal Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-rose-50 via-white to-amber-50/40 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-rose-100 text-[#E51F3E] flex items-center justify-center">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif text-lg font-bold text-slate-900">Report Profile</h3>
+                  <p className="text-xs text-slate-500">Confidential report to Wonderful Jodi Trust & Safety</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReportModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleSubmitReport} className="p-6 space-y-4">
+              {reportSuccess ? (
+                <div className="py-8 text-center space-y-3">
+                  <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-7 h-7" />
+                  </div>
+                  <h4 className="font-serif text-lg font-bold text-slate-900">Report Submitted</h4>
+                  <p className="text-xs sm:text-sm text-slate-600 max-w-sm mx-auto">
+                    Thank you for helping keep Wonderful Jodi safe. Our Trust & Safety team will review this doctor profile thoroughly. Your identity is 100% confidential.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-[12px] text-amber-900 flex items-start gap-2">
+                    <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Strictly Anonymous:</strong> The reported member will never know who submitted this report.
+                    </span>
+                  </div>
+
+                  {reportError && (
+                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>{reportError}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Select Reason <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={selectedReportReason}
+                      onChange={(e) => setSelectedReportReason(e.target.value)}
+                      required
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 bg-white"
+                    >
+                      <option value="">-- Choose a reason --</option>
+                      {REPORT_REASONS.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                        Additional Details & Evidence
+                      </label>
+                      <span className="text-[11px] text-slate-400">
+                        {reportDescription.length} / 1000
+                      </span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      maxLength={1000}
+                      value={reportDescription}
+                      onChange={(e) => setReportDescription(e.target.value)}
+                      placeholder="Please provide any specific information or context (e.g. mismatched medical council registration, suspicious demands, impersonation)..."
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-end gap-3">
+                    <button
+                      type="button"
+                      disabled={reportSubmitting}
+                      onClick={() => setReportModalOpen(false)}
+                      className="px-5 py-2.5 rounded-full border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-100 transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={reportSubmitting || !selectedReportReason}
+                      className="px-6 py-2.5 rounded-full bg-[#E51F3E] hover:bg-[#CC1432] text-white text-xs font-bold shadow-xs transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      {reportSubmitting ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Submitting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Flag className="w-3.5 h-3.5" />
+                          <span>Submit Report</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Block Profile Confirmation Modal ── */}
+      {blockModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-rose-100 overflow-hidden animate-in fade-in zoom-in duration-150 text-left">
+            <div className="p-6 space-y-4 text-center">
+              <div className="w-14 h-14 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                <Ban className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-serif text-lg font-bold text-slate-900">
+                  Block {profile.displayName}?
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  Are you sure you want to block this profile?
+                </p>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-left text-xs text-slate-600 space-y-2">
+                <p className="font-bold text-slate-800">When you block this profile:</p>
+                <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                  <li>They will no longer appear in your search results.</li>
+                  <li>They cannot message you or view your updates.</li>
+                  <li>They will not be recommended to you.</li>
+                  <li>You can unblock them at any time from your Account Settings.</li>
+                </ul>
+              </div>
+
+              <div className="pt-2 flex items-center justify-center gap-3">
+                <button
+                  type="button"
+                  disabled={blockLoading}
+                  onClick={() => setBlockModalOpen(false)}
+                  className="px-5 py-2.5 rounded-full border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={blockLoading}
+                  onClick={handleBlockProfile}
+                  className="px-6 py-2.5 rounded-full bg-[#E51F3E] hover:bg-[#CC1432] text-white text-xs font-bold shadow-xs transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {blockLoading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Blocking...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Ban className="w-3.5 h-3.5" />
+                      <span>Block Profile</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

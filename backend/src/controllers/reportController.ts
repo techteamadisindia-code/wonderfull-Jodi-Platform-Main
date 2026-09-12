@@ -19,6 +19,7 @@ export async function submitReport(req: AuthRequest, res: Response, next: NextFu
     }
 
     let targetUserId = reportedUserId;
+    let targetProfileId: any = undefined;
 
     // If profileId was supplied instead of reportedUserId, resolve target user from profile
     if (!targetUserId && profileId) {
@@ -61,10 +62,19 @@ export async function submitReport(req: AuthRequest, res: Response, next: NextFu
       });
     }
 
+    if (!profileId && targetUserId) {
+      const p = await Profile.findOne({ user: targetUserId }).select('_id');
+      if (p) {
+        targetProfileId = p._id;
+      }
+    } else if (profileId && mongoose.Types.ObjectId.isValid(profileId)) {
+      targetProfileId = profileId;
+    }
+
     const report = await Report.create({
       reporter: reporterId,
       reportedUser: targetUserId,
-      reportedProfile: profileId && mongoose.Types.ObjectId.isValid(profileId) ? profileId : undefined,
+      reportedProfile: targetProfileId,
       reason: String(reason).trim(),
       details: (details || description || '').trim(),
       description: (description || details || '').trim(),
@@ -83,3 +93,25 @@ export async function submitReport(req: AuthRequest, res: Response, next: NextFu
     next(error);
   }
 }
+
+export async function getMyReports(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const reporterId = req.user?.userId || (req.user as any)?._id;
+    if (!reporterId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    const reports = await Report.find({ reporter: reporterId })
+      .sort({ createdAt: -1 })
+      .select('reason description details status actionTaken targetType createdAt updatedAt resolvedAt')
+      .lean();
+
+    res.json({
+      success: true,
+      data: reports,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+

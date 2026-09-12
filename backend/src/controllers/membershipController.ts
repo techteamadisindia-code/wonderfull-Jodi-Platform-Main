@@ -216,7 +216,40 @@ export const plans: MembershipPlanConfig[] = [
  */
 export async function getMembershipPlans(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    // Optionally return plans
+    const dbPlans = await MembershipPlan.find({ isActive: true }).sort({ displayOrder: 1, createdAt: 1 });
+    if (dbPlans && dbPlans.length > 0) {
+      const formatted = dbPlans.map((p) => {
+        const raw = p.toObject ? p.toObject() : p;
+        const finalPrice = raw.discountedPrice !== undefined && raw.discountedPrice !== null
+          ? raw.discountedPrice
+          : (raw.originalPrice ?? raw.price ?? 0);
+        const origPrice = raw.originalPrice ?? raw.price ?? finalPrice;
+        const discountPct = raw.seasonalDiscount ||
+          (origPrice > finalPrice && origPrice > 0
+            ? Math.round(((origPrice - finalPrice) / origPrice) * 100)
+            : 0);
+
+        return {
+          ...raw,
+          _id: raw._id,
+          id: String(raw._id),
+          key: raw.key || raw.slug.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase(),
+          planId: raw.planId || `plan_${raw.slug}`,
+          amount: finalPrice,
+          price: `₹${finalPrice.toLocaleString('en-IN')}`,
+          originalPrice: origPrice,
+          discountedPrice: finalPrice,
+          originalPriceFormatted: `₹${origPrice.toLocaleString('en-IN')}`,
+          discountedPriceFormatted: `₹${finalPrice.toLocaleString('en-IN')}`,
+          discountPercent: discountPct,
+          duration: raw.billingPeriod || (raw.durationMonths ? `${raw.durationMonths} Months` : 'Forever Free'),
+          sortOrder: raw.displayOrder || 1,
+        };
+      });
+      return res.json({ success: true, data: formatted });
+    }
+
+    // Fallback to in-memory plans if database has not yet seeded
     res.json({ success: true, data: plans });
   } catch (error) {
     next(error);
@@ -224,9 +257,69 @@ export async function getMembershipPlans(req: AuthRequest, res: Response, next: 
 }
 
 /**
+ * Helper to dynamically look up a plan from MongoDB (or fallback in-memory plans)
+ */
+export async function findPlanDynamic(targetKey: string): Promise<any> {
+  if (!targetKey) return null;
+  const str = String(targetKey).trim();
+  const query: any[] = [
+    { slug: str.toLowerCase() },
+    { key: str.toUpperCase() },
+    { planId: str },
+    { name: new RegExp(`^${str}$`, 'i') },
+  ];
+  if (str.match(/^[0-9a-fA-F]{24}$/)) {
+    query.push({ _id: str });
+  }
+  // Support legacy aliases
+  if (str === 'PREMIUM') query.push({ slug: 'doctor-connect' }, { slug: 'premium' });
+  if (str === 'PREMIUM_VIP') query.push({ slug: 'premium-match' }, { slug: 'premium' });
+  if (str === 'VVIP') query.push({ slug: 'exclusive-concierge' });
+
+  const dbPlan = await MembershipPlan.findOne({ $or: query, isActive: true });
+  if (dbPlan) {
+    const raw = dbPlan.toObject ? dbPlan.toObject() : dbPlan;
+    const finalAmount = raw.discountedPrice !== undefined && raw.discountedPrice !== null
+      ? raw.discountedPrice
+      : (raw.originalPrice ?? raw.price ?? 0);
+    return {
+      ...raw,
+      _id: raw._id,
+      id: String(raw._id),
+      key: raw.key || raw.slug.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase(),
+      planId: raw.planId || `plan_${raw.slug}`,
+      amount: finalAmount,
+      price: `₹${finalAmount.toLocaleString('en-IN')}`,
+      duration: raw.billingPeriod || (raw.durationMonths ? `${raw.durationMonths} Months` : 'Forever Free'),
+      durationDays: raw.durationDays || (raw.durationMonths ? raw.durationMonths * 30 : 90),
+      contactRequestLimit: raw.contactRequestLimit ?? 0,
+      isUnlimitedContact: Boolean(raw.isUnlimitedContact),
+    };
+  }
+
+  // Fallback to static in-memory plans
+  return (
+    plans.find(
+      (item) =>
+        item.key.toLowerCase() === str.toLowerCase() ||
+        item.slug.toLowerCase() === str.toLowerCase() ||
+        item.planId.toLowerCase() === str.toLowerCase() ||
+        item.name.toLowerCase() === str.toLowerCase() ||
+        (str === 'PREMIUM' && item.slug === 'doctor-connect') ||
+        (str === 'PREMIUM_VIP' && item.slug === 'premium-match') ||
+        (str === 'VVIP' && item.slug === 'exclusive-concierge')
+    ) || null
+  );
+}
+
+/**
  * Helper to get contact credit limit for a plan
  */
-function getContactCreditLimit(planKeyOrSlug: string): number {
+function getContactCreditLimit(planKeyOrSlug: string, dynamicPlan?: any): number {
+  if (dynamicPlan) {
+    if (dynamicPlan.isUnlimitedContact || dynamicPlan.contactRequestLimit === -1) return 9999;
+    return dynamicPlan.contactRequestLimit || 0;
+  }
   const p = plans.find(
     (item) =>
       item.key.toLowerCase() === planKeyOrSlug.toLowerCase() ||
@@ -260,8 +353,8 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
       });
     }
 
-    const { planKey, slug } = req.body;
-    const targetKey = planKey || slug;
+    const { planKey, slug, planId, id } = req.body;
+    const targetKey = planKey || slug || planId || id;
     if (!targetKey) {
       return res.status(400).json({
         success: false,
@@ -269,17 +362,7 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
       });
     }
 
-    const plan = plans.find(
-      (item) =>
-        item.key.toLowerCase() === String(targetKey).toLowerCase() ||
-        item.slug.toLowerCase() === String(targetKey).toLowerCase() ||
-        item.planId.toLowerCase() === String(targetKey).toLowerCase() ||
-        item.name.toLowerCase() === String(targetKey).toLowerCase() ||
-        // Support legacy plan aliases
-        (targetKey === 'PREMIUM' && item.slug === 'doctor-connect') ||
-        (targetKey === 'PREMIUM_VIP' && item.slug === 'premium-match') ||
-        (targetKey === 'VVIP' && item.slug === 'exclusive-concierge')
-    );
+    const plan = await findPlanDynamic(targetKey);
 
     if (!plan) {
       return res.status(400).json({
@@ -501,7 +584,7 @@ export async function verifyPayment(req: AuthRequest, res: Response, next: NextF
     });
 
     const targetPlanKey = planKey || payment?.metadata?.planKey || 'PREMIUM';
-    const plan = plans.find((p) => p.key === targetPlanKey) || plans[1];
+    const plan = (await findPlanDynamic(targetPlanKey)) || plans.find((p) => p.key === targetPlanKey) || plans[1];
     const durationDays = plan.durationDays || (targetPlanKey === 'PREMIUM_VIP' ? 180 : 90);
     const expiryDate = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
 

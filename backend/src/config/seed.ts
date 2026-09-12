@@ -3,11 +3,15 @@ import { User } from '../models/User';
 import { Profile } from '../models/Profile';
 import { Registration } from '../models/Registration';
 import { seedMasterDataIfEmpty } from '../services/masterDataImporter';
+import { MembershipPlan } from '../models/MembershipPlan';
 
 export async function seedInitialData() {
   try {
     // Ensure all location & community master data is seeded and up to date
     await seedMasterDataIfEmpty();
+
+    // Ensure all dynamic membership plans are seeded
+    await seedMembershipPlansIfEmpty();
 
     const userCount = await User.countDocuments();
     let usersList: any[] = [];
@@ -1154,3 +1158,230 @@ export async function seedInitialData() {
     console.error('Error during database seed:', error);
   }
 }
+
+/**
+ * Ensures all dynamic membership plans exist in MongoDB.
+ * If empty, seeds the 5 standard matrimonial plans with complete pricing and promotional metadata.
+ */
+export async function seedMembershipPlansIfEmpty() {
+  try {
+    const existingCount = await MembershipPlan.countDocuments();
+    if (existingCount > 0) {
+      // Ensure any existing plan has originalPrice / discountedPrice properly populated
+      const plans = await MembershipPlan.find();
+      for (const p of plans) {
+        let changed = false;
+        if (p.originalPrice === undefined || p.originalPrice === null) {
+          p.originalPrice = p.price || 0;
+          changed = true;
+        }
+        if (p.discountedPrice === undefined || p.discountedPrice === null) {
+          p.discountedPrice = p.price || 0;
+          changed = true;
+        }
+        if (!p.billingPeriod) {
+          p.billingPeriod = p.durationMonths ? `${p.durationMonths} Months` : 'Forever Free';
+          changed = true;
+        }
+        if (!p.durationDays) {
+          p.durationDays = p.durationMonths ? p.durationMonths * 30 : 3650;
+          changed = true;
+        }
+        if (changed) {
+          await p.save();
+        }
+      }
+      return;
+    }
+
+    console.log('Seeding initial dynamic membership plans...');
+    const defaultPlans = [
+      {
+        name: 'Free',
+        slug: 'free',
+        key: 'FREE',
+        planId: 'plan_free',
+        description: 'Explore basic doctor profiles and create your professional matrimonial profile for free.',
+        originalPrice: 0,
+        discountedPrice: 0,
+        price: 0,
+        currency: 'INR',
+        billingPeriod: 'Forever Free',
+        durationDays: 3650,
+        durationMonths: null,
+        profileViewLimit: 'limited',
+        contactRequestLimit: 0,
+        isUnlimitedContact: false,
+        fairUsageEnabled: false,
+        features: [
+          'Limited profile browsing',
+          'Create and manage profile',
+          'Receive profile interest requests',
+          'Basic search',
+          'Shortlist profiles',
+          'Platform messaging where allowed',
+          'Contact details remain hidden',
+        ],
+        isActive: true,
+        isPopular: false,
+        displayOrder: 1,
+        ctaText: 'Continue Free',
+        ctaAction: 'register',
+        isSeasonalOffer: false,
+      },
+      {
+        name: 'Doctor Connect',
+        slug: 'doctor-connect',
+        key: 'DOCTOR_CONNECT',
+        planId: 'plan_doctor_connect',
+        description: 'Direct doctor connections with 25 verified contact requests and unlimited browsing.',
+        originalPrice: 7999,
+        discountedPrice: 5999,
+        price: 5999,
+        currency: 'INR',
+        billingPeriod: '3 Months',
+        durationDays: 90,
+        durationMonths: 3,
+        profileViewLimit: 'unlimited',
+        contactRequestLimit: 25,
+        isUnlimitedContact: false,
+        fairUsageEnabled: false,
+        features: [
+          'Unlimited doctor profile browsing',
+          '25 Contact Requests',
+          'Verified Doctor Profiles',
+          'Advanced Search',
+          'Unlimited Shortlisting',
+          'Direct Platform Messaging',
+          'Profile Privacy Controls',
+          'Secure Contact Request System',
+        ],
+        isActive: true,
+        isPopular: false,
+        displayOrder: 2,
+        ctaText: 'Choose Doctor Connect',
+        ctaAction: 'order',
+        isSeasonalOffer: false,
+      },
+      {
+        name: 'Premium',
+        slug: 'premium',
+        key: 'PREMIUM',
+        planId: 'plan_premium',
+        description: 'Best plan for serious matrimonial matches with high response rate.',
+        originalPrice: 4999,
+        discountedPrice: 2999,
+        price: 2999,
+        currency: 'INR',
+        billingPeriod: '3 Months',
+        durationDays: 90,
+        durationMonths: 3,
+        profileViewLimit: 'unlimited',
+        contactRequestLimit: 60,
+        isUnlimitedContact: false,
+        fairUsageEnabled: false,
+        features: [
+          'Unlimited Doctor Profile Views',
+          'Send Unlimited Interests',
+          'Priority Search Ranking',
+          'Chat with Matches',
+          'View Contact Details',
+          '60 Contact Requests',
+          'Verified Doctor Badge',
+          'Priority Matching Support',
+        ],
+        isActive: true,
+        isPopular: true,
+        displayOrder: 3,
+        seasonalLabel: 'Wedding Season Offer',
+        seasonalDiscount: 40,
+        isSeasonalOffer: true,
+        badge: '⭐ MOST POPULAR',
+        ctaText: 'Choose Premium',
+        ctaAction: 'order',
+      },
+      {
+        name: 'Priority Matchmaking',
+        slug: 'priority-matchmaking',
+        key: 'PRIORITY_MATCHMAKING',
+        planId: 'plan_priority_matchmaking',
+        description: 'Personalized assisted matchmaking with dedicated relationship manager and curated introductions.',
+        originalPrice: 32999,
+        discountedPrice: 24999,
+        price: 24999,
+        currency: 'INR',
+        billingPeriod: '6 Months',
+        durationDays: 180,
+        durationMonths: 6,
+        profileViewLimit: 'unlimited',
+        contactRequestLimit: 120,
+        isUnlimitedContact: false,
+        fairUsageEnabled: false,
+        features: [
+          'Unlimited Doctor Profile Viewing',
+          '120 Contact Requests',
+          'Dedicated Matchmaking Manager',
+          'Personal Preference Consultation',
+          'Curated Match Recommendations',
+          'AI + Human Compatibility Matching',
+          'Assisted Introductions',
+          'Family Introduction Assistance',
+          'Priority Access',
+          'Confidential Matchmaking Support',
+        ],
+        isActive: true,
+        isPopular: false,
+        displayOrder: 4,
+        badge: '👑 Priority Assisted',
+        ctaText: 'Choose Priority Matchmaking',
+        ctaAction: 'order',
+        isSeasonalOffer: false,
+      },
+      {
+        name: 'Exclusive Concierge',
+        slug: 'exclusive-concierge',
+        key: 'EXCLUSIVE_CONCIERGE',
+        planId: 'plan_exclusive_concierge',
+        description: 'Elite concierge service with senior matchmaking consultant, family coordination, and meeting setup.',
+        originalPrice: 59999,
+        discountedPrice: 49999,
+        price: 49999,
+        currency: 'INR',
+        billingPeriod: '6 Months',
+        durationDays: 180,
+        durationMonths: 6,
+        profileViewLimit: 'unlimited',
+        contactRequestLimit: -1,
+        isUnlimitedContact: true,
+        fairUsageEnabled: true,
+        features: [
+          'Unlimited Doctor Profile Viewing',
+          'Unlimited Contact Access*',
+          'Senior Matchmaking Consultant',
+          'Personally Curated Matches',
+          'AI + Human Compatibility Assessment',
+          'Family Preference Consultation',
+          'Introduction Coordination',
+          'Video / Face-to-Face Coordination',
+          'Family-to-Family Assistance',
+          'Confidentiality & Privacy Management',
+          'Continuous Match Refinement',
+        ],
+        isActive: true,
+        isPopular: false,
+        displayOrder: 5,
+        badge: '💎 Premium Concierge',
+        ctaText: 'Talk to Our Matchmaking Team',
+        ctaAction: 'contact',
+        disclaimer: '*Unlimited Contact Access is subject to Fair Usage Policy and member consent.',
+        isSeasonalOffer: false,
+      },
+    ];
+
+    await MembershipPlan.insertMany(defaultPlans);
+    console.log('Successfully seeded 5 dynamic membership plans into database!');
+  } catch (error) {
+    console.error('Error seeding membership plans:', error);
+  }
+}
+

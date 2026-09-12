@@ -84,6 +84,8 @@ export async function searchProfiles(req: Request, res: Response, next: NextFunc
 
     const activeUsers = await User.find({
       isActive: true,
+      isDeleted: { $ne: true },
+      status: { $nin: ['Suspended', 'Blocked', 'Deleted'] },
       ...(excludedIds.size > 0 ? { _id: { $nin: Array.from(excludedIds) } } : {}),
     }).select('_id');
 
@@ -91,6 +93,8 @@ export async function searchProfiles(req: Request, res: Response, next: NextFunc
 
     const filters: any = {
       user: { $in: activeUserIds },
+      isDeleted: { $ne: true },
+      status: { $nin: ['Suspended', 'Blocked', 'Deleted'] },
     };
 
     // Gender filter (safely match without arbitrary regex)

@@ -68,7 +68,7 @@ export default function ForgotPasswordPage() {
           />
 
           <div className="relative z-10 space-y-4">
-            <Logo size="md" variant="dark" subtitle="Verified Matrimony" />
+            <Logo size="md" variant="dark" subtitle="Doctor Matrimony" />
 
             <div className="pt-2 sm:pt-4">
               <h2 className="font-serif text-xl sm:text-2xl md:text-[26px] lg:text-[28px] font-bold tracking-tight text-white mt-1 leading-tight">

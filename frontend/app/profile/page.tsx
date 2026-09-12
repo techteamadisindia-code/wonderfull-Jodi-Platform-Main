@@ -40,6 +40,7 @@ import {
   ChevronRight,
   Layers,
   CheckSquare,
+  Ban,
 } from 'lucide-react';
 import {
   getMyProfile,
@@ -1131,6 +1132,44 @@ export default function MyProfilePage() {
                     {isDoctorVerified ? 'View' : 'Submit'}
                   </Link>
                 </div>
+              </div>
+            </section>
+
+            {/* Privacy & Safety Controls */}
+            <section
+              id="safety-settings"
+              className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-[#E51F3E]" />
+                  <h3 className="font-serif text-lg font-bold text-[#0F172A]">Privacy & Safety Controls</h3>
+                </div>
+                <Link
+                  href="/profile/blocked"
+                  className="inline-flex items-center gap-1 text-xs font-bold text-[#E51F3E] hover:underline"
+                >
+                  <span>Manage Blocked Profiles</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl bg-rose-50/40 border border-rose-100">
+                <div className="space-y-1">
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Ban className="w-4 h-4 text-[#E51F3E]" />
+                    <span>Blocked Profiles & Unwanted Contact Protection</span>
+                  </span>
+                  <p className="text-xs text-slate-500">
+                    Review or unblock doctor profiles you have blocked. Blocked members cannot view your details, search for you, or send you messages.
+                  </p>
+                </div>
+                <Link
+                  href="/profile/blocked"
+                  className="px-4 py-2 rounded-full bg-white border border-rose-200 text-xs font-bold text-rose-700 hover:bg-rose-50 transition shadow-2xs whitespace-nowrap"
+                >
+                  View Blocked Profiles
+                </Link>
               </div>
             </section>
 

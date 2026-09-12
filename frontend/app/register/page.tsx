@@ -701,16 +701,16 @@ function RegisterForm() {
 
           {/* Top Brand & Message */}
           <div className="relative z-10 space-y-6">
-            <Logo size="lg" variant="dark" subtitle="Verified Matrimony" />
+            <Logo size="lg" variant="dark" subtitle="Doctor Matrimony" />
 
             <div className="space-y-3 pt-2">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/20 border border-rose-500/30 text-[11px] font-bold text-rose-200">
                 <Sparkles className="w-3.5 h-3.5 text-rose-400" />
-                Verified Matrimonial Network
+                Doctor Matrimonial Network
               </span>
 
               <h2 className="font-serif text-2xl sm:text-3xl lg:text-[32px] font-bold text-white leading-tight">
-                Create Your Free Verified Matrimonial Profile
+                Create Your Free Doctor Matrimonial Profile
               </h2>
 
               <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">

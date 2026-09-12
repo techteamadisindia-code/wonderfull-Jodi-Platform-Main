@@ -136,7 +136,23 @@ export interface IProfile extends Document {
     kundaliVisibility?: 'all' | 'members_only' | 'hidden';
   };
   verificationStatus: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
+  status: 'Active' | 'Under Review' | 'Suspended' | 'Blocked' | 'Deleted';
+  statusReason?: string;
+  statusChangedAt?: Date;
+  statusChangedBy?: mongoose.Types.ObjectId;
+  isDeleted: boolean;
+  deletedAt?: Date;
+  deletedBy?: mongoose.Types.ObjectId;
+  deletionReason?: string;
   lastActiveAt: Date;
+  adminNotes?: Array<{
+    _id?: mongoose.Types.ObjectId;
+    note: string;
+    adminId?: mongoose.Types.ObjectId;
+    adminEmail: string;
+    adminName?: string;
+    createdAt: Date;
+  }>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -323,7 +339,29 @@ const profileSchema = new Schema<IProfile>(
       default: 'UNVERIFIED',
       index: true,
     },
+    status: {
+      type: String,
+      enum: ['Active', 'Under Review', 'Suspended', 'Blocked', 'Deleted'],
+      default: 'Active',
+      index: true,
+    },
+    statusReason: { type: String, trim: true },
+    statusChangedAt: { type: Date },
+    statusChangedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date },
+    deletedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    deletionReason: { type: String, trim: true },
     lastActiveAt: { type: Date, default: Date.now },
+    adminNotes: [
+      {
+        note: { type: String, required: true, trim: true },
+        adminId: { type: Schema.Types.ObjectId, ref: 'User' },
+        adminEmail: { type: String, required: true, trim: true },
+        adminName: { type: String, trim: true },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );

@@ -95,10 +95,32 @@ export async function sendMessage(req: AuthRequest, res: Response, next: NextFun
       return res.status(400).json({ success: false, message: 'Cannot message yourself' });
     }
 
+    // Verify sender is active and not restricted
+    const senderUser = await User.findById(senderId);
+    if (
+      !senderUser ||
+      !senderUser.isActive ||
+      ['Suspended', 'Blocked', 'Deleted'].includes(senderUser.status as any) ||
+      senderUser.isDeleted
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account is currently restricted from messaging due to account status.',
+      });
+    }
+
     // Verify recipient user exists and is active
     const receiverUser = await User.findById(actualReceiverId);
-    if (!receiverUser || !receiverUser.isActive) {
-      return res.status(404).json({ success: false, message: 'Recipient not found or account is deactivated' });
+    if (
+      !receiverUser ||
+      !receiverUser.isActive ||
+      ['Suspended', 'Blocked', 'Deleted'].includes(receiverUser.status as any) ||
+      receiverUser.isDeleted
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recipient not found or account is deactivated/restricted.',
+      });
     }
 
     // Check if blocked
@@ -109,7 +131,10 @@ export async function sendMessage(req: AuthRequest, res: Response, next: NextFun
       ],
     });
     if (isBlocked) {
-      return res.status(403).json({ success: false, message: 'Cannot message this member' });
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot message this member as communication is blocked.',
+      });
     }
 
     // ─── 1. CHAT ACCESS CHECK: ACCEPTED INTEREST REQUIRED ───

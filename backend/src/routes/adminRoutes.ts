@@ -17,10 +17,13 @@ import {
   getProfiles,
   getProfileById,
   updateProfile,
+  addProfileAdminNote,
   getVerifications,
   getVerificationById,
   approveVerification,
   rejectVerification,
+  approveAllUserVerifications,
+  rejectAllUserVerifications,
   getMemberships,
   updateMembership,
   getPayments,
@@ -38,9 +41,18 @@ import {
   getMessageStats,
   getReports,
   getReportById,
+  getReportsByProfile,
+  updateReportStatus,
   resolveReport,
   dismissReport,
   blockUserFromReport,
+  updateProfileSafetyStatus,
+  sendProfileWarning,
+  suspendProfile,
+  blockProfileAdmin,
+  deleteProfileAdmin,
+  getSafetyStats,
+  getSafetyAuditLogs,
   getNotifications,
   getBroadcastById,
   getRecipientCount,
@@ -58,6 +70,14 @@ import {
   updateInquiryStatus,
   getAuditLogs,
 } from '../controllers/adminController';
+import {
+  getAllPlans,
+  getPlanById,
+  createPlan,
+  updatePlan,
+  deletePlan,
+  togglePlanStatus,
+} from '../controllers/membershipPlanAdminController';
 
 const router = Router();
 
@@ -100,6 +120,8 @@ router.delete('/users/:id', deleteUser);
 router.get('/profiles', getProfiles);
 router.get('/profiles/:id', getProfileById);
 router.put('/profiles/:id', updateProfile);
+router.patch('/profiles/:id', updateProfile);
+router.post('/profiles/:id/notes', addProfileAdminNote);
 
 // 4. Verifications
 router.get('/verifications', getVerifications);
@@ -108,10 +130,30 @@ router.put('/verifications/:id/approve', approveVerification);
 router.post('/verifications/:id/approve', approveVerification);
 router.put('/verifications/:id/reject', rejectVerification);
 router.post('/verifications/:id/reject', rejectVerification);
+router.put('/verifications/user/:userId/approve-all', approveAllUserVerifications);
+router.put('/verifications/user/:userId/reject-all', rejectAllUserVerifications);
 
-// 5. Memberships / Subscriptions
-router.get('/memberships', getMemberships);
-router.put('/memberships/:id', updateMembership);
+// 5. Dynamic Membership Plan Management
+router.get('/memberships', (req, res, next) => {
+  if (req.query.type === 'subscriptions') {
+    return getMemberships(req, res, next);
+  }
+  return getAllPlans(req, res, next);
+});
+router.post('/memberships', createPlan);
+router.get('/memberships/:id', getPlanById);
+router.put('/memberships/:id', (req, res, next) => {
+  if (req.query.type === 'subscriptions') {
+    return updateMembership(req, res, next);
+  }
+  return updatePlan(req, res, next);
+});
+router.delete('/memberships/:id', deletePlan);
+router.patch('/memberships/:id/status', togglePlanStatus);
+
+// User Subscriptions dedicated routes
+router.get('/subscriptions', getMemberships);
+router.put('/subscriptions/:id', updateMembership);
 
 // 6. Payments
 import {
@@ -154,11 +196,28 @@ router.post('/messages/reset-demo', resetDemoTestMessages);
 // 8. Safety & Reports
 router.get('/reports', getReports);
 router.get('/reports/:id', getReportById);
+router.get('/reports/profile/:profileId', getReportsByProfile);
+router.patch('/reports/:id/status', updateReportStatus);
 router.put('/reports/:id/resolve', resolveReport);
+router.post('/reports/:id/resolve', resolveReport);
 router.patch('/reports/:id/resolve', resolveReport);
 router.put('/reports/:id/dismiss', dismissReport);
+router.post('/reports/:id/dismiss', dismissReport);
 router.patch('/reports/:id/dismiss', dismissReport);
 router.post('/reports/:id/block-user', blockUserFromReport);
+
+// Profile Safety & Moderation Actions
+router.patch('/profiles/:id/status', updateProfileSafetyStatus);
+router.post('/profiles/:id/warning', sendProfileWarning);
+router.post('/profiles/:id/suspend', suspendProfile);
+router.post('/profiles/:id/block', blockProfileAdmin);
+router.delete('/profiles/:id', deleteProfileAdmin);
+
+// Safety Stats & Audit History
+router.get('/safety/stats', getSafetyStats);
+router.get('/safety/audit-logs', getSafetyAuditLogs);
+router.get('/safety/audit-logs/:profileId', getSafetyAuditLogs);
+
 
 // 9. Broadcast Notifications
 router.get('/notifications', getNotifications);

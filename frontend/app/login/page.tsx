@@ -47,7 +47,7 @@ function LoginForm() {
         />
 
         <div className="relative z-10 space-y-4">
-          <Logo size="md" variant="dark" subtitle="Verified Matrimony" />
+          <Logo size="md" variant="dark" subtitle="Doctor Matrimony" />
 
           <h2 className="font-serif text-xl sm:text-2xl md:text-[26px] lg:text-[28px] font-bold tracking-tight text-white mt-4 sm:mt-6 md:mt-8 leading-tight">
             Welcome back to the sweet journey of finding your other half

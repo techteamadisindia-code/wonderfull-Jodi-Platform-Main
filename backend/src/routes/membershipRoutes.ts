@@ -9,7 +9,9 @@ import {
 
 const router = Router();
 
-router.get('/', requireAuth, getMembershipPlans);
+// Public: Fetch active membership plans
+router.get('/', getMembershipPlans);
+router.get('/plans', getMembershipPlans);
 router.get('/status', requireAuth, getMyMembershipStatus);
 router.get('/my-status', requireAuth, getMyMembershipStatus);
 router.post('/create-order', requireAuth, createOrder);

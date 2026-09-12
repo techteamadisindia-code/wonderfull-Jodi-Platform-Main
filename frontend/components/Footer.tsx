@@ -31,7 +31,7 @@ export function Footer() {
             <Logo
               size="md"
               variant="dark"
-              subtitle="VERIFIED MATRIMONY"
+              subtitle="DOCTOR MATRIMONY"
               imageClassName="w-8 h-8 sm:w-9 sm:h-9"
               textClassName="text-base sm:text-[20px]"
             />

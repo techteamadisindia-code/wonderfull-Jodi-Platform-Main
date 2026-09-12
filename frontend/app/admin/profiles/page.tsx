@@ -46,6 +46,7 @@ import {
   validateMedicalQualification,
 } from '../../../lib/doctorConstants';
 import { DobInput } from '../../../components/DobInput';
+import AdminEditProfileModal from '../../../components/admin/AdminEditProfileModal';
 
 export default function AdminProfilesPage() {
   const [profiles, setProfiles] = useState<AdminProfileItem[]>([]);
@@ -171,7 +172,7 @@ export default function AdminProfilesPage() {
   };
 
   // Helper for KYC badge
-  const renderKycBadge = (status: string) => {
+  const renderKycBadge = (status?: string) => {
     switch (status) {
       case 'VERIFIED':
         return (
@@ -580,13 +581,13 @@ export default function AdminProfilesPage() {
                       {/* 7. Actions */}
                       <td className="py-3.5 px-4 sm:px-5 align-middle text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5 justify-end">
-                          <button
-                            onClick={() => setSelectedProfile(profile)}
+                          <Link
+                            href={`/admin/profiles/${profile._id}`}
                             className="w-8 h-8 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 hover:border-slate-300 text-slate-600 hover:text-slate-900 transition flex items-center justify-center shadow-2xs active:scale-95"
-                            title="View Profile Preview"
+                            title="View Complete Admin Profile Preview"
                           >
                             <Eye className="w-3.5 h-3.5" />
-                          </button>
+                          </Link>
                           <button
                             onClick={() => setEditingProfile({ ...profile })}
                             className="w-8 h-8 rounded-lg border border-red-200/80 bg-red-50/50 hover:bg-red-100/70 text-[#E51F3E] hover:text-[#C81432] transition flex items-center justify-center shadow-2xs active:scale-95"
@@ -1012,281 +1013,23 @@ export default function AdminProfilesPage() {
       )}
 
       {/* ========================================================================= */}
-      {/* EDIT PROFILE MODAL                                                        */}
+      {/* EDIT PROFILE MODAL (SECURE & COMPLETE 5-SECTION POPUP)                     */}
       {/* ========================================================================= */}
       {editingProfile && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 animate-fade-in"
-          onClick={() => setEditingProfile(null)}
-        >
-          <div
-            className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-scale-up"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <form onSubmit={handleSaveEdit} className="flex flex-col h-full overflow-hidden">
-              {/* Header */}
-              <div className="p-5 sm:p-6 border-b border-slate-200 bg-slate-50/80 flex items-center justify-between shrink-0">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    Edit Profile: {editingProfile.displayName}
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Update matrimonial directory profile details and verification status
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setEditingProfile(null)}
-                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Form Body Scroll Area */}
-              <div className="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Display Name *</label>
-                    <input
-                      type="text"
-                      value={editingProfile.displayName || ''}
-                      onChange={(e) =>
-                        setEditingProfile({ ...editingProfile, displayName: e.target.value })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Gender *</label>
-                    <select
-                      value={editingProfile.gender || ''}
-                      onChange={(e) =>
-                        setEditingProfile({ ...editingProfile, gender: e.target.value })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                      required
-                    >
-                      <option value="Female">Female</option>
-                      <option value="Male">Male</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Medical Qualification *</label>
-                    <select
-                      value={editingProfile.education || ''}
-                      onChange={(e) =>
-                        setEditingProfile({
-                          ...editingProfile,
-                          education: e.target.value,
-                          degree: editingProfile.degree || e.target.value,
-                        })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                    >
-                      <option value="" disabled>Select medical qualification</option>
-                      {DOCTOR_QUALIFICATIONS.map((q) => (
-                        <option key={q} value={q}>
-                          {q}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Medical Specialization *</label>
-                    <select
-                      value={editingProfile.profession || ''}
-                      onChange={(e) =>
-                        setEditingProfile({ ...editingProfile, profession: e.target.value })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                      required
-                    >
-                      <option value="" disabled>Select medical specialization</option>
-                      {DOCTOR_SPECIALIZATIONS.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <DobInput
-                      label="Date of Birth"
-                      value={editingProfile.dob ? new Date(editingProfile.dob).toISOString().split('T')[0] : ''}
-                      required={false}
-                      onChange={(isoDate) => {
-                        setEditingProfile({ ...editingProfile, dob: isoDate });
-                      }}
-                    />
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <label className="block font-semibold text-slate-700 mb-1">Degree / College / Institution Details</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. MBBS, MD Cardiology (AIIMS)"
-                      value={editingProfile.degree || ''}
-                      onChange={(e) =>
-                        setEditingProfile({
-                          ...editingProfile,
-                          degree: e.target.value,
-                        })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Company / Workplace</label>
-                    <input
-                      type="text"
-                      value={editingProfile.company || ''}
-                      onChange={(e) =>
-                        setEditingProfile({ ...editingProfile, company: e.target.value })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Annual Income</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. ₹ 40 - 55 Lakhs"
-                      value={editingProfile.annualIncome || ''}
-                      onChange={(e) =>
-                        setEditingProfile({ ...editingProfile, annualIncome: e.target.value })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">City *</label>
-                    <input
-                      type="text"
-                      value={editingProfile.city || ''}
-                      onChange={(e) =>
-                        setEditingProfile({ ...editingProfile, city: e.target.value })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">State / Province</label>
-                    <input
-                      type="text"
-                      value={editingProfile.state || ''}
-                      onChange={(e) =>
-                        setEditingProfile({ ...editingProfile, state: e.target.value })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Religion</label>
-                    <input
-                      type="text"
-                      value={editingProfile.religion || ''}
-                      onChange={(e) =>
-                        setEditingProfile({ ...editingProfile, religion: e.target.value })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Caste / Subcaste</label>
-                    <input
-                      type="text"
-                      value={editingProfile.caste || ''}
-                      onChange={(e) =>
-                        setEditingProfile({ ...editingProfile, caste: e.target.value })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Height</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. 5ft 8in"
-                      value={editingProfile.height || ''}
-                      onChange={(e) =>
-                        setEditingProfile({ ...editingProfile, height: e.target.value })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">KYC Verification Status</label>
-                    <select
-                      value={editingProfile.verificationStatus || 'UNVERIFIED'}
-                      onChange={(e) =>
-                        setEditingProfile({ ...editingProfile, verificationStatus: e.target.value })
-                      }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                    >
-                      <option value="UNVERIFIED">UNVERIFIED</option>
-                      <option value="PENDING">PENDING REVIEW</option>
-                      <option value="VERIFIED">VERIFIED</option>
-                      <option value="REJECTED">REJECTED</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">About Bio Statement</label>
-                  <textarea
-                    rows={4}
-                    value={editingProfile.about || ''}
-                    onChange={(e) =>
-                      setEditingProfile({ ...editingProfile, about: e.target.value })
-                    }
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white"
-                    placeholder="Brief description about lifestyle, interests, and partner preferences..."
-                  />
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="p-4 border-t border-slate-200 bg-slate-50/80 flex items-center justify-end gap-2.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setEditingProfile(null)}
-                  className="px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saveLoading}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#E51F3E] hover:bg-[#C81432] text-white font-bold text-xs shadow-xs shadow-red-500/25 transition active:scale-95 disabled:opacity-50"
-                >
-                  {saveLoading ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Saving Changes...</span>
-                    </>
-                  ) : (
-                    <span>Save Profile Changes</span>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <AdminEditProfileModal
+          isOpen={Boolean(editingProfile)}
+          onClose={() => setEditingProfile(null)}
+          profile={editingProfile}
+          onSuccess={(updated) => {
+            setProfiles((prev) =>
+              prev.map((p) => (p._id === updated._id ? { ...p, ...updated } : p))
+            );
+            if (selectedProfile?._id === updated._id) {
+              setSelectedProfile((prev) => (prev ? { ...prev, ...updated } : null));
+            }
+            setNotice({ type: 'success', message: 'Profile updated successfully.' });
+          }}
+        />
       )}
     </div>
   );

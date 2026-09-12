@@ -10,6 +10,14 @@ export interface IUser extends Document {
   verified: boolean;
   verificationStatus: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
   isActive: boolean;
+  status: 'Active' | 'Under Review' | 'Suspended' | 'Blocked' | 'Deleted';
+  isDeleted: boolean;
+  deletedAt?: Date;
+  deletedBy?: mongoose.Types.ObjectId;
+  deletionReason?: string;
+  suspensionReason?: string;
+  suspendedAt?: Date;
+  suspendedBy?: mongoose.Types.ObjectId;
   termsAccepted: boolean;
   termsVersion: string;
   termsAcceptedAt?: Date;
@@ -32,6 +40,19 @@ const userSchema = new Schema<IUser>(
       index: true,
     },
     isActive: { type: Boolean, default: true, index: true },
+    status: {
+      type: String,
+      enum: ['Active', 'Under Review', 'Suspended', 'Blocked', 'Deleted'],
+      default: 'Active',
+      index: true,
+    },
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date },
+    deletedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    deletionReason: { type: String, trim: true },
+    suspensionReason: { type: String, trim: true },
+    suspendedAt: { type: Date },
+    suspendedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     termsAccepted: { type: Boolean, default: false },
     termsVersion: { type: String, default: CURRENT_TERMS_VERSION },
     termsAcceptedAt: { type: Date },
@@ -40,3 +61,4 @@ const userSchema = new Schema<IUser>(
 );
 
 export const User = mongoose.models.User || mongoose.model<IUser>('User', userSchema);
+

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   Users,
   Search,
@@ -413,14 +414,14 @@ function AdminUsersContent() {
 
                     {/* Actions */}
                     <td className="py-3.5 px-5 text-right space-x-1.5">
-                      {/* View Details */}
-                      <button
-                        onClick={() => handleViewUser(user._id)}
-                        className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition"
-                        title="View Full User Details"
+                      {/* View Profile */}
+                      <Link
+                        href={`/admin/profiles/${user._id}`}
+                        className="inline-flex p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition"
+                        title="View Complete Admin Profile Details"
                       >
                         <Eye className="w-3.5 h-3.5" />
-                      </button>
+                      </Link>
 
                       {/* Deactivate / Reactivate Action */}
                       {user.isActive ? (

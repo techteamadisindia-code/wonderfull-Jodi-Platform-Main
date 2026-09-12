@@ -432,9 +432,9 @@ textarea:focus-visible, button:focus-visible {
   transform: scale(0.97);
 }
 
-/* ─── Hero Couple Composition (Clean Transparent Cutout) ─── */
+/* ─── Hero Couple Composition (Clean Transparent Cutout - No Shadows) ─── */
 
-/* Outer wrapper: natural positioning without any hard circular frame */
+/* Outer wrapper: natural positioning without any hard circular frame or shadow */
 .hero-couple-wrapper {
   position: relative;
   width: 100%;
@@ -442,6 +442,10 @@ textarea:focus-visible, button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: transparent !important;
+  box-shadow: none !important;
+  filter: none !important;
+  -webkit-filter: none !important;
 }
 
 /* Layer — Couple transparent cutout image */
@@ -450,7 +454,10 @@ textarea:focus-visible, button:focus-visible {
   z-index: 5;
   width: 100%;
   max-width: 510px;
-  filter: none;
+  filter: none !important;
+  -webkit-filter: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
   overflow: visible;
   pointer-events: auto;
 }
@@ -461,6 +468,20 @@ textarea:focus-visible, button:focus-visible {
   max-height: 600px;
   object-fit: contain;
   display: block;
+  filter: none !important;
+  -webkit-filter: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+.hero-couple-wrapper::before,
+.hero-couple-wrapper::after,
+.hero-couple-img-frame::before,
+.hero-couple-img-frame::after {
+  content: none !important;
+  display: none !important;
+  box-shadow: none !important;
+  filter: none !important;
 }
 
 /* ── Hero close-in petals ───────────────────── */

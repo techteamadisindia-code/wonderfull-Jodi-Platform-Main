@@ -7,10 +7,21 @@ export interface IReport extends Document {
   reason: string;
   details?: string;
   description?: string;
-  status: 'PENDING' | 'RESOLVED' | 'DISMISSED' | 'REJECTED';
+  status: 'PENDING' | 'UNDER_REVIEW' | 'RESOLVED' | 'DISMISSED' | 'REJECTED' | 'ACTION_TAKEN';
   moderator?: mongoose.Types.ObjectId;
+  handledByAdminId?: mongoose.Types.ObjectId;
   resolutionNotes?: string;
-  actionTaken?: 'NONE' | 'RESOLVED' | 'DISMISSED' | 'ACCOUNT_BLOCKED';
+  adminNotes?: string;
+  actionTaken?:
+    | 'NONE'
+    | 'WARNING_SENT'
+    | 'PROFILE_UNDER_REVIEW'
+    | 'SUSPENDED'
+    | 'BLOCKED'
+    | 'DELETED'
+    | 'RESOLVED'
+    | 'DISMISSED'
+    | 'ACCOUNT_BLOCKED';
   targetType?: 'PROFILE' | 'MESSAGE' | 'USER' | 'OTHER';
   messageSnippet?: string;
   resolvedAt?: Date;
@@ -28,15 +39,27 @@ const reportSchema = new Schema<IReport>(
     description: { type: String, trim: true },
     status: {
       type: String,
-      enum: ['PENDING', 'RESOLVED', 'DISMISSED', 'REJECTED'],
+      enum: ['PENDING', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED', 'REJECTED', 'ACTION_TAKEN'],
       default: 'PENDING',
       index: true,
     },
     moderator: { type: Schema.Types.ObjectId, ref: 'User' },
+    handledByAdminId: { type: Schema.Types.ObjectId, ref: 'User' },
     resolutionNotes: { type: String, trim: true },
+    adminNotes: { type: String, trim: true },
     actionTaken: {
       type: String,
-      enum: ['NONE', 'RESOLVED', 'DISMISSED', 'ACCOUNT_BLOCKED'],
+      enum: [
+        'NONE',
+        'WARNING_SENT',
+        'PROFILE_UNDER_REVIEW',
+        'SUSPENDED',
+        'BLOCKED',
+        'DELETED',
+        'RESOLVED',
+        'DISMISSED',
+        'ACCOUNT_BLOCKED',
+      ],
       default: 'NONE',
     },
     targetType: {
@@ -51,3 +74,4 @@ const reportSchema = new Schema<IReport>(
 );
 
 export const Report = mongoose.models.Report || mongoose.model<IReport>('Report', reportSchema);
+

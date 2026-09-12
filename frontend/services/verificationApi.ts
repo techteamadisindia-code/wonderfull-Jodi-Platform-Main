@@ -161,3 +161,32 @@ export async function fetchUserVerifications(): Promise<UserVerificationSummaryR
   const response = await apiClient.get<UserVerificationSummaryResponse>('/verifications/me');
   return response.data;
 }
+
+/**
+ * Approve all pending verification documents for a user
+ */
+export async function approveAllUserVerifications(
+  userId: string,
+  notes?: string
+): Promise<{ success: boolean; data: VerificationItem[]; message: string }> {
+  const response = await apiClient.put<{ success: boolean; data: VerificationItem[]; message: string }>(
+    `/admin/verifications/user/${userId}/approve-all`,
+    { notes }
+  );
+  return response.data;
+}
+
+/**
+ * Reject all pending verification documents for a user
+ */
+export async function rejectAllUserVerifications(
+  userId: string,
+  reason: string,
+  notes?: string
+): Promise<{ success: boolean; data: VerificationItem[]; message: string }> {
+  const response = await apiClient.put<{ success: boolean; data: VerificationItem[]; message: string }>(
+    `/admin/verifications/user/${userId}/reject-all`,
+    { reason, rejectionReason: reason, notes }
+  );
+  return response.data;
+}

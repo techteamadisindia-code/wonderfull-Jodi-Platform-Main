@@ -3,8 +3,8 @@ import type { Metadata } from 'next';
 import { AppLayoutWrapper } from '../components/AppLayoutWrapper';
 
 export const metadata: Metadata = {
-  title: 'Wonderful Jodi - Matrimony for Professionals',
-  description: 'Find your life partner with a premium, secure and trusted matrimonial experience.',
+  title: 'Wonderful Jodi - Doctor Matrimony for Healthcare Professionals',
+  description: 'Find your life partner on India’s premier Doctor Matrimony platform with verified medical professionals and esteemed families.',
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'),
 };
 

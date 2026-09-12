@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
 import { AuthRequest } from '../middleware/authMiddleware';
@@ -33,20 +34,47 @@ import { getFormattedVisitDate } from '../services/visitTrackingService';
 import { detectCompliance } from '../services/complianceDetector';
 
 // Helper for audit logging
-async function logAdminAction(adminEmail: string, action: string, details?: string, targetModel?: string, targetId?: string) {
+async function logAdminAction(
+  adminEmail: string,
+  action: string,
+  details?: string,
+  targetModel?: string,
+  targetId?: string,
+  extraParams?: {
+    adminId?: any;
+    adminName?: string;
+    targetProfileId?: any;
+    targetUserId?: any;
+    previousStatus?: string;
+    newStatus?: string;
+    reason?: string;
+    relatedReportId?: any;
+    metadata?: Record<string, any>;
+  }
+) {
   try {
     await AuditLog.create({
       adminEmail: adminEmail || 'admin@wonderfuljodi.com',
+      adminId: extraParams?.adminId,
+      adminName: extraParams?.adminName,
       action,
       details,
       targetModel,
       targetId,
+      targetProfileId: extraParams?.targetProfileId,
+      targetUserId: extraParams?.targetUserId,
+      previousStatus: extraParams?.previousStatus,
+      newStatus: extraParams?.newStatus,
+      reason: extraParams?.reason,
+      relatedReportId: extraParams?.relatedReportId,
+      metadata: extraParams?.metadata,
       status: 'SUCCESS',
     });
   } catch (err) {
     console.error('Audit logging failed:', err);
   }
 }
+
 
 // 1. Dashboard KPIs & Aggregations
 export async function getDashboardStats(req: AuthRequest, res: Response, next: NextFunction) {
@@ -698,11 +726,171 @@ export async function getProfiles(req: AuthRequest, res: Response, next: NextFun
 
 export async function getProfileById(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const profile = await Profile.findById(req.params.id).populate('user', 'fullName email mobile role isActive');
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid profile or user ID' });
+    }
+
+    // Attempt to locate Profile by Profile ID or User ID
+    let profile = await Profile.findById(id)
+      .populate('currentLocation.countryId', 'name code')
+      .populate('currentLocation.stateId', 'name code')
+      .populate('currentLocation.districtId', 'name')
+      .populate('currentLocation.cityId', 'name type pincode')
+      .populate('nativePlaceDetails.countryId', 'name code')
+      .populate('nativePlaceDetails.stateId', 'name code')
+      .populate('nativePlaceDetails.districtId', 'name')
+      .populate('nativePlaceDetails.cityId', 'name type pincode')
+      .populate('communityDetails.religionId', 'name')
+      .populate('communityDetails.casteId', 'name category')
+      .populate('communityDetails.subCasteId', 'name')
+      .populate('languageDetails.motherTongueId', 'name nativeNames')
+      .populate('languageDetails.otherLanguagesIds', 'name nativeNames');
+
+    let user: any = null;
+
+    if (profile) {
+      user = await User.findById(profile.user).select('-password');
+    } else {
+      // Maybe ID is a User ID
+      user = await User.findById(id).select('-password');
+      if (user) {
+        profile = await Profile.findOne({ user: user._id })
+          .populate('currentLocation.countryId', 'name code')
+          .populate('currentLocation.stateId', 'name code')
+          .populate('currentLocation.districtId', 'name')
+          .populate('currentLocation.cityId', 'name type pincode')
+          .populate('nativePlaceDetails.countryId', 'name code')
+          .populate('nativePlaceDetails.stateId', 'name code')
+          .populate('nativePlaceDetails.districtId', 'name')
+          .populate('nativePlaceDetails.cityId', 'name type pincode')
+          .populate('communityDetails.religionId', 'name')
+          .populate('communityDetails.casteId', 'name category')
+          .populate('communityDetails.subCasteId', 'name')
+          .populate('languageDetails.motherTongueId', 'name nativeNames')
+          .populate('languageDetails.otherLanguagesIds', 'name nativeNames');
+      }
+    }
+
+    if (!profile && !user) {
+      return res.status(404).json({ success: false, message: 'Profile or User not found' });
+    }
+
+    const userId = user?._id || profile?.user;
+    const profileId = profile?._id;
+
+    // Concurrently fetch all auxiliary admin review data
+    const [verifications, subscriptions, payments, reports, auditLogs] = await Promise.all([
+      userId ? Verification.find({ user: userId }).sort({ createdAt: -1 }) : [],
+      userId ? Subscription.find({ user: userId }).sort({ createdAt: -1 }) : [],
+      userId ? Payment.find({ user: userId }).sort({ createdAt: -1 }) : [],
+      Report.find({
+        $or: [
+          ...(userId ? [{ reportedUser: userId }] : []),
+          ...(profileId ? [{ reportedProfile: profileId }] : []),
+        ],
+      })
+        .populate('reporter', 'fullName email mobile')
+        .populate('moderator', 'fullName email')
+        .sort({ createdAt: -1 }),
+      AuditLog.find({
+        $or: [
+          ...(profileId ? [{ targetProfileId: profileId }] : []),
+          ...(userId ? [{ targetUserId: userId }] : []),
+        ],
+      }).sort({ createdAt: -1 }),
+    ]);
+
+    const activeSubscription =
+      subscriptions.find((s: any) => s.status === 'ACTIVE') || subscriptions[0] || null;
+
+    const profileObj = profile ? (typeof profile.toObject === 'function' ? profile.toObject() : profile) : null;
+    const userObj = user ? (typeof user.toObject === 'function' ? user.toObject() : user) : null;
+
+    const responsePayload = {
+      ...(profileObj || {}),
+      profile: profileObj,
+      user: userObj,
+      verifications: verifications || [],
+      subscription: activeSubscription,
+      subscriptions: subscriptions || [],
+      payments: payments || [],
+      reports: reports || [],
+      auditLogs: auditLogs || [],
+      adminNotes: profileObj?.adminNotes || [],
+    };
+
+    res.json({
+      success: true,
+      data: responsePayload,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function addProfileAdminNote(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { id } = req.params;
+    const { note } = req.body;
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid profile or user ID' });
+    }
+
+    if (!note || typeof note !== 'string' || !note.trim()) {
+      return res.status(400).json({ success: false, message: 'Note text is required' });
+    }
+
+    let profile = await Profile.findById(id);
+    let user = profile ? await User.findById(profile.user) : await User.findById(id);
+    if (!profile && user) {
+      profile = await Profile.findOne({ user: user._id });
+    }
+
     if (!profile) {
       return res.status(404).json({ success: false, message: 'Profile not found' });
     }
-    res.json({ success: true, data: profile });
+
+    const adminId = req.user?.userId;
+    const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
+    const adminName = (req.user as any)?.fullName || adminEmail;
+    const cleanNote = note.trim();
+
+    const noteItem = {
+      note: cleanNote,
+      adminId,
+      adminEmail,
+      adminName,
+      createdAt: new Date(),
+    };
+
+    if (!profile.adminNotes) {
+      profile.adminNotes = [];
+    }
+    profile.adminNotes.unshift(noteItem as any);
+    await profile.save();
+
+    await logAdminAction(
+      adminEmail,
+      'ADMIN_NOTE_ADDED',
+      `Added internal note to profile ${profile._id}: "${cleanNote.slice(0, 80)}${cleanNote.length > 80 ? '...' : ''}"`,
+      'Profile',
+      String(profile._id),
+      {
+        adminId,
+        adminName,
+        targetProfileId: profile._id,
+        targetUserId: user?._id,
+        reason: cleanNote,
+      }
+    );
+
+    res.json({
+      success: true,
+      message: 'Admin note added successfully',
+      data: profile.adminNotes,
+    });
   } catch (error) {
     next(error);
   }
@@ -710,8 +898,164 @@ export async function getProfileById(req: AuthRequest, res: Response, next: Next
 
 export async function updateProfile(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const updateData = { ...req.body };
+    const targetId = req.params.id;
 
+    // 1. Resolve target profile (by Profile._id or User._id)
+    let profile = null;
+    if (mongoose.Types.ObjectId.isValid(targetId)) {
+      profile = await Profile.findById(targetId);
+      if (!profile) {
+        profile = await Profile.findOne({ user: targetId });
+      }
+    }
+
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+
+    const user = await User.findById(profile.user);
+
+    // 2. Strict Backend Security Check: Protected Fields Enforcement
+    // Admins must NEVER be able to edit Full Name, Email Address, or Mobile/Phone Number.
+    const protectedFieldKeys = [
+      'name',
+      'fullname',
+      'firstname',
+      'lastname',
+      'email',
+      'phone',
+      'mobile',
+      'mobilenumber',
+      'displayname',
+    ];
+
+    // Check top-level request body
+    const attemptedProtectedField = Object.keys(req.body).find((key) => {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, '');
+      return protectedFieldKeys.includes(normalizedKey);
+    });
+
+    if (attemptedProtectedField) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, Email Address and Mobile Number are protected and cannot be modified by administrators.',
+        protectedField: attemptedProtectedField,
+      });
+    }
+
+    // Check nested user object if provided
+    if (req.body.user && typeof req.body.user === 'object') {
+      const attemptedNestedField = Object.keys(req.body.user).find((key) => {
+        const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, '');
+        return protectedFieldKeys.includes(normalizedKey);
+      });
+      if (attemptedNestedField) {
+        return res.status(400).json({
+          success: false,
+          message: 'Name, Email Address and Mobile Number are protected and cannot be modified by administrators.',
+          protectedField: `user.${attemptedNestedField}`,
+        });
+      }
+    }
+
+    // 3. Explicitly Whitelist Editable Fields (Do NOT pass req.body directly into the database update)
+    const updateData: Record<string, any> = {};
+
+    // Personal Details
+    if (req.body.gender !== undefined) updateData.gender = req.body.gender;
+    if (req.body.dob !== undefined) updateData.dob = req.body.dob;
+    if (req.body.dateOfBirth !== undefined) updateData.dob = req.body.dateOfBirth;
+    if (req.body.maritalStatus !== undefined) updateData.maritalStatus = req.body.maritalStatus;
+    if (req.body.height !== undefined) updateData.height = req.body.height;
+    if (req.body.weight !== undefined) updateData.weight = req.body.weight;
+    if (req.body.religion !== undefined) updateData.religion = req.body.religion;
+    if (req.body.caste !== undefined) updateData.caste = req.body.caste;
+    if (req.body.subCaste !== undefined) updateData.subCaste = req.body.subCaste;
+    if (req.body.motherTongue !== undefined) updateData.motherTongue = req.body.motherTongue;
+    if (req.body.city !== undefined) updateData.city = req.body.city;
+    if (req.body.state !== undefined) updateData.state = req.body.state;
+    if (req.body.country !== undefined) updateData.country = req.body.country;
+
+    // Professional Details
+    if (req.body.education !== undefined) updateData.education = req.body.education;
+    if (req.body.qualification !== undefined) updateData.education = req.body.qualification;
+    if (req.body.degree !== undefined) updateData.degree = req.body.degree;
+    if (req.body.profession !== undefined) updateData.profession = req.body.profession;
+    if (req.body.specialization !== undefined) updateData.additionalQualification = req.body.specialization;
+    if (req.body.additionalQualification !== undefined) updateData.additionalQualification = req.body.additionalQualification;
+    if (req.body.company !== undefined) updateData.company = req.body.company;
+    if (req.body.workplace !== undefined) updateData.company = req.body.workplace;
+    if (req.body.workLocation !== undefined) updateData.workLocation = req.body.workLocation;
+    if (req.body.workType !== undefined) updateData.workType = req.body.workType;
+    if (req.body.annualIncome !== undefined) updateData.annualIncome = req.body.annualIncome;
+    if (req.body.medicalRegistrationNumber !== undefined) updateData.medicalRegistrationNumber = req.body.medicalRegistrationNumber;
+    if (req.body.medicalCouncil !== undefined) updateData.medicalCouncil = req.body.medicalCouncil;
+    if (req.body.medicalCollege !== undefined) updateData.medicalCollege = req.body.medicalCollege;
+    if (req.body.institution !== undefined) updateData.medicalCollege = req.body.institution;
+    if (req.body.college !== undefined) updateData.medicalCollege = req.body.college;
+    if (req.body.currentHospital !== undefined) updateData.currentHospital = req.body.currentHospital;
+
+    // Family Details
+    if (req.body.familyType !== undefined) updateData.familyType = req.body.familyType;
+    if (req.body.familyStatus !== undefined) updateData.familyStatus = req.body.familyStatus;
+    if (req.body.familyValues !== undefined) updateData.familyValues = req.body.familyValues;
+    if (req.body.fatherOccupation !== undefined) updateData.fatherOccupation = req.body.fatherOccupation;
+    if (req.body.motherOccupation !== undefined) updateData.motherOccupation = req.body.motherOccupation;
+    if (req.body.siblings !== undefined) updateData.siblings = req.body.siblings;
+    if (req.body.nativePlace !== undefined) updateData.nativePlace = req.body.nativePlace;
+    if (req.body.familyLocation !== undefined) updateData.familyLocation = req.body.familyLocation;
+
+    // Profile Details & Bio
+    if (req.body.about !== undefined) updateData.about = req.body.about;
+    if (req.body.bio !== undefined) updateData.about = req.body.bio;
+    if (req.body.foodPreference !== undefined) updateData.foodPreference = req.body.foodPreference;
+    if (req.body.smoking !== undefined) updateData.smoking = req.body.smoking;
+    if (req.body.drinking !== undefined) updateData.drinking = req.body.drinking;
+    if (req.body.lifestyleInterests && typeof req.body.lifestyleInterests === 'object') {
+      updateData.lifestyleInterests = {
+        ...(profile.lifestyleInterests || {}),
+        ...req.body.lifestyleInterests,
+      };
+    }
+    if (req.body.partnerPreferences && typeof req.body.partnerPreferences === 'object') {
+      updateData.partnerPreferences = {
+        ...(profile.partnerPreferences || {}),
+        ...req.body.partnerPreferences,
+      };
+    }
+
+    // Admin Controls / Status
+    if (req.body.status !== undefined) updateData.status = req.body.status;
+    if (req.body.profileStatus !== undefined) updateData.status = req.body.profileStatus;
+    if (req.body.verificationStatus !== undefined) updateData.verificationStatus = req.body.verificationStatus;
+    if (req.body.kycStatus !== undefined) updateData.verificationStatus = req.body.kycStatus;
+
+    // 4. Handle Account / User Status (if admin provided accountStatus)
+    let userChanged = false;
+    let oldAccountStatus = user ? user.status : undefined;
+    const requestedAccountStatus = req.body.accountStatus;
+    if (user && requestedAccountStatus) {
+      if (user.status !== requestedAccountStatus) {
+        user.status = requestedAccountStatus;
+        if (requestedAccountStatus === 'Active') {
+          user.isActive = true;
+          user.isDeleted = false;
+        } else if (requestedAccountStatus === 'Suspended' || requestedAccountStatus === 'Blocked') {
+          user.isActive = false;
+          user.suspendedAt = new Date();
+          user.suspendedBy = req.user?.userId ? new mongoose.Types.ObjectId(req.user.userId) : undefined;
+        } else if (requestedAccountStatus === 'Deleted') {
+          user.isDeleted = true;
+          user.isActive = false;
+          user.deletedAt = new Date();
+          user.deletedBy = req.user?.userId ? new mongoose.Types.ObjectId(req.user.userId) : undefined;
+        }
+        userChanged = true;
+      }
+      delete updateData.accountStatus;
+    }
+
+    // 5. Field validations
     if (updateData.dob) {
       const dobResult = validateDateOfBirth(updateData.dob);
       if (!dobResult.isValid) {
@@ -725,29 +1069,99 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
 
     if (updateData.education || updateData.degree) {
       const qualToCheck = updateData.education || updateData.degree;
-      const qualResult = validateMedicalQualification(qualToCheck);
-      if (!qualResult.isValid) {
-        return res.status(400).json({
-          success: false,
-          message: qualResult.error || 'Please select a valid medical/doctor qualification.',
-        });
+      if (qualToCheck && typeof qualToCheck === 'string' && qualToCheck.trim()) {
+        const qualResult = validateMedicalQualification(qualToCheck);
+        if (!qualResult.isValid) {
+          return res.status(400).json({
+            success: false,
+            message: qualResult.error || 'Please select a valid medical/doctor qualification.',
+          });
+        }
       }
     }
 
-    const profile = await Profile.findByIdAndUpdate(req.params.id, { $set: updateData }, { new: true });
-    if (!profile) {
-      return res.status(404).json({ success: false, message: 'Profile not found' });
+    // 6. Handle nested objects merge
+    if (updateData.partnerPreferences && typeof updateData.partnerPreferences === 'object') {
+      updateData.partnerPreferences = {
+        ...(profile.partnerPreferences || {}),
+        ...updateData.partnerPreferences,
+      };
+    }
+    if (updateData.lifestyleInterests && typeof updateData.lifestyleInterests === 'object') {
+      updateData.lifestyleInterests = {
+        ...(profile.lifestyleInterests || {}),
+        ...updateData.lifestyleInterests,
+      };
     }
 
-    await logAdminAction(
-      req.user?.role || 'admin',
-      'PROFILE_UPDATED',
-      `Updated profile for ${profile.displayName}`,
-      'Profile',
-      String(profile._id)
-    );
+    // 7. Track diff for audit logging
+    const changes: Array<{ field: string; oldValue: any; newValue: any }> = [];
+    for (const [key, newVal] of Object.entries(updateData)) {
+      const oldVal = (profile as any)[key];
+      const oldStr = oldVal instanceof Date ? oldVal.toISOString().slice(0, 10) : JSON.stringify(oldVal ?? '');
+      const newStr = newVal instanceof Date ? newVal.toISOString().slice(0, 10) : JSON.stringify(newVal ?? '');
+      if (oldStr !== newStr) {
+        changes.push({
+          field: key,
+          oldValue: oldVal,
+          newValue: newVal,
+        });
+      }
+    }
+    if (userChanged && user) {
+      changes.push({
+        field: 'accountStatus',
+        oldValue: oldAccountStatus,
+        newValue: user.status,
+      });
+    }
 
-    res.json({ success: true, data: profile });
+    // 8. Persist changes
+    Object.assign(profile, updateData);
+    if (updateData.status && updateData.status !== profile.status) {
+      profile.statusChangedAt = new Date();
+      profile.statusChangedBy = req.user?.userId ? new mongoose.Types.ObjectId(req.user.userId) : undefined;
+    }
+    await profile.save();
+
+    if (userChanged && user) {
+      await user.save();
+    }
+
+    // 9. Record in Admin Audit Log
+    const changedFieldNames = changes.map((c) => c.field);
+    if (changes.length > 0) {
+      const adminNameStr = req.user?.email ? req.user.email.split('@')[0] : 'Administrator';
+      await logAdminAction(
+        req.user?.email || 'admin@wonderfuljodi.com',
+        'PROFILE_EDITED',
+        `Admin modified profile for ${profile.displayName || user?.fullName || profile._id}: ${changedFieldNames.join(', ')}`,
+        'Profile',
+        String(profile._id),
+        {
+          adminId: req.user?.userId ? new mongoose.Types.ObjectId(req.user.userId) : undefined,
+          adminName: adminNameStr,
+          targetProfileId: profile._id,
+          targetUserId: profile.user,
+          previousStatus: profile.status,
+          newStatus: updateData.status || profile.status,
+          metadata: {
+            fieldsChanged: changedFieldNames,
+            changes,
+          },
+        }
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully.',
+      data: {
+        ...profile.toObject(),
+        user: user ? user.toObject() : undefined,
+      },
+      changesCount: changes.length,
+    });
   } catch (error) {
     next(error);
   }
@@ -1024,6 +1438,152 @@ export async function rejectVerification(req: AuthRequest, res: Response, next: 
       success: true,
       data: populated,
       message: 'Verification marked as rejected and notification dispatched to user.',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function approveAllUserVerifications(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { userId } = req.params;
+    const { notes } = req.body;
+
+    if (!isValidObjectId(userId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user ID' });
+    }
+
+    const pendingDocs = await Verification.find({ user: userId, status: 'PENDING' });
+    if (!pendingDocs.length) {
+      return res.status(400).json({ success: false, message: 'No pending verification documents found for this user.' });
+    }
+
+    const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
+    const adminId = req.user?.userId;
+    const adminNote = notes?.trim() || 'All submitted credentials audited and approved by Administrator';
+
+    for (const doc of pendingDocs) {
+      doc.status = 'APPROVED';
+      doc.reviewedAt = new Date();
+      if (adminId && isValidObjectId(adminId)) {
+        doc.reviewedBy = adminId as any;
+      }
+      doc.reviewedByEmail = adminEmail;
+      doc.adminNotes = adminNote;
+      await doc.save();
+
+      await logAdminAction(
+        adminEmail,
+        'VERIFICATION_APPROVED',
+        `Approved ${doc.documentType} verification for User ID: ${userId}. Notes: ${adminNote}`,
+        'Verification',
+        String(doc._id)
+      );
+    }
+
+    // Update User & Profile Status to VERIFIED
+    await User.findByIdAndUpdate(userId, { verified: true, verificationStatus: 'VERIFIED' });
+    await Profile.findOneAndUpdate({ user: userId }, { verificationStatus: 'VERIFIED' });
+
+    try {
+      await Notification.create({
+        user: userId,
+        type: 'VERIFICATION',
+        title: 'All Credentials Verified & Approved',
+        message: 'All your submitted verification credentials have been approved by the administration. Your profile now proudly displays the verified doctor badge.',
+        actionUrl: '/profile',
+        read: false,
+      });
+    } catch (notifErr) {
+      console.error('Failed to create user verification approval notification:', notifErr);
+    }
+
+    const allDocs = await Verification.find({ user: userId }).populate(
+      'user',
+      'fullName email mobile verificationStatus verified isActive'
+    );
+
+    res.json({
+      success: true,
+      data: allDocs,
+      message: `Successfully approved all ${pendingDocs.length} verification document(s). User is now verified.`,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function rejectAllUserVerifications(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { userId } = req.params;
+    const { reason, rejectionReason, notes } = req.body;
+
+    if (!isValidObjectId(userId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user ID' });
+    }
+
+    const selectedReason = (rejectionReason || reason || '').trim() || 'Documents do not meet matrimonial verification requirements';
+    const pendingDocs = await Verification.find({ user: userId, status: 'PENDING' });
+    if (!pendingDocs.length) {
+      return res.status(400).json({ success: false, message: 'No pending verification documents found for this user.' });
+    }
+
+    const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
+    const adminId = req.user?.userId;
+    const adminNote = notes?.trim() || selectedReason;
+
+    for (const doc of pendingDocs) {
+      doc.status = 'REJECTED';
+      doc.reviewedAt = new Date();
+      if (adminId && isValidObjectId(adminId)) {
+        doc.reviewedBy = adminId as any;
+      }
+      doc.reviewedByEmail = adminEmail;
+      doc.rejectionReason = selectedReason;
+      doc.adminNotes = adminNote;
+      await doc.save();
+
+      await logAdminAction(
+        adminEmail,
+        'VERIFICATION_REJECTED',
+        `Rejected ${doc.documentType} verification for User ID: ${userId}. Reason: ${selectedReason}. Notes: ${adminNote}`,
+        'Verification',
+        String(doc._id)
+      );
+    }
+
+    const remainingApproved = await Verification.countDocuments({
+      user: userId,
+      status: 'APPROVED',
+    });
+
+    if (remainingApproved === 0) {
+      await User.findByIdAndUpdate(userId, { verified: false, verificationStatus: 'REJECTED' });
+      await Profile.findOneAndUpdate({ user: userId }, { verificationStatus: 'REJECTED' });
+    }
+
+    try {
+      await Notification.create({
+        user: userId,
+        type: 'VERIFICATION',
+        title: 'Verification Requires Attention',
+        message: `Your submitted credentials could not be verified. Reason: ${selectedReason}. Please visit your profile verification center to submit clear documents.`,
+        actionUrl: '/profile/verification',
+        read: false,
+      });
+    } catch (notifErr) {
+      console.error('Failed to create user verification rejection notification:', notifErr);
+    }
+
+    const allDocs = await Verification.find({ user: userId }).populate(
+      'user',
+      'fullName email mobile verificationStatus verified isActive'
+    );
+
+    res.json({
+      success: true,
+      data: allDocs,
+      message: `Rejected ${pendingDocs.length} verification document(s) for user.`,
     });
   } catch (error) {
     next(error);
@@ -2274,10 +2834,109 @@ export async function getReports(req: AuthRequest, res: Response, next: NextFunc
       };
     });
 
+    // 8. Group reports by reported profile/user for unified safety view
+    profiles.forEach((p: any) => {
+      if (p.user) profileMap.set(String(p.user), p);
+      if (p._id) profileMap.set(String(p._id), p);
+    });
+
+    const groupedMap = new Map<string, any>();
+    for (const r of reports) {
+      const repUserId = r.reportedUser?._id ? String(r.reportedUser._id) : 'unknown';
+      if (!groupedMap.has(repUserId)) {
+        const targetProf = profileMap.get(repUserId) || null;
+        const profStatus =
+          targetProf?.status ||
+          (r.reportedUser?.isActive === false ? 'Suspended' : 'Active');
+
+        const doctorName = targetProf?.displayName || r.reportedUser?.fullName || 'Doctor Profile';
+        const profilePhoto =
+          targetProf?.primaryPhoto ||
+          (targetProf?.photos && targetProf.photos[0]) ||
+          (r.reportedUser as any)?.photo ||
+          null;
+        const profileId = targetProf?._id ? String(targetProf._id) : repUserId;
+
+        groupedMap.set(repUserId, {
+          userId: repUserId,
+          profileId,
+          doctorName,
+          email: r.reportedUser?.email || '',
+          mobile: r.reportedUser?.mobile || '',
+          education: targetProf?.education || targetProf?.degree || '',
+          profession: targetProf?.profession || '',
+          city: targetProf?.city || '',
+          profilePhoto,
+          reportedUser: r.reportedUser || null,
+          profile: targetProf,
+          profileStatus: profStatus,
+          reports: [],
+          totalReports: 0,
+          pendingReports: 0,
+          underReviewReports: 0,
+          resolvedReports: 0,
+          dismissedReports: 0,
+          latestReportDate: r.createdAt,
+          overallReportStatus: 'PENDING',
+          overallStatus: 'PENDING',
+          reasonsSummary: [],
+        });
+      }
+
+      const grp = groupedMap.get(repUserId);
+      grp.reports.push(r);
+      grp.totalReports++;
+      if (r.reason && !grp.reasonsSummary.includes(r.reason)) {
+        grp.reasonsSummary.push(r.reason);
+      }
+      if (r.status === 'PENDING') grp.pendingReports++;
+      else if (r.status === 'UNDER_REVIEW') grp.underReviewReports++;
+      else if (r.status === 'RESOLVED') grp.resolvedReports++;
+      else if (r.status === 'DISMISSED' || r.status === 'REJECTED') grp.dismissedReports++;
+
+      if (new Date(r.createdAt) > new Date(grp.latestReportDate)) {
+        grp.latestReportDate = r.createdAt;
+      }
+    }
+
+    // Determine overall status for each grouped profile
+    for (const grp of groupedMap.values()) {
+      if (grp.pendingReports > 0) {
+        grp.overallReportStatus = 'PENDING';
+        grp.overallStatus = 'PENDING';
+      } else if (grp.underReviewReports > 0) {
+        grp.overallReportStatus = 'UNDER_REVIEW';
+        grp.overallStatus = 'UNDER_REVIEW';
+      } else if (grp.resolvedReports > 0) {
+        grp.overallReportStatus = 'RESOLVED';
+        grp.overallStatus = 'RESOLVED';
+      } else {
+        grp.overallReportStatus = 'DISMISSED';
+        grp.overallStatus = 'DISMISSED';
+      }
+    }
+
+    const groupedProfiles = Array.from(groupedMap.values());
+
+    // 9. Extra safety counts
+    const [underReviewCount, multiReportProfilesAgg, suspendedCount, blockedCount] = await Promise.all([
+      Report.countDocuments({ status: 'UNDER_REVIEW' }),
+      Report.aggregate([
+        { $group: { _id: '$reportedUser', count: { $sum: 1 } } },
+        { $match: { count: { $gt: 1 } } },
+        { $count: 'multiCount' },
+      ]),
+      Profile.countDocuments({ status: 'Suspended' }),
+      Profile.countDocuments({ status: 'Blocked' }),
+    ]);
+
+    const profilesWithMultipleReports = multiReportProfilesAgg[0]?.multiCount || 0;
+
     res.json({
       success: true,
       data: {
         reports,
+        groupedProfiles,
         pagination: {
           page: pageNumber,
           limit: limitNumber,
@@ -2287,8 +2946,12 @@ export async function getReports(req: AuthRequest, res: Response, next: NextFunc
         counts: {
           ALL: allCount,
           PENDING: pendingCount,
+          UNDER_REVIEW: underReviewCount,
           RESOLVED: resolvedCount,
           DISMISSED: dismissedCount,
+          multiReports: profilesWithMultipleReports,
+          suspended: suspendedCount,
+          blocked: blockedCount,
         },
         filters: {
           reasons: distinctReasons.filter(Boolean).sort(),
@@ -2350,6 +3013,128 @@ export async function getReportById(req: AuthRequest, res: Response, next: NextF
   }
 }
 
+export async function getReportsByProfile(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { profileId } = req.params;
+    if (!isValidObjectId(profileId)) {
+      return res.status(400).json({ success: false, message: 'Invalid profile ID format' });
+    }
+
+    // Resolve profile and user
+    let profile: any = await Profile.findById(profileId).lean();
+    let targetUserId: any = profile?.user;
+
+    if (!profile) {
+      // Check if profileId is actually a user ID
+      const user: any = await User.findById(profileId).lean();
+      if (user) {
+        targetUserId = user._id;
+        profile = (await Profile.findOne({ user: user._id }).lean()) as any;
+      }
+    }
+
+    if (!targetUserId) {
+      return res.status(404).json({ success: false, message: 'Profile or User not found' });
+    }
+
+    const [reports, targetUser, auditLogs] = await Promise.all([
+      Report.find({ reportedUser: targetUserId })
+        .populate('reporter', 'fullName email mobile verificationStatus isActive')
+        .populate('moderator', 'fullName email')
+        .sort({ createdAt: -1 })
+        .lean(),
+      User.findById(targetUserId).select('-password').lean(),
+      AuditLog.find({
+        $or: [
+          { targetProfileId: profile?._id },
+          { targetUserId: targetUserId },
+          { targetId: String(profile?._id) },
+          { targetId: String(targetUserId) },
+        ],
+      })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean(),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        profile,
+        user: targetUser,
+        reports,
+        auditLogs,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateReportStatus(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { id } = req.params;
+    const { status, notes, adminNotes, actionTaken } = req.body;
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid report ID format' });
+    }
+
+    const report = await Report.findById(id);
+    if (!report) {
+      return res.status(404).json({ success: false, message: 'Report not found' });
+    }
+
+    const prevStatus = report.status;
+    const cleanStatus = ['PENDING', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED', 'REJECTED', 'ACTION_TAKEN'].includes(
+      status
+    )
+      ? status
+      : 'UNDER_REVIEW';
+
+    report.status = cleanStatus;
+    report.moderator = (req.user?.userId || (req.user as any)?._id) as any;
+    report.handledByAdminId = report.moderator;
+    report.resolutionNotes = (notes || adminNotes || report.resolutionNotes || '').trim();
+    report.adminNotes = report.resolutionNotes;
+
+    if (cleanStatus === 'RESOLVED' || cleanStatus === 'DISMISSED') {
+      report.resolvedAt = new Date();
+    }
+    if (actionTaken) {
+      report.actionTaken = actionTaken;
+    }
+
+    await report.save();
+
+    await logAdminAction(
+      req.user?.email || 'admin@wonderfuljodi.com',
+      'REPORT_STATUS_UPDATED',
+      `Updated report ID: ${report._id} status to ${cleanStatus}. Notes: ${report.adminNotes || 'None'}`,
+      'Report',
+      String(report._id),
+      {
+        adminId: req.user?.userId,
+        adminName: (req.user as any)?.fullName || req.user?.email,
+        targetUserId: report.reportedUser,
+        targetProfileId: report.reportedProfile,
+        previousStatus: prevStatus,
+        newStatus: cleanStatus,
+        reason: report.adminNotes,
+        relatedReportId: report._id,
+      }
+    );
+
+    res.json({
+      success: true,
+      message: `Report marked as ${cleanStatus}.`,
+      data: report,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function resolveReport(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
@@ -2366,7 +3151,9 @@ export async function resolveReport(req: AuthRequest, res: Response, next: NextF
 
     report.status = 'RESOLVED';
     report.resolutionNotes = (resolutionNotes || notes || '').trim();
+    report.adminNotes = report.resolutionNotes;
     report.moderator = (req.user?.userId || (req.user as any)?._id) as any;
+    report.handledByAdminId = report.moderator;
     report.resolvedAt = new Date();
     report.actionTaken = actionTaken || 'RESOLVED';
     await report.save();
@@ -2376,7 +3163,17 @@ export async function resolveReport(req: AuthRequest, res: Response, next: NextF
       'REPORT_RESOLVED',
       `Resolved abuse report ID: ${report._id}. Notes: ${report.resolutionNotes || 'No notes provided'}`,
       'Report',
-      String(report._id)
+      String(report._id),
+      {
+        adminId: req.user?.userId,
+        adminName: (req.user as any)?.fullName || req.user?.email,
+        targetUserId: report.reportedUser,
+        targetProfileId: report.reportedProfile,
+        previousStatus: 'PENDING',
+        newStatus: 'RESOLVED',
+        reason: report.resolutionNotes,
+        relatedReportId: report._id,
+      }
     );
 
     res.json({
@@ -2405,7 +3202,9 @@ export async function dismissReport(req: AuthRequest, res: Response, next: NextF
 
     report.status = 'DISMISSED';
     report.resolutionNotes = (resolutionNotes || notes || '').trim();
+    report.adminNotes = report.resolutionNotes;
     report.moderator = (req.user?.userId || (req.user as any)?._id) as any;
+    report.handledByAdminId = report.moderator;
     report.resolvedAt = new Date();
     report.actionTaken = 'DISMISSED';
     await report.save();
@@ -2415,7 +3214,17 @@ export async function dismissReport(req: AuthRequest, res: Response, next: NextF
       'REPORT_DISMISSED',
       `Dismissed abuse report ID: ${report._id}. Reason: ${report.resolutionNotes || 'Deemed non-violating'}`,
       'Report',
-      String(report._id)
+      String(report._id),
+      {
+        adminId: req.user?.userId,
+        adminName: (req.user as any)?.fullName || req.user?.email,
+        targetUserId: report.reportedUser,
+        targetProfileId: report.reportedProfile,
+        previousStatus: 'PENDING',
+        newStatus: 'DISMISSED',
+        reason: report.resolutionNotes,
+        relatedReportId: report._id,
+      }
     );
 
     res.json({
@@ -2442,17 +3251,26 @@ export async function blockUserFromReport(req: AuthRequest, res: Response, next:
       return res.status(404).json({ success: false, message: 'Report not found' });
     }
 
-    // Deactivate / block the reported user account
     const targetUser = await User.findById(report.reportedUser);
     if (targetUser) {
       targetUser.isActive = false;
+      targetUser.status = 'Blocked';
       await targetUser.save();
+    }
+
+    const targetProfile = await Profile.findOne({ user: report.reportedUser });
+    if (targetProfile) {
+      targetProfile.status = 'Blocked';
+      targetProfile.statusReason = reason || 'Blocked following member reports';
+      await targetProfile.save();
     }
 
     report.status = 'RESOLVED';
     report.actionTaken = 'ACCOUNT_BLOCKED';
     report.resolutionNotes = (notes || reason || `Account suspended due to report: ${report.reason}`).trim();
+    report.adminNotes = report.resolutionNotes;
     report.moderator = (req.user?.userId || (req.user as any)?._id) as any;
+    report.handledByAdminId = report.moderator;
     report.resolvedAt = new Date();
     await report.save();
 
@@ -2461,8 +3279,26 @@ export async function blockUserFromReport(req: AuthRequest, res: Response, next:
       'USER_BLOCKED_VIA_REPORT',
       `Blocked user ${report.reportedUser} following report ${report._id}`,
       'User',
-      String(report.reportedUser)
+      String(report.reportedUser),
+      {
+        adminId: req.user?.userId,
+        adminName: (req.user as any)?.fullName || req.user?.email,
+        targetUserId: report.reportedUser,
+        targetProfileId: targetProfile?._id,
+        previousStatus: 'Active',
+        newStatus: 'Blocked',
+        reason: report.resolutionNotes,
+        relatedReportId: report._id,
+      }
     );
+
+    // Send notification to blocked user (without exposing reporter)
+    await Notification.create({
+      user: report.reportedUser,
+      type: 'SAFETY',
+      title: 'Account Status Notice',
+      message: 'Your profile has been blocked due to a violation of platform policies.',
+    }).catch(() => {});
 
     res.json({
       success: true,
@@ -2473,6 +3309,466 @@ export async function blockUserFromReport(req: AuthRequest, res: Response, next:
     next(error);
   }
 }
+
+// ── Profile Safety & Moderation Actions ──
+
+export async function updateProfileSafetyStatus(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { id } = req.params;
+    const { status, reason, notes } = req.body;
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid profile or user ID' });
+    }
+
+    // Resolve profile and user
+    let profile = await Profile.findById(id);
+    let user = profile ? await User.findById(profile.user) : await User.findById(id);
+    if (!profile && user) {
+      profile = await Profile.findOne({ user: user._id });
+    }
+
+    if (!profile && !user) {
+      return res.status(404).json({ success: false, message: 'Profile or User not found' });
+    }
+
+    const previousStatus = profile?.status || (user?.isActive ? 'Active' : 'Suspended');
+    const newStatus = ['Active', 'Under Review', 'Suspended', 'Blocked', 'Deleted'].includes(status)
+      ? status
+      : 'Under Review';
+
+    const adminId = req.user?.userId;
+    const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
+    const adminName = (req.user as any)?.fullName || adminEmail;
+
+    if (profile) {
+      profile.status = newStatus as any;
+      profile.statusReason = (reason || notes || '').trim();
+      profile.statusChangedAt = new Date();
+      profile.statusChangedBy = adminId as any;
+      if (newStatus === 'Deleted') {
+        profile.isDeleted = true;
+        profile.deletedAt = new Date();
+        profile.deletedBy = adminId as any;
+        profile.deletionReason = (reason || notes || '').trim();
+      } else if (profile.isDeleted && newStatus === 'Active') {
+        profile.isDeleted = false;
+      }
+      await profile.save();
+    }
+
+    if (user) {
+      user.status = newStatus as any;
+      if (newStatus === 'Suspended' || newStatus === 'Blocked' || newStatus === 'Deleted') {
+        user.isActive = false;
+      } else if (newStatus === 'Active') {
+        user.isActive = true;
+      }
+      if (newStatus === 'Deleted') {
+        user.isDeleted = true;
+        user.deletedAt = new Date();
+        user.deletedBy = adminId as any;
+        user.deletionReason = (reason || notes || '').trim();
+      } else if (user.isDeleted && newStatus === 'Active') {
+        user.isDeleted = false;
+      }
+      await user.save();
+    }
+
+    // Record audit log
+    await logAdminAction(
+      adminEmail,
+      'PROFILE_STATUS_CHANGED',
+      `Changed status of profile ${profile?._id || user?._id} from ${previousStatus} to ${newStatus}. Reason: ${reason || notes || 'None'}`,
+      'Profile',
+      String(profile?._id || user?._id),
+      {
+        adminId,
+        adminName,
+        targetProfileId: profile?._id,
+        targetUserId: user?._id,
+        previousStatus,
+        newStatus,
+        reason: reason || notes,
+      }
+    );
+
+    // Notify user if appropriate
+    if (user && newStatus === 'Under Review') {
+      await Notification.create({
+        user: user._id,
+        type: 'SAFETY',
+        title: 'Profile Under Review',
+        message: 'Your profile is currently under review by our safety and compliance team.',
+      }).catch(() => {});
+    } else if (user && newStatus === 'Suspended') {
+      await Notification.create({
+        user: user._id,
+        type: 'SAFETY',
+        title: 'Profile Suspended',
+        message: 'Your profile has been temporarily suspended.',
+      }).catch(() => {});
+    } else if (user && newStatus === 'Blocked') {
+      await Notification.create({
+        user: user._id,
+        type: 'SAFETY',
+        title: 'Profile Blocked',
+        message: 'Your profile has been blocked due to a violation of platform policies.',
+      }).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      message: `Profile status updated to ${newStatus}.`,
+      data: {
+        profile,
+        user,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function sendProfileWarning(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { id } = req.params;
+    const { message, warningTitle = 'Safety & Platform Compliance Notice' } = req.body;
+
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({ success: false, message: 'A warning message is required.' });
+    }
+
+    let profile = await Profile.findById(id);
+    let user = profile ? await User.findById(profile.user) : await User.findById(id);
+    if (!profile && user) {
+      profile = await Profile.findOne({ user: user._id });
+    }
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const cleanMsg = String(message).trim();
+
+    await Notification.create({
+      user: user._id,
+      type: 'WARNING',
+      title: warningTitle,
+      message: cleanMsg,
+    });
+
+    await logAdminAction(
+      req.user?.email || 'admin@wonderfuljodi.com',
+      'WARNING_SENT',
+      `Sent warning to profile ${profile?._id || user._id}. Message: ${cleanMsg}`,
+      'Profile',
+      String(profile?._id || user._id),
+      {
+        adminId: req.user?.userId,
+        adminName: (req.user as any)?.fullName || req.user?.email,
+        targetProfileId: profile?._id,
+        targetUserId: user._id,
+        reason: cleanMsg,
+      }
+    );
+
+    res.json({
+      success: true,
+      message: 'Official warning has been delivered to the member.',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function suspendProfile(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { id } = req.params;
+    const { reason = 'Temporarily suspended by administration pending compliance review' } = req.body;
+
+    let profile = await Profile.findById(id);
+    let user = profile ? await User.findById(profile.user) : await User.findById(id);
+    if (!profile && user) {
+      profile = await Profile.findOne({ user: user._id });
+    }
+
+    if (!user && !profile) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+
+    const previousStatus = profile?.status || 'Active';
+
+    if (profile) {
+      profile.status = 'Suspended';
+      profile.statusReason = reason;
+      profile.statusChangedAt = new Date();
+      profile.statusChangedBy = req.user?.userId as any;
+      await profile.save();
+    }
+
+    if (user) {
+      user.status = 'Suspended';
+      user.isActive = false;
+      user.suspensionReason = reason;
+      user.suspendedAt = new Date();
+      user.suspendedBy = req.user?.userId as any;
+      await user.save();
+    }
+
+    await logAdminAction(
+      req.user?.email || 'admin@wonderfuljodi.com',
+      'PROFILE_SUSPENDED',
+      `Suspended profile ${profile?._id || user?._id}. Reason: ${reason}`,
+      'Profile',
+      String(profile?._id || user?._id),
+      {
+        adminId: req.user?.userId,
+        adminName: (req.user as any)?.fullName || req.user?.email,
+        targetProfileId: profile?._id,
+        targetUserId: user?._id,
+        previousStatus,
+        newStatus: 'Suspended',
+        reason,
+      }
+    );
+
+    if (user) {
+      await Notification.create({
+        user: user._id,
+        type: 'SAFETY',
+        title: 'Account Suspended',
+        message: 'Your profile has been temporarily suspended.',
+      }).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile has been temporarily suspended.',
+      data: { profile, user },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function blockProfileAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { id } = req.params;
+    const { reason = 'Blocked by platform administrator' } = req.body;
+
+    let profile = await Profile.findById(id);
+    let user = profile ? await User.findById(profile.user) : await User.findById(id);
+    if (!profile && user) {
+      profile = await Profile.findOne({ user: user._id });
+    }
+
+    if (!user && !profile) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+
+    const previousStatus = profile?.status || 'Active';
+
+    if (profile) {
+      profile.status = 'Blocked';
+      profile.statusReason = reason;
+      profile.statusChangedAt = new Date();
+      profile.statusChangedBy = req.user?.userId as any;
+      await profile.save();
+    }
+
+    if (user) {
+      user.status = 'Blocked';
+      user.isActive = false;
+      await user.save();
+    }
+
+    await logAdminAction(
+      req.user?.email || 'admin@wonderfuljodi.com',
+      'PROFILE_BLOCKED',
+      `Blocked profile ${profile?._id || user?._id}. Reason: ${reason}`,
+      'Profile',
+      String(profile?._id || user?._id),
+      {
+        adminId: req.user?.userId,
+        adminName: (req.user as any)?.fullName || req.user?.email,
+        targetProfileId: profile?._id,
+        targetUserId: user?._id,
+        previousStatus,
+        newStatus: 'Blocked',
+        reason,
+      }
+    );
+
+    if (user) {
+      await Notification.create({
+        user: user._id,
+        type: 'SAFETY',
+        title: 'Account Blocked',
+        message: 'Your profile has been blocked due to a violation of platform policies.',
+      }).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile has been blocked.',
+      data: { profile, user },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteProfileAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { id } = req.params;
+    const reason = (req.body?.reason || req.query?.reason || 'Deleted by administrator').toString();
+
+    let profile = await Profile.findById(id);
+    let user = profile ? await User.findById(profile.user) : await User.findById(id);
+    if (!profile && user) {
+      profile = await Profile.findOne({ user: user._id });
+    }
+
+    if (!user && !profile) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+
+    const previousStatus = profile?.status || 'Active';
+    const adminId = req.user?.userId;
+
+    // Soft delete profile
+    if (profile) {
+      profile.status = 'Deleted';
+      profile.isDeleted = true;
+      profile.deletedAt = new Date();
+      profile.deletedBy = adminId as any;
+      profile.deletionReason = reason;
+      await profile.save();
+    }
+
+    // Soft delete user
+    if (user) {
+      user.status = 'Deleted';
+      user.isDeleted = true;
+      user.isActive = false;
+      user.deletedAt = new Date();
+      user.deletedBy = adminId as any;
+      user.deletionReason = reason;
+      await user.save();
+    }
+
+    await logAdminAction(
+      req.user?.email || 'admin@wonderfuljodi.com',
+      'PROFILE_DELETED',
+      `Soft-deleted profile ${profile?._id || user?._id}. Reason: ${reason}`,
+      'Profile',
+      String(profile?._id || user?._id),
+      {
+        adminId,
+        adminName: (req.user as any)?.fullName || req.user?.email,
+        targetProfileId: profile?._id,
+        targetUserId: user?._id,
+        previousStatus,
+        newStatus: 'Deleted',
+        reason,
+      }
+    );
+
+    res.json({
+      success: true,
+      message: 'Profile has been safely soft-deleted.',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getSafetyStats(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const [
+      totalReports,
+      pendingReports,
+      underReviewReports,
+      resolvedReports,
+      dismissedReports,
+      multiReportProfilesAgg,
+      suspendedProfiles,
+      blockedProfiles,
+      deletedProfiles,
+    ] = await Promise.all([
+      Report.countDocuments(),
+      Report.countDocuments({ status: 'PENDING' }),
+      Report.countDocuments({ status: 'UNDER_REVIEW' }),
+      Report.countDocuments({ status: 'RESOLVED' }),
+      Report.countDocuments({ status: { $in: ['DISMISSED', 'REJECTED'] } }),
+      Report.aggregate([
+        { $group: { _id: '$reportedUser', count: { $sum: 1 } } },
+        { $match: { count: { $gt: 1 } } },
+        { $count: 'multiCount' },
+      ]),
+      Profile.countDocuments({ status: 'Suspended' }),
+      Profile.countDocuments({ status: 'Blocked' }),
+      Profile.countDocuments({ status: 'Deleted' }),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        totalReports,
+        pendingReports,
+        underReviewReports,
+        resolvedReports,
+        dismissedReports,
+        profilesWithMultipleReports: multiReportProfilesAgg[0]?.multiCount || 0,
+        suspendedProfiles,
+        blockedProfiles,
+        deletedProfiles,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getSafetyAuditLogs(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { profileId } = req.params;
+    const query: any = {};
+
+    if (profileId && isValidObjectId(profileId)) {
+      query.$or = [
+        { targetProfileId: profileId },
+        { targetUserId: profileId },
+        { targetId: profileId },
+      ];
+    } else {
+      query.action = {
+        $in: [
+          'REPORT_RESOLVED',
+          'REPORT_DISMISSED',
+          'REPORT_STATUS_UPDATED',
+          'USER_BLOCKED_VIA_REPORT',
+          'PROFILE_STATUS_CHANGED',
+          'WARNING_SENT',
+          'PROFILE_SUSPENDED',
+          'PROFILE_BLOCKED',
+          'PROFILE_DELETED',
+        ],
+      };
+    }
+
+    const logs = await AuditLog.find(query).sort({ createdAt: -1 }).limit(100).lean();
+
+    res.json({
+      success: true,
+      data: logs,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 
 // 9. Platform Notifications & Broadcast Announcements
 export async function getNotifications(req: AuthRequest, res: Response, next: NextFunction) {

@@ -16,9 +16,12 @@ import {
   RefreshCw,
   ChevronLeft,
   ChevronRight,
-  Filter,
   Heart,
   MessageSquare,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  GraduationCap,
 } from 'lucide-react';
 import {
   fetchUserNotifications,
@@ -26,6 +29,8 @@ import {
   markAllNotificationsAsRead,
   UserNotificationItem,
 } from '../../services/notificationApi';
+import { acceptInterest, rejectInterest } from '../../services/interestApi';
+import { DoctorAvatar } from '../../components/DoctorAvatar';
 import { getAuthToken } from '../../lib/api';
 
 export default function UserNotificationsPage() {
@@ -37,6 +42,8 @@ export default function UserNotificationsPage() {
   const [total, setTotal] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({});
   const limit = 15;
 
   const loadNotifications = useCallback(async () => {
@@ -88,6 +95,42 @@ export default function UserNotificationsPage() {
       setUnreadCount(0);
     } catch (err) {
       console.error('Failed to mark all as read:', err);
+    }
+  };
+
+  const handleNotificationAccept = async (e: React.MouseEvent, notif: UserNotificationItem) => {
+    e.stopPropagation();
+    const interestId = notif.metadata?.interestId;
+    if (!interestId) return;
+
+    setActionLoadingId(notif._id);
+    try {
+      await acceptInterest(interestId);
+      setActionFeedback((prev) => ({ ...prev, [notif._id]: 'ACCEPTED' }));
+      await markNotificationAsRead(notif._id).catch(() => null);
+      setUnreadCount((c) => Math.max(0, c - 1));
+    } catch (err: any) {
+      console.error('Failed to accept:', err);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleNotificationReject = async (e: React.MouseEvent, notif: UserNotificationItem) => {
+    e.stopPropagation();
+    const interestId = notif.metadata?.interestId;
+    if (!interestId) return;
+
+    setActionLoadingId(notif._id);
+    try {
+      await rejectInterest(interestId);
+      setActionFeedback((prev) => ({ ...prev, [notif._id]: 'REJECTED' }));
+      await markNotificationAsRead(notif._id).catch(() => null);
+      setUnreadCount((c) => Math.max(0, c - 1));
+    } catch (err: any) {
+      console.error('Failed to reject:', err);
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
@@ -289,6 +332,74 @@ export default function UserNotificationsPage() {
                     <p className="text-xs sm:text-[13px] text-slate-600 leading-relaxed whitespace-pre-wrap">
                       {notif.message}
                     </p>
+
+                    {/* Doctor Details & Inline Actions for Interest Notifications */}
+                    {notif.metadata?.interestId && (
+                      <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 text-xs text-slate-700">
+                          {notif.metadata?.qualification && (
+                            <span className="inline-flex items-center gap-1 font-semibold text-slate-800 bg-slate-100 px-2.5 py-1 rounded-lg">
+                              <GraduationCap className="w-3.5 h-3.5 text-[#E51F3E]" />
+                              <span>{notif.metadata.qualification}</span>
+                            </span>
+                          )}
+                          {notif.metadata?.specialization && (
+                            <span className="text-slate-500 font-medium">
+                              • {notif.metadata.specialization}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {actionFeedback[notif._id] === 'ACCEPTED' ? (
+                            <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Connected ✓</span>
+                            </span>
+                          ) : actionFeedback[notif._id] === 'REJECTED' ? (
+                            <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-semibold">
+                              <span>Declined</span>
+                            </span>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                disabled={actionLoadingId === notif._id}
+                                onClick={(e) => handleNotificationAccept(e, notif)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-2xs cursor-pointer disabled:opacity-50"
+                              >
+                                {actionLoadingId === notif._id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="w-3 h-3" />
+                                )}
+                                <span>Accept</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={actionLoadingId === notif._id}
+                                onClick={(e) => handleNotificationReject(e, notif)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition cursor-pointer disabled:opacity-50"
+                              >
+                                <span>Reject</span>
+                              </button>
+                            </>
+                          )}
+
+                          {notif.metadata?.profileId && (
+                            <Link
+                              href={`/profile/${notif.metadata.profileId}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-rose-200 text-[#E51F3E] bg-rose-50/60 hover:bg-rose-100 text-xs font-bold transition"
+                            >
+                              <span>View Profile</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex items-center gap-3 pt-1 text-[11px] text-slate-400">
                       <span>
                         {notif.createdAt &&

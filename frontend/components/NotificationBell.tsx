@@ -16,6 +16,10 @@ import {
   RefreshCw,
   Heart,
   MessageSquare,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  GraduationCap,
 } from 'lucide-react';
 import {
   fetchUserNotifications,
@@ -24,6 +28,8 @@ import {
   markAllNotificationsAsRead,
   UserNotificationItem,
 } from '../services/notificationApi';
+import { acceptInterest, rejectInterest } from '../services/interestApi';
+import { DoctorAvatar } from './DoctorAvatar';
 
 export function NotificationBell() {
   const router = useRouter();
@@ -31,6 +37,8 @@ export function NotificationBell() {
   const [recentNotifications, setRecentNotifications] = useState<UserNotificationItem[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Fetch unread count
@@ -59,7 +67,6 @@ export function NotificationBell() {
 
   useEffect(() => {
     refreshUnreadCount();
-    // Poll unread count conservatively every 60 seconds
     const interval = setInterval(refreshUnreadCount, 60000);
     return () => clearInterval(interval);
   }, [refreshUnreadCount]);
@@ -81,6 +88,42 @@ export function NotificationBell() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const handleNotificationAccept = async (e: React.MouseEvent, notif: UserNotificationItem) => {
+    e.stopPropagation();
+    const interestId = notif.metadata?.interestId;
+    if (!interestId) return;
+
+    setActionLoadingId(notif._id);
+    try {
+      await acceptInterest(interestId);
+      setActionFeedback((prev) => ({ ...prev, [notif._id]: 'ACCEPTED' }));
+      await markNotificationAsRead(notif._id).catch(() => null);
+      setUnreadCount((c) => Math.max(0, c - 1));
+    } catch (err: any) {
+      console.error('Failed to accept from bell:', err);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleNotificationReject = async (e: React.MouseEvent, notif: UserNotificationItem) => {
+    e.stopPropagation();
+    const interestId = notif.metadata?.interestId;
+    if (!interestId) return;
+
+    setActionLoadingId(notif._id);
+    try {
+      await rejectInterest(interestId);
+      setActionFeedback((prev) => ({ ...prev, [notif._id]: 'REJECTED' }));
+      await markNotificationAsRead(notif._id).catch(() => null);
+      setUnreadCount((c) => Math.max(0, c - 1));
+    } catch (err: any) {
+      console.error('Failed to reject from bell:', err);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
   // Mark single as read
   const handleItemClick = async (notif: UserNotificationItem) => {
     if (!notif.read) {
@@ -95,7 +138,7 @@ export function NotificationBell() {
       }
     }
     setOpen(false);
-    const targetUrl = notif.actionUrl || notif.link;
+    const targetUrl = notif.actionUrl || notif.link || '/interests';
     if (targetUrl) {
       router.push(targetUrl);
     }
@@ -124,14 +167,15 @@ export function NotificationBell() {
     return date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
   };
 
-  // Icon by type
   const getTypeIcon = (type?: string) => {
     switch (type?.toUpperCase()) {
       case 'INTEREST':
+      case 'INTEREST_RECEIVED':
         return <Heart className="w-3.5 h-3.5 text-[#E51F3E] fill-[#E51F3E]" />;
       case 'INTEREST_ACCEPTED':
         return <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />;
       case 'INTEREST_DECLINED':
+      case 'INTEREST_REJECTED':
         return <Info className="w-3.5 h-3.5 text-slate-500" />;
       case 'PROMOTION':
       case 'OFFER':
@@ -191,7 +235,7 @@ export function NotificationBell() {
           </div>
 
           {/* Notifications List */}
-          <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+          <div className="max-h-96 overflow-y-auto divide-y divide-slate-100">
             {loading ? (
               <div className="py-8 text-center text-slate-400 text-xs">
                 <RefreshCw className="w-5 h-5 animate-spin mx-auto text-[#E51F3E] mb-2" />
@@ -204,45 +248,135 @@ export function NotificationBell() {
                 <p className="text-[10.5px] text-slate-400">You are all caught up!</p>
               </div>
             ) : (
-              recentNotifications.map((item) => (
-                <div
-                  key={item._id}
-                  onClick={() => handleItemClick(item)}
-                  className={`p-3.5 hover:bg-rose-50/50 transition cursor-pointer flex items-start gap-3 relative ${
-                    !item.read ? 'bg-[#FFFDFB]' : 'bg-white'
-                  }`}
-                >
-                  <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
-                    {getTypeIcon(item.type)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1 mb-0.5">
-                      <span
-                        className={`text-xs block truncate ${
-                          !item.read ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'
-                        }`}
-                      >
-                        {item.title}
-                      </span>
-                      <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0">
-                        {formatTime(item.createdAt)}
-                      </span>
+              recentNotifications.map((item) => {
+                const isInterestReceived =
+                  item.type === 'INTEREST_RECEIVED' ||
+                  (item.type === 'INTEREST' && item.metadata?.interestId);
+                const feedbackStatus = actionFeedback[item._id];
+
+                return (
+                  <div
+                    key={item._id}
+                    onClick={() => handleItemClick(item)}
+                    className={`p-3.5 hover:bg-rose-50/40 transition cursor-pointer flex flex-col gap-2 relative ${
+                      !item.read ? 'bg-[#FFFDFB]' : 'bg-white'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      {isInterestReceived ? (
+                        <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-100 shrink-0 border border-rose-100 mt-0.5">
+                          {item.metadata?.senderPhoto ? (
+                            <img
+                              src={item.metadata.senderPhoto}
+                              alt={item.metadata?.senderName || 'Doctor'}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <DoctorAvatar
+                              name={item.metadata?.senderName || 'Doctor'}
+                              className="w-full h-full rounded-none"
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
+                          {getTypeIcon(item.type)}
+                        </div>
+                      )}
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                          <span
+                            className={`text-xs block truncate ${
+                              !item.read ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'
+                            }`}
+                          >
+                            {item.title}
+                          </span>
+                          <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0">
+                            {formatTime(item.createdAt)}
+                          </span>
+                        </div>
+
+                        {isInterestReceived && item.metadata?.senderName ? (
+                          <div className="space-y-0.5 mb-1">
+                            <p className="text-xs font-bold text-slate-900 truncate">
+                              {item.metadata.senderName}
+                            </p>
+                            {(item.metadata.senderDegree || item.metadata.senderSpecialization) && (
+                              <p className="text-[11px] text-[#E51F3E] font-medium flex items-center gap-1 truncate">
+                                <GraduationCap className="w-3 h-3 shrink-0" />
+                                <span>
+                                  {[item.metadata.senderDegree, item.metadata.senderSpecialization]
+                                    .filter(Boolean)
+                                    .join(' • ')}
+                                </span>
+                              </p>
+                            )}
+                          </div>
+                        ) : null}
+
+                        <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed">
+                          {item.message}
+                        </p>
+
+                        {/* Interactive Accept / Reject Actions for Interest Notifications */}
+                        {isInterestReceived && item.metadata?.interestId && (
+                          <div className="mt-2 pt-1 flex items-center gap-2">
+                            {feedbackStatus === 'ACCEPTED' ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Accepted ✓</span>
+                              </span>
+                            ) : feedbackStatus === 'REJECTED' ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                                <span>Declined</span>
+                              </span>
+                            ) : (
+                              <>
+                                {item.metadata?.senderProfileId && (
+                                  <Link
+                                    href={`/profile/${item.metadata.senderProfileId}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="px-2.5 py-1 rounded-lg text-[10.5px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition"
+                                  >
+                                    View Profile
+                                  </Link>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={actionLoadingId === item._id}
+                                  onClick={(e) => handleNotificationAccept(e, item)}
+                                  className="px-2.5 py-1 rounded-lg text-[10.5px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition shadow-2xs cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                                >
+                                  {actionLoadingId === item._id ? (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="w-3 h-3" />
+                                  )}
+                                  <span>Accept</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={actionLoadingId === item._id}
+                                  onClick={(e) => handleNotificationReject(e, item)}
+                                  className="px-2.5 py-1 rounded-lg text-[10.5px] font-semibold text-slate-700 border border-slate-200 hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {!item.read && (
+                        <span className="w-2 h-2 rounded-full bg-[#E51F3E] shrink-0 self-center" />
+                      )}
                     </div>
-                    <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed">
-                      {item.message}
-                    </p>
-                    {(item.actionUrl || item.link) && (
-                      <span className="inline-flex items-center gap-0.5 text-[10.5px] font-bold text-[#E51F3E] mt-1 hover:underline">
-                        <span>View</span>
-                        <ExternalLink className="w-2.5 h-2.5" />
-                      </span>
-                    )}
                   </div>
-                  {!item.read && (
-                    <span className="w-2 h-2 rounded-full bg-[#E51F3E] shrink-0 self-center" />
-                  )}
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 

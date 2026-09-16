@@ -382,14 +382,20 @@ export async function updateMyProfile(req: AuthRequest, res: Response, next: Nex
 export async function getProfile(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
-    if (!isValidObjectId(id)) {
+    let profileQuery: any = null;
+
+    if (isValidObjectId(id)) {
+      profileQuery = { _id: id };
+    } else if (typeof id === 'string' && /^[A-Za-z0-9_-]{3,32}$/.test(id)) {
+      profileQuery = { candidateId: id.toUpperCase() };
+    } else {
       return res.status(400).json({ success: false, message: 'Invalid profile ID' });
     }
 
     const callerUserId = (req as any).user?.userId;
     const isCallerAdmin = (req as any).user?.role === 'admin';
 
-    const profile = await Profile.findById(id).populate(
+    const profile = await Profile.findOne(profileQuery).populate(
       'user',
       'fullName verificationStatus verified role mobile email'
     );
@@ -414,9 +420,12 @@ export async function getProfile(req: Request, res: Response, next: NextFunction
       }
     }
 
+    res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+
     res.json({
       success: true,
       data: serializePublicProfile(profile, {
+        viewerUserId: callerUserId,
         isContactUnlocked,
         isSelf,
         isAdmin: isCallerAdmin,

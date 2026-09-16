@@ -1,7 +1,9 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { getNextCandidateId } from './Counter';
 
 export interface IProfile extends Document {
   user: mongoose.Types.ObjectId;
+  candidateId?: string;
   displayName: string;
   gender: 'Male' | 'Female' | 'Other';
   dob: Date;
@@ -134,6 +136,7 @@ export interface IProfile extends Document {
     birthTimeVisibility?: 'all' | 'members_only' | 'hidden';
     birthPlaceVisibility?: 'all' | 'members_only' | 'hidden';
     kundaliVisibility?: 'all' | 'members_only' | 'hidden';
+    nameVisibility?: 'all' | 'members_only' | 'hidden';
   };
   verificationStatus: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
   status: 'Active' | 'Under Review' | 'Suspended' | 'Blocked' | 'Deleted';
@@ -160,6 +163,7 @@ export interface IProfile extends Document {
 const profileSchema = new Schema<IProfile>(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
+    candidateId: { type: String, unique: true, sparse: true, index: true, trim: true },
     displayName: { type: String, required: true, trim: true, index: true },
     gender: { type: String, enum: ['Male', 'Female', 'Other'], required: true, index: true },
     dob: { type: Date, required: true, index: true },
@@ -321,6 +325,11 @@ const profileSchema = new Schema<IProfile>(
         enum: ['all', 'members_only', 'hidden'],
         default: 'all',
       },
+      nameVisibility: {
+        type: String,
+        enum: ['all', 'members_only', 'hidden'],
+        default: 'members_only',
+      },
     },
     fatherOccupation: { type: String, trim: true },
     motherOccupation: { type: String, trim: true },
@@ -365,6 +374,17 @@ const profileSchema = new Schema<IProfile>(
   },
   { timestamps: true }
 );
+
+profileSchema.pre('save', async function (next) {
+  if (!this.candidateId) {
+    try {
+      this.candidateId = await getNextCandidateId();
+    } catch (err: any) {
+      return next(err);
+    }
+  }
+  next();
+});
 
 profileSchema.index({ gender: 1, city: 1, religion: 1, caste: 1, education: 1, profession: 1 });
 

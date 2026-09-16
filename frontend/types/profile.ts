@@ -1,6 +1,13 @@
 export interface ProfileCard {
   _id: string;
-  displayName: string;
+  id?: string;
+  candidateId?: string;
+  profileId?: string;
+  isAuthenticatedViewer?: boolean;
+  displayName?: string | null;
+  name?: string | null;
+  publicName?: string | null;
+  age?: number;
   gender: string;
   dob: string;
   height?: string;
@@ -9,7 +16,9 @@ export interface ProfileCard {
   country?: string;
   education: string;
   degree?: string;
+  qualification?: string;
   profession: string;
+  specialization?: string;
   company?: string;
   workLocation?: string;
   annualIncome?: string;
@@ -34,7 +43,13 @@ export interface SearchResult {
 export interface FullUserProfile {
   _id: string;
   id?: string;
-  displayName: string;
+  candidateId?: string;
+  profileId?: string;
+  isAuthenticatedViewer?: boolean;
+  displayName?: string | null;
+  name?: string | null;
+  publicName?: string | null;
+  age?: number;
   gender: 'Male' | 'Female' | 'Other';
   dob: string | Date;
   height: string;

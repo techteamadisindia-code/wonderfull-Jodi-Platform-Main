@@ -30,6 +30,28 @@ import { getAuthToken } from '../../lib/api';
 import api from '../../lib/api';
 import { VvipModal } from '../../components/VvipModal';
 import { PaymentModal, PaymentOrderData } from '../../components/PaymentModal';
+import { Tag, Gift, Percent } from 'lucide-react';
+
+interface CalculatedOfferData {
+  originalPrice: number;
+  discountAmount: number;
+  finalPrice: number;
+  discountPercentage: number;
+  isFree: boolean;
+  campaign?: {
+    id: string;
+    name: string;
+    discountType: string;
+    discountValue: number;
+  } | null;
+  coupon?: {
+    id: string;
+    code: string;
+    name: string;
+    discountType: string;
+    discountValue: number;
+  } | null;
+}
 
 export default function MembershipPage() {
   const router = useRouter();
@@ -38,6 +60,16 @@ export default function MembershipPage() {
   const [plans, setPlans] = useState<MembershipPlanData[]>([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [plansError, setPlansError] = useState<string | null>(null);
+
+  // Dynamic Server-Calculated Offers per plan key
+  const [planOffers, setPlanOffers] = useState<Record<string, CalculatedOfferData>>({});
+  const [loadingOffers, setLoadingOffers] = useState(false);
+
+  // Coupon / Promo Code State
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
+  const [couponApplying, setCouponApplying] = useState(false);
+  const [couponAlert, setCouponAlert] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // User & Order State
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
@@ -97,12 +129,102 @@ export default function MembershipPage() {
     }
   };
 
+  // Fetch Server-Authoritative Offers for all plans
+  const fetchOffers = async (planList: MembershipPlanData[], coupon?: string | null) => {
+    if (!planList.length) return;
+    setLoadingOffers(true);
+    const newOffers: Record<string, CalculatedOfferData> = {};
+
+    await Promise.all(
+      planList.map(async (p) => {
+        const pKey = p.key || p.slug;
+        if (!pKey || p.slug === 'free' || p.ctaAction === 'register') return;
+
+        try {
+          const res = await api.post('/memberships/calculate-offer', {
+            planKey: pKey,
+            couponCode: coupon || undefined,
+          });
+          if (res.data?.success && res.data.data) {
+            newOffers[pKey] = res.data.data;
+          }
+        } catch (err) {
+          // If unauthenticated or no rule, fallback to plan's listed price
+          newOffers[pKey] = {
+            originalPrice: p.originalPrice ?? 0,
+            discountAmount: (p.originalPrice ?? 0) - (p.discountedPrice ?? p.originalPrice ?? 0),
+            finalPrice: p.discountedPrice ?? p.originalPrice ?? 0,
+            discountPercentage: p.seasonalDiscount ?? 0,
+            isFree: (p.discountedPrice ?? p.originalPrice ?? 0) === 0,
+          };
+        }
+      })
+    );
+
+    setPlanOffers(newOffers);
+    setLoadingOffers(false);
+  };
+
   useEffect(() => {
     loadDynamicPlans();
     loadMembershipStatus();
   }, []);
 
+  // Whenever plans or appliedCoupon or auth changes, calculate server offers
+  useEffect(() => {
+    if (plans.length > 0) {
+      fetchOffers(plans, appliedCoupon);
+    }
+  }, [plans, appliedCoupon, authenticated]);
+
+  // Handle Apply Coupon
+  const handleApplyCoupon = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!couponInput.trim()) return;
+
+    setCouponApplying(true);
+    setCouponAlert(null);
+
+    try {
+      // Pick first paid plan to validate
+      const testPlan = plans.find((p) => p.slug !== 'free' && p.ctaAction !== 'register') || plans[0];
+      const pKey = testPlan?.key || testPlan?.slug || 'DOCTOR_CONNECT';
+
+      const res = await api.post('/coupons/validate', {
+        couponCode: couponInput.trim().toUpperCase(),
+        planKey: pKey,
+      });
+
+      if (res.data?.valid) {
+        setAppliedCoupon(couponInput.trim().toUpperCase());
+        setCouponAlert({
+          type: 'success',
+          text: `Coupon applied successfully! ${res.data.discountPercentage ? `${res.data.discountPercentage}% OFF` : `₹${res.data.discountAmount} OFF`}`,
+        });
+      } else {
+        setCouponAlert({
+          type: 'error',
+          text: res.data?.message || 'Invalid coupon code or eligibility requirement not met.',
+        });
+      }
+    } catch (err: any) {
+      setCouponAlert({
+        type: 'error',
+        text: err.response?.data?.message || 'Failed to validate coupon. Please check the code.',
+      });
+    } finally {
+      setCouponApplying(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponInput('');
+    setCouponAlert(null);
+  };
+
   const handlePlanAction = async (plan: MembershipPlanData) => {
+    const planKey = plan.key || plan.slug;
     setSelectedPlan(plan.name);
     setOrderError(null);
     setOrderSuccess(null);
@@ -133,12 +255,49 @@ export default function MembershipPage() {
       return;
     }
 
+    const calculatedOffer = planOffers[planKey];
+    const isFreeClaim = calculatedOffer?.isFree || calculatedOffer?.finalPrice === 0;
+
+    // 100% Free Campaign / Coupon Entitlement Flow (Part 27)
+    if (isFreeClaim) {
+      try {
+        setProcessingOrder(true);
+        const res = await api.post('/memberships/claim-free', {
+          planKey,
+          slug: plan.slug,
+          couponCode: appliedCoupon || undefined,
+        });
+
+        if (res.data?.success) {
+          setOrderSuccess(
+            res.data.message ||
+              `Congratulations! Your free ${plan.name} membership has been activated successfully with full privileges.`
+          );
+          await loadMembershipStatus();
+          await fetchOffers(plans, appliedCoupon);
+        } else {
+          setOrderError(res.data?.message || 'Unable to claim free membership offer.');
+        }
+      } catch (err: any) {
+        console.error('Free membership claim error:', err);
+        setOrderError(
+          err.response?.data?.message ||
+            'Unable to activate free offer. You may already have claimed this or limits were reached.'
+        );
+      } finally {
+        setProcessingOrder(false);
+      }
+      return;
+    }
+
+    // Standard / Discounted Paid Plan Order Flow
     try {
       setProcessingOrder(true);
       const res = await api.post('/memberships/create-order', {
-        planKey: plan.key || plan.slug,
+        planKey,
         slug: plan.slug,
         id: plan._id,
+        couponCode: appliedCoupon || undefined,
       });
 
       if (res.data?.success) {
@@ -372,6 +531,83 @@ export default function MembershipPage() {
         </div>
       </section>
 
+      {/* ── 2.5 Promo / Coupon Code Section ── */}
+      <section className="pt-4 pb-2 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+        <div className="bg-white rounded-2xl border border-rose-200/80 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3 text-left">
+            <div className="w-10 h-10 rounded-xl bg-rose-50 text-[#E51F3E] flex items-center justify-center shrink-0 border border-rose-100">
+              <Tag className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                <span>Have a Promo or Referral Coupon?</span>
+                <span className="text-[10px] uppercase font-extrabold bg-rose-100 text-[#E51F3E] px-2 py-0.5 rounded-full">
+                  Special Savings
+                </span>
+              </h3>
+              <p className="text-xs text-slate-500">
+                Enter your seasonal coupon or referral reward code to apply discounts instantly.
+              </p>
+            </div>
+          </div>
+
+          <div className="w-full sm:w-auto">
+            {appliedCoupon ? (
+              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 rounded-xl">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="text-xs font-bold text-emerald-800">
+                  Applied: <span className="tracking-wider">{appliedCoupon}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleRemoveCoupon}
+                  className="ml-2 text-xs text-slate-400 hover:text-rose-600 font-bold cursor-pointer"
+                  title="Remove coupon"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleApplyCoupon} className="flex items-center gap-2 w-full sm:w-72">
+                <input
+                  type="text"
+                  placeholder="e.g. WJ50OFF / WJREF-XXXX"
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                  className="flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wider rounded-xl border border-[#E8E1DB] focus:outline-none focus:border-[#E51F3E] bg-slate-50 focus:bg-white"
+                />
+                <button
+                  type="submit"
+                  disabled={couponApplying || !couponInput.trim()}
+                  className="px-3.5 py-2 rounded-xl bg-[#E51F3E] hover:bg-[#CC1432] disabled:opacity-50 text-white text-xs font-bold transition shadow-xs cursor-pointer shrink-0"
+                >
+                  {couponApplying ? 'Verifying...' : 'Apply'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+
+        {couponAlert && (
+          <div
+            className={`mt-2.5 px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 ${
+              couponAlert.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                : 'bg-rose-50 text-rose-800 border border-rose-200'
+            }`}
+          >
+            <span>{couponAlert.text}</span>
+            <button
+              type="button"
+              onClick={() => setCouponAlert(null)}
+              className="text-slate-400 hover:text-slate-700 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </section>
+
       {/* ── 3. Dynamic Pricing Cards Section ── */}
       <section className="py-5 sm:py-7 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
         <div className="text-center mb-6 sm:mb-8">
@@ -420,52 +656,71 @@ export default function MembershipPage() {
         {!loadingPlans && !plansError && plans.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 items-stretch">
             {plans.map((plan) => {
-              const origPrice = plan.originalPrice ?? 0;
-              const discPrice =
-                plan.discountedPrice !== undefined && plan.discountedPrice !== null
-                  ? plan.discountedPrice
-                  : plan.price
-                  ? Number(plan.price)
-                  : origPrice;
+              const planKey = plan.key || plan.slug;
+              const calculatedOffer = planOffers[planKey];
+
+              const origPrice = calculatedOffer ? calculatedOffer.originalPrice : (plan.originalPrice ?? 0);
+              const discPrice = calculatedOffer
+                ? calculatedOffer.finalPrice
+                : plan.discountedPrice !== undefined && plan.discountedPrice !== null
+                ? plan.discountedPrice
+                : plan.price
+                ? Number(plan.price)
+                : origPrice;
 
               const hasDiscount = origPrice > discPrice && origPrice > 0;
-              const discountPct =
-                plan.seasonalDiscount ||
-                (hasDiscount ? Math.round(((origPrice - discPrice) / origPrice) * 100) : 0);
+              const discountPct = calculatedOffer
+                ? calculatedOffer.discountPercentage
+                : plan.seasonalDiscount ||
+                  (hasDiscount ? Math.round(((origPrice - discPrice) / origPrice) * 100) : 0);
+
+              const isFree =
+                calculatedOffer?.isFree ||
+                (discPrice === 0 && origPrice > 0 && plan.slug !== 'free' && plan.ctaAction !== 'register');
 
               const isExclusive =
                 plan.slug === 'exclusive-concierge' ||
                 plan.slug.includes('concierge') ||
                 plan.key === 'EXCLUSIVE_CONCIERGE';
 
+              const activeCampaignName = calculatedOffer?.campaign?.name;
+              const activeCoupon = calculatedOffer?.coupon;
+
               return (
                 <div
                   key={plan._id || plan.slug}
                   className={`relative flex flex-col rounded-2xl bg-white p-5 sm:p-6 transition-all duration-300 ${
-                    plan.isPopular
+                    isFree
+                      ? 'border-2 border-emerald-500 shadow-lg shadow-emerald-900/10 lg:-translate-y-1.5'
+                      : plan.isPopular
                       ? 'border-2 border-[#E51F3E] shadow-lg shadow-rose-900/10 lg:-translate-y-1.5'
                       : 'border border-[#E8E1DB] shadow-2xs hover:shadow-sm hover:border-slate-300'
                   }`}
                 >
                   {/* Highlight Badges */}
-                  {plan.isPopular && (
+                  {isFree ? (
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-3.5 py-0.5 rounded-full text-[11px] font-extrabold tracking-wide uppercase shadow-2xs flex items-center gap-1 animate-bounce">
+                      <Sparkles className="w-3 h-3 fill-current" />
+                      <span>100% FREE OFFER</span>
+                    </div>
+                  ) : plan.isPopular ? (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#E51F3E] text-white px-3.5 py-0.5 rounded-full text-[11px] font-extrabold tracking-wide uppercase shadow-2xs flex items-center gap-1">
                       <Star className="w-3 h-3 fill-current" />
                       <span>{plan.badge || 'MOST POPULAR'}</span>
                     </div>
-                  )}
-
-                  {!plan.isPopular && plan.badge && (
+                  ) : plan.badge ? (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-100 text-amber-900 border border-amber-300 px-3 py-0.5 rounded-full text-[10.5px] font-extrabold tracking-wide uppercase shadow-2xs">
                       {plan.badge}
                     </div>
-                  )}
+                  ) : null}
 
                   {/* Card Header */}
                   <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
                     <div
                       className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                        plan.isPopular
+                        isFree
+                          ? 'bg-emerald-50 border border-emerald-200 text-emerald-600'
+                          : plan.isPopular
                           ? 'bg-rose-50 border border-rose-200'
                           : 'bg-slate-100 border border-slate-200/80'
                       }`}
@@ -500,20 +755,44 @@ export default function MembershipPage() {
                       )}
 
                       {/* Offer Price */}
-                      <span className="font-serif text-2xl sm:text-3xl font-extrabold text-[#111827]">
+                      <span
+                        className={`font-serif text-2xl sm:text-3xl font-extrabold ${
+                          isFree ? 'text-emerald-700' : 'text-[#111827]'
+                        }`}
+                      >
                         ₹{discPrice.toLocaleString('en-IN')}
                       </span>
 
                       {/* Discount Percentage Badge */}
                       {discountPct > 0 && (
-                        <span className="text-[10.5px] font-extrabold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        <span
+                          className={`text-[10.5px] font-extrabold px-2 py-0.5 rounded-md border ${
+                            isFree
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                              : 'bg-rose-100 text-rose-800 border-rose-200'
+                          }`}
+                        >
                           {discountPct}% OFF
                         </span>
                       )}
                     </div>
 
-                    {/* Seasonal Promotion Label */}
-                    {(plan.seasonalLabel || plan.isSeasonalOffer) && (
+                    {/* Active Campaign / Coupon Promotion Label */}
+                    {activeCampaignName && (
+                      <div className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-rose-50 via-[#FFF0F3] to-amber-50 border border-rose-200 text-[#9E132D] text-xs font-bold shadow-2xs">
+                        <Flame className="w-3.5 h-3.5 text-[#E51F3E] shrink-0" />
+                        <span>{activeCampaignName}</span>
+                      </div>
+                    )}
+
+                    {activeCoupon && (
+                      <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold">
+                        <Tag className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span>Coupon: {activeCoupon.code} Applied</span>
+                      </div>
+                    )}
+
+                    {!activeCampaignName && !activeCoupon && (plan.seasonalLabel || plan.isSeasonalOffer) && (
                       <div className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-rose-50 via-[#FFF0F3] to-amber-50 border border-rose-200 text-[#9E132D] text-xs font-bold shadow-2xs">
                         <Flame className="w-3.5 h-3.5 text-[#E51F3E] shrink-0" />
                         <span>{plan.seasonalLabel || 'Special Limited Offer'}</span>
@@ -577,7 +856,9 @@ export default function MembershipPage() {
                       disabled={processingOrder}
                       onClick={() => handlePlanAction(plan)}
                       className={`w-full h-11 min-h-[44px] px-4 rounded-xl font-bold text-xs sm:text-sm transition-all duration-200 cursor-pointer shadow-2xs flex items-center justify-center ${
-                        plan.isPopular
+                        isFree
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/20 hover:shadow-md animate-pulse'
+                          : plan.isPopular
                           ? 'bg-[#E51F3E] hover:bg-[#CC1432] text-white shadow-rose-900/20 hover:shadow-md'
                           : isExclusive
                           ? 'bg-gradient-to-r from-purple-800 to-indigo-900 hover:from-purple-900 hover:to-indigo-950 text-white'
@@ -586,6 +867,8 @@ export default function MembershipPage() {
                     >
                       {processingOrder && selectedPlan === plan.name
                         ? 'Processing...'
+                        : isFree
+                        ? '🎉 Claim 100% Free Offer'
                         : plan.ctaText || 'Select Plan'}
                     </button>
                   </div>

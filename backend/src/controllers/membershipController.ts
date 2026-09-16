@@ -7,6 +7,11 @@ import { Payment } from '../models/Payment';
 import { User } from '../models/User';
 import { AuditLog } from '../models/AuditLog';
 import { MembershipPlan } from '../models/MembershipPlan';
+import { calculateOffer, resolvePlan } from '../services/offerEngine';
+import { Coupon } from '../models/Coupon';
+import { CouponRedemption } from '../models/CouponRedemption';
+import { Campaign } from '../models/Campaign';
+import { Profile } from '../models/Profile';
 
 export interface MembershipPlanConfig {
   key: string;
@@ -332,7 +337,198 @@ function getContactCreditLimit(planKeyOrSlug: string, dynamicPlan?: any): number
 }
 
 /**
- * 2. Create Membership Order (Initiate Upgrade)
+ * 2. Calculate Dynamic Offer for Plan & Member
+ * POST /api/memberships/calculate-offer
+ */
+export async function calculateOfferEndpoint(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { planKey, slug, couponCode } = req.body;
+    const targetKey = planKey || slug;
+    if (!targetKey) {
+      return res.status(400).json({ success: false, message: 'planKey is required' });
+    }
+
+    const offerResult = await calculateOffer({
+      userId: req.user?.userId,
+      planKeyOrSlug: targetKey,
+      couponCode,
+    });
+
+    res.json({
+      success: true,
+      data: offerResult,
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message || 'Unable to calculate offer' });
+  }
+}
+
+/**
+ * 3. Claim 100% Free Membership Entitlement Flow (Part 27)
+ * POST /api/memberships/claim-free
+ */
+export async function claimFreeMembership(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    const { planKey, slug, planId, id, couponCode } = req.body;
+    const targetKey = planKey || slug || planId || id;
+    if (!targetKey) {
+      return res.status(400).json({ success: false, message: 'Please select a membership plan' });
+    }
+
+    const plan = await findPlanDynamic(targetKey);
+    if (!plan) {
+      return res.status(400).json({ success: false, message: 'Membership plan not found' });
+    }
+
+    // Recalculate offer on backend safely
+    const offerResult = await calculateOffer({
+      userId,
+      planKeyOrSlug: targetKey,
+      couponCode,
+    });
+
+    if (!offerResult.isFree || offerResult.finalPrice > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'You are not eligible for a 100% free membership entitlement on this plan.',
+      });
+    }
+
+    // Check active subscription
+    const now = new Date();
+    const existingActiveSub = await Subscription.findOne({
+      user: userId,
+      status: 'ACTIVE',
+      $and: [
+        { $or: [{ plan: plan.key }, { planId: plan.slug }] },
+        { $or: [{ expiryDate: { $gt: now } }, { expiryDate: null }] },
+      ],
+    });
+
+    const durationDays = plan.durationDays || 90;
+    const contactCredits = getContactCreditLimit(plan.slug);
+    const claimId = `claim_free_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    let subscription = existingActiveSub;
+    let expiryDate: Date;
+
+    if (existingActiveSub) {
+      const baseDate = existingActiveSub.expiryDate && existingActiveSub.expiryDate > now ? existingActiveSub.expiryDate : now;
+      expiryDate = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+      existingActiveSub.expiryDate = expiryDate;
+      existingActiveSub.contactRequestsRemaining = (existingActiveSub.contactRequestsRemaining || 0) + contactCredits;
+      existingActiveSub.paymentReference = claimId;
+      await existingActiveSub.save();
+    } else {
+      expiryDate = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+      subscription = await Subscription.create({
+        user: userId,
+        plan: plan.key,
+        planId: plan.slug,
+        status: 'ACTIVE',
+        startDate: new Date(),
+        expiryDate,
+        contactRequestsRemaining: contactCredits,
+        contactRequestsUsed: 0,
+        paymentReference: claimId,
+      });
+    }
+
+    // Create 0 INR payment record for audit
+    const payment = await Payment.create({
+      user: userId,
+      subscription: subscription._id,
+      orderId: claimId,
+      paymentId: claimId,
+      provider: 'free_campaign_claim',
+      providerPaymentId: claimId,
+      amount: 0,
+      currency: 'INR',
+      planId: plan.planId,
+      planName: plan.name,
+      paymentMethod: 'CAMPAIGN_100_PERCENT_OFFER',
+      status: 'SUCCESS',
+      metadata: {
+        reason: '100_PERCENT_CAMPAIGN_DISCOUNT',
+        campaignId: offerResult.campaign?.id,
+        campaignName: offerResult.campaign?.name,
+        couponId: offerResult.coupon?.id,
+        couponCode: offerResult.coupon?.code,
+        originalAmount: offerResult.originalPrice,
+        discountAmount: offerResult.discountAmount,
+        finalAmount: 0,
+      },
+    });
+
+    // Record Coupon Redemption if coupon was used
+    if (offerResult.coupon?.id) {
+      await CouponRedemption.create({
+        couponId: offerResult.coupon.id,
+        couponCode: offerResult.coupon.code,
+        userId,
+        campaignId: offerResult.campaign?.id,
+        planKey: plan.key,
+        originalAmount: offerResult.originalPrice,
+        discountAmount: offerResult.discountAmount,
+        finalAmount: 0,
+        paymentId: claimId,
+        orderId: claimId,
+        status: 'SUCCESS',
+      });
+      await Coupon.findByIdAndUpdate(offerResult.coupon.id, { $inc: { usedCount: 1 } });
+    }
+
+    // Increment campaign usage counts
+    if (offerResult.campaign?.id) {
+      const profile = await Profile.findOne({ user: userId });
+      const gender = profile?.gender || 'Female';
+
+      const updateObj: any = {
+        $inc: {
+          usedCount: 1,
+          'analytics.timesClaimed': 1,
+          'analytics.totalDiscountGiven': offerResult.discountAmount,
+        },
+      };
+      if (gender === 'Female') updateObj.$inc['genderUsageLimit.femaleUsed'] = 1;
+      if (gender === 'Male') updateObj.$inc['genderUsageLimit.maleUsed'] = 1;
+
+      await Campaign.findByIdAndUpdate(offerResult.campaign.id, updateObj);
+    }
+
+    // Log Audit
+    await AuditLog.create({
+      adminEmail: 'system@wonderfuljodi.com',
+      action: 'FREE_MEMBERSHIP_CLAIMED',
+      targetModel: 'Subscription',
+      targetId: String(subscription._id),
+      targetUserId: userId,
+      details: `100% free membership activated via ${offerResult.campaign?.name || offerResult.coupon?.name || 'Campaign'}`,
+      status: 'SUCCESS',
+    });
+
+    res.json({
+      success: true,
+      message: `Congratulations! Your free ${plan.name} membership has been activated successfully.`,
+      data: {
+        subscription,
+        payment,
+        plan,
+        offerResult,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * 4. Create Membership Order (Initiate Upgrade)
  * POST /api/memberships/create-order
  */
 export async function createOrder(req: AuthRequest, res: Response, next: NextFunction) {
@@ -353,7 +549,7 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
       });
     }
 
-    const { planKey, slug, planId, id } = req.body;
+    const { planKey, slug, planId, id, couponCode } = req.body;
     const targetKey = planKey || slug || planId || id;
     if (!targetKey) {
       return res.status(400).json({
@@ -398,27 +594,28 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
       });
     }
 
-    const initialCredits = getContactCreditLimit(plan.slug);
+    // Calculate server-authoritative final price using Offer Engine
+    const offerResult = await calculateOffer({
+      userId,
+      planKeyOrSlug: targetKey,
+      couponCode,
+    });
 
-    // Free plan activation
-    if (plan.amount === 0 && !plan.isVvip) {
-      const subscription = await Subscription.create({
-        user: userId,
-        plan: plan.key,
-        planId: plan.slug,
-        status: 'ACTIVE',
-        startDate: new Date(),
-        expiryDate: new Date(Date.now() + plan.durationDays * 24 * 60 * 60 * 1000),
-        contactRequestsUsed: 0,
-        contactRequestsRemaining: 0,
-      });
-
+    // If offer calculates to ₹0 (100% discount), instruct client to claim free
+    if (offerResult.isFree || offerResult.finalPrice === 0) {
       return res.json({
         success: true,
-        message: 'Free membership activated successfully.',
-        data: { subscription, plan },
+        isFree: true,
+        message: 'This membership offer is 100% free! Click Claim to activate.',
+        data: {
+          isFree: true,
+          plan,
+          offerResult,
+        },
       });
     }
+
+    const payableAmount = offerResult.finalPrice;
 
     // Paid plan upgrade flow
     const keyId = process.env.RAZORPAY_KEY_ID || process.env.RAPIDPAY_KEY_ID || '';
@@ -428,7 +625,6 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
     );
 
     let order: any = null;
-
     let isSimulated = !isLiveGateway;
 
     // If live/test Razorpay API credentials are configured, attempt real order creation
@@ -440,7 +636,7 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
         });
 
         order = await razorpay.orders.create({
-          amount: Math.round(plan.amount * 100),
+          amount: Math.round(payableAmount * 100),
           currency: 'INR',
           receipt: `rcpt_${userId}_${Date.now()}`,
           payment_capture: true,
@@ -448,6 +644,8 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
             planKey: plan.key,
             userId: String(userId),
             userEmail: user.email,
+            couponCode: offerResult.coupon?.code || '',
+            campaignId: offerResult.campaign?.id || '',
           },
         });
       } catch (rzpErr: any) {
@@ -465,9 +663,9 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
       order = {
         id: orderId,
         entity: 'order',
-        amount: Math.round(plan.amount * 100),
+        amount: Math.round(payableAmount * 100),
         amount_paid: 0,
-        amount_due: Math.round(plan.amount * 100),
+        amount_due: Math.round(payableAmount * 100),
         currency: 'INR',
         receipt: `rcpt_${userId}_${Date.now()}`,
         status: 'created',
@@ -476,6 +674,8 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
           planKey: plan.key,
           userId: String(userId),
           userEmail: user.email,
+          couponCode: offerResult.coupon?.code || '',
+          campaignId: offerResult.campaign?.id || '',
         },
         created_at: Math.floor(Date.now() / 1000),
       };
@@ -493,14 +693,14 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
       expiryDate: calculatedExpiry,
     });
 
-    // Create a pending Payment record
+    // Create a pending Payment record with full audit metadata
     const payment = await Payment.create({
       user: userId,
       subscription: pendingSubscription._id,
       orderId: order.id,
       provider: 'razorpay',
       providerPaymentId: order.id,
-      amount: plan.amount,
+      amount: payableAmount,
       currency: 'INR',
       planId: plan.planId,
       planName: plan.name,
@@ -511,6 +711,13 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
         planKey: plan.key,
         duration: plan.duration,
         userEmail: user.email,
+        originalAmount: offerResult.originalPrice,
+        discountAmount: offerResult.discountAmount,
+        finalAmount: payableAmount,
+        campaignId: offerResult.campaign?.id,
+        campaignName: offerResult.campaign?.name,
+        couponId: offerResult.coupon?.id,
+        couponCode: offerResult.coupon?.code,
         initiatedAt: new Date().toISOString(),
       },
     });
@@ -521,6 +728,7 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
       data: {
         order,
         plan,
+        offerResult,
         keyId: isLiveGateway ? keyId : 'rzp_test_mock',
         isSimulated,
         subscriptionId: pendingSubscription._id,
@@ -534,7 +742,7 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
 }
 
 /**
- * 3. Verify Payment & Activate Membership
+ * 5. Verify Payment & Activate Membership
  * POST /api/memberships/verify
  */
 export async function verifyPayment(req: AuthRequest, res: Response, next: NextFunction) {
@@ -615,6 +823,43 @@ export async function verifyPayment(req: AuthRequest, res: Response, next: NextF
       });
     }
 
+    // Atomically record coupon redemption if coupon was applied
+    if (payment?.metadata?.couponCode && payment?.metadata?.couponId) {
+      await CouponRedemption.create({
+        couponId: payment.metadata.couponId,
+        couponCode: payment.metadata.couponCode,
+        userId,
+        campaignId: payment.metadata.campaignId,
+        planKey: targetPlanKey,
+        originalAmount: payment.metadata.originalAmount || payment.amount,
+        discountAmount: payment.metadata.discountAmount || 0,
+        finalAmount: payment.metadata.finalAmount || payment.amount,
+        paymentId: finalPaymentId,
+        orderId,
+        status: 'SUCCESS',
+      });
+      await Coupon.findByIdAndUpdate(payment.metadata.couponId, { $inc: { usedCount: 1 } });
+    }
+
+    // Increment campaign analytics
+    if (payment?.metadata?.campaignId) {
+      const profile = await Profile.findOne({ user: userId });
+      const gender = profile?.gender || 'Male';
+
+      const updateObj: any = {
+        $inc: {
+          usedCount: 1,
+          'analytics.timesClaimed': 1,
+          'analytics.totalDiscountGiven': payment.metadata.discountAmount || 0,
+          'analytics.totalRevenueGenerated': payment.metadata.finalAmount || payment.amount,
+        },
+      };
+      if (gender === 'Female') updateObj.$inc['genderUsageLimit.femaleUsed'] = 1;
+      if (gender === 'Male') updateObj.$inc['genderUsageLimit.maleUsed'] = 1;
+
+      await Campaign.findByIdAndUpdate(payment.metadata.campaignId, updateObj);
+    }
+
     // Activate the user's subscription
     let subscription = null;
     const targetSubId = payment?.subscription || subscriptionId;
@@ -657,7 +902,7 @@ export async function verifyPayment(req: AuthRequest, res: Response, next: NextF
       action: 'PAYMENT_SUCCESS',
       targetModel: 'Subscription',
       targetId: String(subscription._id),
-      details: `Activated ${plan.name} (₹${plan.amount}) with ${contactCredits} contact credits for user ${userId}. Expiry: ${expiryDate.toISOString()}`,
+      details: `Activated ${plan.name} (₹${payment?.amount ?? plan.amount}) with ${contactCredits} contact credits for user ${userId}. Expiry: ${expiryDate.toISOString()}`,
       ipAddress: req.ip || '127.0.0.1',
       status: 'SUCCESS',
     }).catch(() => {});

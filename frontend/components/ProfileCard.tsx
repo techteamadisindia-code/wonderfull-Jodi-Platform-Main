@@ -7,6 +7,7 @@ import { ShieldCheck, MapPin, Briefcase, GraduationCap, Heart, ArrowRight } from
 import { addShortlist, removeShortlist, getAuthToken } from '../lib/api';
 
 import { DoctorAvatar } from './DoctorAvatar';
+import { getProfileDisplayName, getCandidateId } from '../lib/profileUtils';
 
 function getAge(dob?: string | Date) {
   if (!dob) return 28;
@@ -26,12 +27,15 @@ export function ProfileCard({
 }) {
   const [shortlisted, setShortlisted] = useState(isShortlistedDefault);
   const [isUpdating, setIsUpdating] = useState(false);
-  const age = getAge(profile.dob);
+  const age = profile.age || getAge(profile.dob);
   const [imgError, setImgError] = useState(!profile.primaryPhoto);
+
+  const displayName = getProfileDisplayName(profile);
+  const candidateId = getCandidateId(profile);
 
   const degreeLower = (profile.degree || profile.education || '').toLowerCase();
   const professionLower = (profile.profession || '').toLowerCase();
-  const nameLower = (profile.displayName || '').toLowerCase();
+  const nameLower = (displayName || '').toLowerCase();
 
   const isDoctor =
     nameLower.startsWith('dr.') ||
@@ -53,7 +57,7 @@ export function ProfileCard({
   const isDoctorVerified = rawStatus === 'DOCTOR_VERIFIED' || (rawStatus === 'VERIFIED' && isDoctor);
   const isGeneralVerified = rawStatus === 'VERIFIED' || rawStatus === 'APPROVED' || rawStatus === 'TRUE';
 
-  const profileUrl = `/profile/${profile._id}`;
+  const profileUrl = `/profile/${profile.candidateId || profile._id}`;
 
   const handleShortlistToggle = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -91,20 +95,20 @@ export function ProfileCard({
         <Link
           href={profileUrl}
           className="cursor-pointer block h-full w-full relative overflow-hidden"
-          title={`View full profile of ${profile.displayName}`}
-          aria-label={`View full profile of ${profile.displayName}`}
+          title={`View full profile of ${displayName}`}
+          aria-label={`View full profile of ${displayName}`}
         >
           {profile.primaryPhoto && !imgError ? (
             <img
               src={profile.primaryPhoto}
-              alt={profile.displayName}
+              alt={displayName}
               onError={() => setImgError(true)}
               className="h-full w-full object-cover object-center block transition-transform duration-500 group-hover:scale-105 cursor-pointer"
               loading="lazy"
             />
           ) : (
             <DoctorAvatar
-              name={profile.displayName}
+              name={displayName}
               gender={profile.gender}
               className="w-full h-full rounded-none"
             />
@@ -159,7 +163,7 @@ export function ProfileCard({
             href={profileUrl}
             className="block text-[15px] sm:text-[15.5px] leading-snug font-bold text-[#101728] hover:text-[#E51F3E] truncate whitespace-nowrap overflow-hidden text-ellipsis transition-colors cursor-pointer"
           >
-            {profile.displayName}
+            {displayName}
           </Link>
 
           {/* Age • Location */}

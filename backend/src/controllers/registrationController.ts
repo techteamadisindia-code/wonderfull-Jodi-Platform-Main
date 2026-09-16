@@ -764,6 +764,26 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
     registration.profile = newProfile._id;
     await registration.save();
 
+    // Attribute referral attribution if referral code was provided
+    const referralCode =
+      req.body.referralCode ||
+      raw.referralCode ||
+      basic.referralCode ||
+      (req.cookies && req.cookies.wj_referral_code);
+
+    if (referralCode) {
+      try {
+        const { attributeReferralOnRegistration } = await import('../services/referralService');
+        await attributeReferralOnRegistration({
+          referredUserId: String(newUser._id),
+          referralCode: String(referralCode).trim().toUpperCase(),
+          req,
+        });
+      } catch (refErr) {
+        console.warn('Referral attribution notice:', refErr);
+      }
+    }
+
     // 4. Generate Auth JWT Token for immediate login
     const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
     const accessToken = jwt.sign(

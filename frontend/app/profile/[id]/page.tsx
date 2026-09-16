@@ -32,9 +32,11 @@ import {
   Ban,
   ShieldAlert,
   X,
+  Crown,
 } from 'lucide-react';
 import { addShortlist, removeShortlist, getAuthToken, getMyProfile } from '../../../lib/api';
 import apiClient from '../../../services/api';
+import { fetchMySubscription, UserSubscriptionDetails } from '../../../services/membershipApi';
 import {
   sendInterest,
   checkInterestStatus,
@@ -53,6 +55,7 @@ import { submitPublicUserReport } from '../../../services/reportApi';
 import { blockProfile, unblockProfile, fetchBlockedProfiles } from '../../../services/blockApi';
 import { DoctorAvatar } from '../../../components/DoctorAvatar';
 import { Phone, Mail, MessageCircle, PhoneCall } from 'lucide-react';
+import { getProfileDisplayName, getCandidateId } from '../../../lib/profileUtils';
 
 function getAge(dob?: string | Date) {
   if (!dob) return 28;
@@ -99,6 +102,8 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
   const [interestActionLoading, setInterestActionLoading] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [isMyOwnProfile, setIsMyOwnProfile] = useState(false);
+  const [isPaidMember, setIsPaidMember] = useState<boolean>(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
 
   // Safety: Report & Block States
   const [reportModalOpen, setReportModalOpen] = useState(false);
@@ -151,13 +156,22 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
             if (isOwn) {
               setIsMyOwnProfile(true);
             } else {
-              const [statusRes, accessRes, blockedRes] = await Promise.all([
+              const [statusRes, accessRes, blockedRes, subRes] = await Promise.all([
                 checkInterestStatus(id).catch(() => null),
                 fetchContactAccessStatus(id).catch(() => null),
                 fetchBlockedProfiles().catch(() => []),
+                fetchMySubscription().catch(() => null),
               ]);
               if (statusRes) setInterestStatus(statusRes);
               if (accessRes) setContactAccess(accessRes);
+              if (subRes) {
+                const isPaid =
+                  subRes.status === 'ACTIVE' &&
+                  subRes.planKey !== 'FREE' &&
+                  subRes.slug !== 'free' &&
+                  (!subRes.expiryDate || new Date(subRes.expiryDate) > new Date());
+                setIsPaidMember(Boolean(isPaid));
+              }
               if (Array.isArray(blockedRes)) {
                 const blocked = blockedRes.some(
                   (b: any) =>
@@ -182,7 +196,32 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
     if (id) {
       loadProfileAndStatus();
     }
+
+    // Auto-refresh when login status changes in another tab or window
+    const handleAuthChange = () => {
+      if (id) loadProfileAndStatus();
+    };
+    window.addEventListener('storage', handleAuthChange);
+    window.addEventListener('focus', handleAuthChange);
+    return () => {
+      window.removeEventListener('storage', handleAuthChange);
+      window.removeEventListener('focus', handleAuthChange);
+    };
   }, [id]);
+
+  const candidateId = getCandidateId(profile);
+  const displayName = getProfileDisplayName(profile);
+
+  // Dynamic Document Title based on privacy
+  useEffect(() => {
+    if (profile) {
+      if (profile.isAuthenticatedViewer) {
+        document.title = `${displayName} – Wonderful Jodi Doctor Matrimony`;
+      } else {
+        document.title = `Candidate ${candidateId} – Wonderful Jodi Doctor Matrimony`;
+      }
+    }
+  }, [profile, displayName, candidateId]);
 
   const handleRequestContact = async () => {
     const token = getAuthToken();
@@ -466,6 +505,10 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
 
   // ── Start Chat ──
   const handleStartChat = () => {
+    if (!isPaidMember) {
+      setShowUpgradeModal(true);
+      return;
+    }
     const targetUserId = profile.user?._id || profile.user || interestStatus.targetUserId;
     if (targetUserId) {
       router.push(`/messages?user=${targetUserId}&profile=${profile._id}`);
@@ -563,11 +606,43 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
           </button>
 
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Profile ID: #{profile._id.slice(-6).toUpperCase()}
+            <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full uppercase tracking-wider">
+              Candidate ID: {candidateId}
             </span>
           </div>
         </div>
+
+        {/* ── Public Visitor Notice Banner ── */}
+        {!profile.isAuthenticatedViewer && (
+          <div className="rounded-2xl bg-gradient-to-r from-rose-50 via-amber-50/50 to-rose-50 border border-rose-200/90 p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold text-[#E51F3E]">
+                <Lock className="w-3.5 h-3.5" />
+                <span>Limited Public Preview</span>
+              </div>
+              <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                Sign in or create your free profile to view more member details.
+              </h3>
+              <p className="text-xs text-slate-600">
+                Candidate's full name, verification badge, and direct matrimonial communication are reserved for registered community members.
+              </p>
+            </div>
+            <div className="flex items-center gap-2.5 shrink-0">
+              <Link
+                href={`/login?redirect=/profile/${id}`}
+                className="px-4 py-2 text-xs sm:text-sm font-bold text-slate-700 bg-white border border-slate-200 hover:border-rose-300 hover:text-[#E51F3E] rounded-xl shadow-2xs transition cursor-pointer"
+              >
+                Sign In
+              </Link>
+              <Link
+                href="/register"
+                className="px-4 py-2 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-[#E51F3E] via-[#E21838] to-[#CC1432] hover:bg-[#ce102f] rounded-xl shadow-2xs hover:shadow-xs transition cursor-pointer"
+              >
+                Create Free Profile
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* ── Top Header Hero Card ── */}
         <section className="rounded-3xl bg-white p-6 sm:p-8 border border-rose-100/90 shadow-sm overflow-hidden text-left">
@@ -578,13 +653,13 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                 {selectedPhoto ? (
                   <img
                     src={selectedPhoto}
-                    alt={profile.displayName}
+                    alt={displayName}
                     className="h-full w-full object-cover object-center"
                   />
                 ) : (
                   <DoctorAvatar
                     photoUrl={null}
-                    name={profile.displayName}
+                    name={displayName}
                     gender={profile.gender}
                     className="w-full h-full rounded-none"
                   />
@@ -628,7 +703,7 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                   <span>Verified Matrimonial Match</span>
                 </div>
                 <h1 className="font-serif text-2xl sm:text-3xl lg:text-4xl font-bold text-[#101828]">
-                  {profile.displayName}
+                  {profile.isAuthenticatedViewer ? displayName : `Candidate ID: ${candidateId}`}
                 </h1>
                 <p className="text-xs sm:text-sm font-medium text-slate-600 mt-1 flex flex-wrap items-center gap-2">
                   <span className="inline-flex items-center gap-1">
@@ -739,14 +814,27 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                     <span>Edit My Profile</span>
                   </Link>
                 ) : interestStatus.status === 'ACCEPTED' ? (
-                  <button
-                    type="button"
-                    onClick={handleStartChat}
-                    className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-6 py-3 text-xs sm:text-sm font-bold transition shadow-md shadow-emerald-600/20 hover:-translate-y-0.5 cursor-pointer"
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                    <span>Start Chat</span>
-                  </button>
+                  isPaidMember ? (
+                    <button
+                      type="button"
+                      onClick={handleStartChat}
+                      className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-6 py-3 text-xs sm:text-sm font-bold transition shadow-md shadow-emerald-600/20 hover:-translate-y-0.5 cursor-pointer"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                      <span>Start Chat</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowUpgradeModal(true)}
+                      className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white px-6 py-3 text-xs sm:text-sm font-bold transition shadow-md shadow-amber-500/20 hover:-translate-y-0.5 cursor-pointer"
+                      title="Chat is available for paid members only"
+                    >
+                      <Lock className="w-4 h-4" />
+                      <span>Chat 🔒</span>
+                      <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded-full font-semibold">Upgrade</span>
+                    </button>
+                  )
                 ) : interestStatus.status === 'PENDING' && interestStatus.isReceiver ? (
                   <div className="flex items-center gap-2">
                     <button
@@ -902,11 +990,11 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
             <section className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-3">
               <h2 className="font-serif text-lg font-bold text-[#101828] flex items-center gap-2 border-b border-slate-100 pb-3">
                 <User className="w-4.5 h-4.5 text-[#E51F3E]" />
-                <span>About {profile.displayName}</span>
+                <span>About {profile.isAuthenticatedViewer ? displayName : `Candidate ${candidateId}`}</span>
               </h2>
               <p className="text-xs sm:text-sm leading-relaxed text-slate-700 whitespace-pre-line">
                 {profile.about ||
-                  `${profile.displayName} is a verified professional on Wonderful Jodi seeking a compatible life partner who shares similar family values, mutual respect, and life ambitions.`}
+                  `${profile.isAuthenticatedViewer ? displayName : `Candidate ${candidateId}`} is a verified professional on Wonderful Jodi seeking a compatible life partner who shares similar family values, mutual respect, and life ambitions.`}
               </p>
             </section>
 
@@ -1047,7 +1135,7 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                   className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-50 text-[#800020] text-xs font-bold hover:bg-amber-100 transition border border-amber-200/80"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Match Kundali with {profile.displayName?.split(' ')[0]} →</span>
+                  <span>Match Kundali with {profile.isAuthenticatedViewer ? (displayName || '').split(' ')[0] : candidateId} →</span>
                 </Link>
               </div>
 
@@ -1445,7 +1533,7 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
               </div>
               <div className="space-y-1">
                 <h3 className="font-serif text-lg font-bold text-slate-900">
-                  Block {profile.displayName}?
+                  Block {displayName}?
                 </h3>
                 <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
                   Are you sure you want to block this profile?
@@ -1490,6 +1578,63 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Paid Chat Upgrade Modal ── */}
+      {showUpgradeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl border border-rose-100 space-y-5 text-center relative animate-scale-up">
+            <button
+              type="button"
+              onClick={() => setShowUpgradeModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-400 to-amber-600 text-white flex items-center justify-center mx-auto shadow-md shadow-amber-500/30">
+              <Crown className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="font-serif text-xl font-bold text-slate-900">
+                Paid Membership Required
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                Chat is available for paid members. Upgrade your membership to start chatting with your accepted matches.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-left space-y-1.5 text-xs text-amber-900">
+              <div className="flex items-center gap-2 font-bold">
+                <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Premium Matchmaking Benefits:</span>
+              </div>
+              <ul className="list-disc list-inside space-y-1 text-[11.5px] text-amber-800 pl-1">
+                <li>Direct unlimited messaging with accepted matches</li>
+                <li>Direct contact details request and phone unlocking</li>
+                <li>Priority doctor profile matching recommendations</li>
+              </ul>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowUpgradeModal(false)}
+                className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <Link
+                href="/membership"
+                className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[#E51F3E] via-[#E21838] to-[#CC1432] text-white text-xs font-bold shadow-md shadow-red-600/25 hover:shadow-lg transition text-center inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Crown className="w-3.5 h-3.5" />
+                <span>Upgrade Membership</span>
+              </Link>
             </div>
           </div>
         </div>

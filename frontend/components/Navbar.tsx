@@ -59,11 +59,12 @@ export function Navbar() {
 
   const navLinks = [
     { href: '/', label: 'Home' },
+    { href: '/how-it-works', label: 'How It Works' },
     { href: '/search', label: 'Search' },
-    { href: '/astrology', label: 'Kundali' },
     { href: '/membership', label: 'Membership' },
+    { href: '/referrals', label: 'Refer & Earn' },
+    { href: '/astrology', label: 'Kundali' },
     { href: '/about', label: 'About Us' },
-    { href: '/contact', label: 'Help & Contact' },
   ];
 
   if (pathname?.startsWith('/admin') || pathname === '/login') {
@@ -108,6 +109,18 @@ export function Navbar() {
             {authenticated ? (
               <div className="flex items-center gap-1.5 xl:gap-2.5 shrink-0 flex-nowrap">
                 <NotificationBell />
+                <Link
+                  href="/interests"
+                  className={`inline-flex items-center gap-1 xl:gap-1.5 rounded-full px-2.5 xl:px-3.5 h-9 text-xs font-bold transition shadow-xs whitespace-nowrap shrink-0 ${
+                    pathname === '/interests'
+                      ? 'bg-[#E51F3E] text-white shadow-md shadow-red-600/20'
+                      : 'bg-rose-50 border border-rose-200 text-[#E51F3E] hover:bg-rose-100'
+                  }`}
+                  title="Interests & Connections"
+                >
+                  <Heart className="w-3.5 h-3.5 xl:w-4 xl:h-4 fill-current" />
+                  <span>Interests</span>
+                </Link>
                 <Link
                   href="/messages"
                   className={`inline-flex items-center gap-1 xl:gap-1.5 rounded-full px-2.5 xl:px-3.5 h-9 text-xs font-bold transition shadow-xs whitespace-nowrap shrink-0 ${
@@ -291,6 +304,21 @@ export function Navbar() {
                       <div className="flex items-center gap-2.5">
                         <Bell className="w-4 h-4 text-[#E51F3E]" />
                         <span>Notifications</span>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-300" />
+                    </Link>
+                    <Link
+                      href="/interests"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`px-3.5 py-3 rounded-xl text-[15px] font-semibold transition flex items-center justify-between border-0 outline-none ${
+                        pathname === '/interests'
+                          ? 'bg-[#FFF0F3] text-[#E9232E]'
+                          : 'text-slate-700 hover:bg-slate-50 hover:text-[#E9232E]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Heart className="w-4 h-4 text-[#E51F3E] fill-[#E51F3E]" />
+                        <span>Interests & Matches</span>
                       </div>
                       <ChevronRight className="w-4 h-4 text-slate-300" />
                     </Link>

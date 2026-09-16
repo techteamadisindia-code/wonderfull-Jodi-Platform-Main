@@ -22,9 +22,11 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  Flame,
+  Tag,
+  Share2,
+  Gift,
   ExternalLink,
-  Heart,
-  X,
 } from 'lucide-react';
 import { adminLogout, getAdminUser } from '../../services/authApi';
 import { Logo } from '../Logo';
@@ -90,12 +92,32 @@ export function AdminSidebar({
       ],
     },
     {
-      group: 'MONETIZATION & PLANS',
+      group: 'MONETIZATION & PROMOTIONS',
       items: [
         {
           href: '/admin/memberships',
           label: 'Memberships',
           icon: CreditCard,
+        },
+        {
+          href: '/admin/campaigns',
+          label: 'Campaigns & Rules',
+          icon: Flame,
+        },
+        {
+          href: '/admin/coupons',
+          label: 'Coupon Management',
+          icon: Tag,
+        },
+        {
+          href: '/admin/referrals',
+          label: 'Referrals Tracker',
+          icon: Share2,
+        },
+        {
+          href: '/admin/referral-rewards',
+          label: 'Referral Rewards',
+          icon: Gift,
         },
         {
           href: '/admin/payments',

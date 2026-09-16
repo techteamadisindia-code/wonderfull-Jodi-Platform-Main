@@ -41,16 +41,20 @@ export interface LogoProps {
    */
   textClassName?: string;
   /**
+   * Optional custom image source override
+   */
+  src?: string;
+  /**
    * Click handler
    */
   onClick?: () => void;
 }
 
 const SIZE_MAP = {
-  sm: { img: 'w-8 h-8', text: 'text-base sm:text-lg', sub: 'text-[7px] sm:text-[7.5px]' },
-  md: { img: 'w-9 h-9 sm:w-10 sm:h-10', text: 'text-lg sm:text-[20px] xl:text-[22px]', sub: 'text-[8px] sm:text-[8.5px] xl:text-[9px]' },
-  lg: { img: 'w-11 h-11 sm:w-12 sm:h-12', text: 'text-xl sm:text-2xl', sub: 'text-[9px] sm:text-[9.5px]' },
-  xl: { img: 'w-13 h-13 sm:w-14 sm:h-14', text: 'text-2xl sm:text-3xl', sub: 'text-[10px] sm:text-[11px]' },
+  sm: { img: 'w-8 h-8 sm:w-9 sm:h-9', text: 'text-base sm:text-lg', sub: 'text-[7.5px] sm:text-[8px]' },
+  md: { img: 'w-10 h-10 sm:w-11 sm:h-11', text: 'text-lg sm:text-[20px] xl:text-[21px]', sub: 'text-[8px] sm:text-[8.5px] xl:text-[9px]' },
+  lg: { img: 'w-12 h-12 sm:w-13 sm:h-13', text: 'text-xl sm:text-2xl', sub: 'text-[9px] sm:text-[9.5px]' },
+  xl: { img: 'w-14 h-14 sm:w-15 sm:h-15', text: 'text-2xl sm:text-3xl', sub: 'text-[10px] sm:text-[11px]' },
   '2xl': { img: 'w-16 h-16', text: 'text-4xl', sub: 'text-[12px]' },
 };
 
@@ -63,10 +67,12 @@ export function Logo({
   className = '',
   imageClassName = '',
   textClassName = '',
+  src,
   onClick,
 }: LogoProps) {
   const sizeConfig = typeof size === 'string' ? SIZE_MAP[size] || SIZE_MAP.md : null;
   const customImgStyle = typeof size === 'number' ? { width: `${size}px`, height: `${size}px` } : undefined;
+  const emblemSrc = src || (variant === 'dark' ? '/images/wonderful-jodi-logo-light.png' : '/images/wonderful-jodi-logo.png');
 
   const content = (
     <div
@@ -76,7 +82,7 @@ export function Logo({
       {/* Official Uploaded Logo Emblem */}
       <div className="relative shrink-0 flex items-center justify-center">
         <img
-          src="/images/wonderful-jodi-logo.png"
+          src={emblemSrc}
           alt="Wonderful Jodi Official Logo"
           className={`object-contain transition-transform duration-300 group-hover:scale-105 ${
             sizeConfig ? sizeConfig.img : ''

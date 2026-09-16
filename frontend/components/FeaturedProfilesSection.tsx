@@ -22,7 +22,14 @@ export function FeaturedProfilesSection() {
       const result = await searchProfiles('limit=4&sort=bestMatch');
       const fetchedProfiles: ProfileCardType[] = (result?.profiles || []).map((p: any) => ({
         _id: p._id,
-        displayName: p.displayName || p.user?.fullName || 'Verified Member',
+        id: p._id,
+        candidateId: p.candidateId,
+        profileId: p.profileId,
+        isAuthenticatedViewer: p.isAuthenticatedViewer,
+        displayName: p.displayName,
+        name: p.name,
+        publicName: p.publicName,
+        age: p.age,
         gender: p.gender,
         dob: p.dob,
         city: p.city,
@@ -31,6 +38,7 @@ export function FeaturedProfilesSection() {
         education: p.education,
         degree: p.degree,
         profession: p.profession,
+        specialization: p.specialization,
         primaryPhoto: p.primaryPhoto || (p.photos && p.photos[0]) || '',
         verificationStatus: p.verificationStatus,
       }));

@@ -264,8 +264,12 @@ export async function searchProfiles(req: Request, res: Response, next: NextFunc
         .populate('user', 'fullName role verificationStatus verified'),
     ]);
 
-    // Serialize profiles securely (strips all private user fields: email, mobile)
-    const sanitizedProfiles = rawProfiles.map(serializePublicProfile);
+    // Serialize profiles securely (strips candidate identity if not authenticated)
+    const sanitizedProfiles = rawProfiles.map((p) =>
+      serializePublicProfile(p, { viewerUserId: currentUserId || undefined })
+    );
+
+    res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
 
     res.json({
       success: true,

@@ -83,6 +83,7 @@ export async function startRegistration(payload: {
   dob?: string;
   lookingFor?: string;
   agreeTerms?: boolean;
+  referralCode?: string;
   rawFormData?: Record<string, any>;
 }): Promise<RegistrationSessionData> {
   const response = await apiClient.post<{
@@ -100,21 +101,21 @@ export async function startRegistration(payload: {
 export async function saveRegistrationStep(payload: {
   registrationId: string;
   stepNumber: number;
-  section?: string;
-  data?: Record<string, any>;
+  section: string;
+  data: Record<string, any>;
   rawFormData?: Record<string, any>;
 }): Promise<RegistrationSessionData> {
   const response = await apiClient.post<{
     success: boolean;
     data: RegistrationSessionData;
     message: string;
-  }>('/registration/save-step', payload);
+  }>('/registration/step', payload);
 
   return response.data.data;
 }
 
 /**
- * 3. Fast debounced auto-save without modifying active step number
+ * 3. Lightweight background auto-save
  */
 export async function autoSaveRegistration(payload: {
   registrationId: string;
@@ -150,6 +151,7 @@ export async function getRegistrationSession(
  */
 export async function completeRegistration(payload: {
   registrationId: string;
+  referralCode?: string;
   finalData?: Record<string, any>;
 }): Promise<{
   success: boolean;

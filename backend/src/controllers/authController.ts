@@ -191,6 +191,20 @@ export async function registerUser(req: Request, res: Response, next: NextFuncti
       lastActiveAt: new Date(),
     });
 
+    const referralCode = req.body.referralCode || (req.cookies && req.cookies.wj_referral_code);
+    if (referralCode) {
+      try {
+        const { attributeReferralOnRegistration } = await import('../services/referralService');
+        await attributeReferralOnRegistration({
+          referredUserId: String(user._id),
+          referralCode: String(referralCode).trim().toUpperCase(),
+          req,
+        });
+      } catch (refErr) {
+        console.warn('Referral attribution error (non-blocking):', refErr);
+      }
+    }
+
     const accessToken = signAccessToken(user._id.toString(), user.role);
     const { rawRefreshToken } = await issueRefreshToken(user._id.toString(), undefined, req);
 

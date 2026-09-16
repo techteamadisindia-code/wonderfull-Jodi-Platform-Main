@@ -72,7 +72,7 @@ export async function getShortlisted(req: AuthRequest, res: Response, next: Next
       _id: item._id,
       user: item.user,
       createdAt: item.createdAt,
-      profile: item.profile ? serializePublicProfile(item.profile) : null,
+      profile: item.profile ? serializePublicProfile(item.profile, { viewerUserId: userId }) : null,
     }));
 
     res.json({ success: true, data: sanitizedItems });

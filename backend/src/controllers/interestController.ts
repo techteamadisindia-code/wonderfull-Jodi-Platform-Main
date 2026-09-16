@@ -71,7 +71,7 @@ export async function createInterest(req: AuthRequest, res: Response, next: Next
       return res.status(404).json({ success: false, message: 'Candidate not found or inactive' });
     }
 
-    // Enforce recipient's whoCanSendInterest privacy setting
+    // Enforce recipient's whoCanSendInterest privacy setting (if verified_only)
     const targetProfile = await Profile.findOne({ user: targetUserId });
     const interestPrivacy = targetProfile?.privacySettings?.whoCanSendInterest || 'all';
 
@@ -84,23 +84,8 @@ export async function createInterest(req: AuthRequest, res: Response, next: Next
           message: 'This doctor only accepts interest requests from verified doctor profiles.',
         });
       }
-    } else if (interestPrivacy === 'premium_only') {
-      const isSenderPremium =
-        req.user?.role === 'admin' ||
-        Boolean(
-          await Subscription.findOne({
-            user: senderUserId,
-            status: 'ACTIVE',
-            $or: [{ expiryDate: { $gt: new Date() } }, { expiryDate: null }],
-          })
-        );
-      if (!isSenderPremium) {
-        return res.status(403).json({
-          success: false,
-          message: 'This doctor only accepts interest requests from Premium members.',
-        });
-      }
     }
+    // Free members can send interests freely without paid restrictions
 
     // Verify no block relationship
     const isBlocked = await Block.findOne({
@@ -124,20 +109,22 @@ export async function createInterest(req: AuthRequest, res: Response, next: Next
     if (existing) {
       if (existing.sender.toString() === senderUserId) {
         if (existing.status === 'PENDING') {
-          return res.status(200).json({
-            success: true,
-            message: 'Interest already sent to this profile',
+          return res.status(409).json({
+            success: false,
+            code: 'DUPLICATE_INTEREST',
+            message: 'You have already sent an interest to this profile.',
             data: existing,
           });
         }
         if (existing.status === 'ACCEPTED') {
-          return res.status(200).json({
-            success: true,
-            message: 'Interest already accepted! You can chat with this member.',
+          return res.status(409).json({
+            success: false,
+            code: 'DUPLICATE_INTEREST',
+            message: 'Interest already accepted with this profile.',
             data: existing,
           });
         }
-        // If previously declined or cancelled, allow re-sending
+        // If previously declined or cancelled or rejected, allow re-sending
         existing.status = 'PENDING';
         existing.updatedAt = new Date();
         await existing.save();
@@ -152,9 +139,10 @@ export async function createInterest(req: AuthRequest, res: Response, next: Next
           });
         }
         if (existing.status === 'ACCEPTED') {
-          return res.status(200).json({
-            success: true,
-            message: 'Interest already accepted!',
+          return res.status(409).json({
+            success: false,
+            code: 'DUPLICATE_INTEREST',
+            message: 'Interest already accepted with this profile.',
             data: existing,
           });
         }
@@ -165,10 +153,12 @@ export async function createInterest(req: AuthRequest, res: Response, next: Next
     const senderUser = await User.findById(senderUserId);
     const senderProfile = await Profile.findOne({ user: senderUserId });
     const receiverProfile = await Profile.findOne({ user: targetUserId });
-    const senderName = senderProfile?.displayName || senderUser?.fullName || 'A candidate';
+    const senderName = senderProfile?.displayName || senderUser?.fullName || 'A doctor';
     const senderPhoto = senderProfile?.primaryPhoto || senderProfile?.photos?.[0] || '';
     const senderProfileId = senderProfile ? String(senderProfile._id) : '';
     const receiverProfileId = receiverProfile ? String(receiverProfile._id) : '';
+    const senderDegree = senderProfile?.degree || senderProfile?.education || 'MBBS';
+    const senderSpecialization = senderProfile?.profession || senderProfile?.specialization || 'Doctor';
 
     const interest =
       existing && existing.sender.toString() === senderUserId
@@ -181,20 +171,22 @@ export async function createInterest(req: AuthRequest, res: Response, next: Next
             status: 'PENDING',
           });
 
-    // Create real database Notification for receiver (matches "❤️ Rushikesh K sent you an interest")
+    // Create real database Notification for receiver in MongoDB
     const notification = await Notification.create({
       user: targetUserId,
       type: 'INTEREST_RECEIVED',
       title: 'New Interest Received',
-      message: `❤️ ${senderName} sent you an interest.`,
-      actionUrl: senderProfileId ? `/profile/${senderProfileId}` : '/notifications',
-      link: senderProfileId ? `/profile/${senderProfileId}` : '/notifications',
+      message: `${senderName} sent you an interest.`,
+      actionUrl: '/interests',
+      link: '/interests',
       read: false,
       metadata: {
         interestId: interest._id,
         senderUserId,
         senderName,
         senderPhoto,
+        senderDegree,
+        senderSpecialization,
         senderProfileId,
         receiverProfileId,
         type: 'INTEREST_RECEIVED',
@@ -214,6 +206,8 @@ export async function createInterest(req: AuthRequest, res: Response, next: Next
           id: senderUserId,
           name: senderName,
           photo: senderPhoto,
+          degree: senderDegree,
+          specialization: senderSpecialization,
           profileId: senderProfileId,
         },
       });
@@ -322,6 +316,13 @@ export async function acceptInterest(req: AuthRequest, res: Response, next: Next
       });
     }
 
+    if (interest.status !== 'PENDING') {
+      return res.status(400).json({
+        success: false,
+        message: 'Interest request is not pending',
+      });
+    }
+
     interest.status = 'ACCEPTED';
     await interest.save();
 
@@ -338,7 +339,7 @@ export async function acceptInterest(req: AuthRequest, res: Response, next: Next
       user: senderUserId,
       type: 'INTEREST_ACCEPTED',
       title: 'Interest Accepted! 🎉',
-      message: `${recipientName} accepted your interest request. You can now chat!`,
+      message: 'Your interest has been accepted.',
       actionUrl: `/messages?user=${userId}`,
       link: `/messages?user=${userId}`,
       read: false,
@@ -392,7 +393,7 @@ export async function acceptInterest(req: AuthRequest, res: Response, next: Next
 
     res.json({
       success: true,
-      message: 'Interest accepted successfully. Chat is now available!',
+      message: 'Interest accepted successfully. Chat is now available for paid members!',
       data: {
         interest,
         conversationId: conversation._id,
@@ -404,7 +405,7 @@ export async function acceptInterest(req: AuthRequest, res: Response, next: Next
 }
 
 /**
- * Decline received interest
+ * Decline / Reject received interest
  */
 export async function declineInterest(req: AuthRequest, res: Response, next: NextFunction) {
   try {
@@ -429,11 +430,18 @@ export async function declineInterest(req: AuthRequest, res: Response, next: Nex
     if (!isReceiver && !isAdmin) {
       return res.status(403).json({
         success: false,
-        message: 'Only the recipient can decline this interest request',
+        message: 'Only the recipient can reject this interest request',
       });
     }
 
-    interest.status = 'DECLINED';
+    if (interest.status !== 'PENDING') {
+      return res.status(400).json({
+        success: false,
+        message: 'Interest request is not pending',
+      });
+    }
+
+    interest.status = 'REJECTED';
     await interest.save();
 
     // Fetch recipient info
@@ -445,16 +453,16 @@ export async function declineInterest(req: AuthRequest, res: Response, next: Nex
     const senderUserId = interest.sender.toString();
     const notification = await Notification.create({
       user: senderUserId,
-      type: 'INTEREST_DECLINED',
+      type: 'INTEREST_REJECTED',
       title: 'Interest Update',
-      message: `${recipientName} declined your interest request.`,
-      actionUrl: '/notifications',
-      link: '/notifications',
+      message: 'Your interest was not accepted.',
+      actionUrl: '/interests',
+      link: '/interests',
       read: false,
       metadata: {
         interestId: interest._id,
         recipientUserId: userId,
-        type: 'INTEREST_DECLINED',
+        type: 'INTEREST_REJECTED',
       },
     });
 
@@ -465,17 +473,20 @@ export async function declineInterest(req: AuthRequest, res: Response, next: Nex
         unreadCountDelta: 1,
       });
       io.to(`user:${senderUserId}`).emit('interestDeclined', { interest });
+      io.to(`user:${senderUserId}`).emit('interestRejected', { interest });
     }
 
     res.json({
       success: true,
-      message: 'Interest declined',
+      message: 'Interest rejected',
       data: interest,
     });
   } catch (error) {
     next(error);
   }
 }
+
+export const rejectInterest = declineInterest;
 
 /**
  * Generic update (for backward compatibility)
@@ -517,14 +528,24 @@ export async function getSentInterests(req: AuthRequest, res: Response, next: Ne
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const interests = await Interest.find({ sender: userId })
+    const query: any = { sender: userId };
+    if (req.query.status) {
+      const s = String(req.query.status).toUpperCase();
+      if (s === 'REJECTED' || s === 'DECLINED') {
+        query.status = { $in: ['REJECTED', 'DECLINED'] };
+      } else {
+        query.status = s;
+      }
+    }
+
+    const interests = await Interest.find(query)
       .populate('receiver', 'fullName verificationStatus email')
       .sort({ createdAt: -1 })
       .lean();
 
     const receiverIds = interests.map((i: any) => i.receiver?._id).filter(Boolean);
     const profiles = await Profile.find({ user: { $in: receiverIds } })
-      .select('user displayName profession city state primaryPhoto photos age education')
+      .select('user displayName profession specialization degree education city state primaryPhoto photos age dob gender')
       .lean();
     const profileMap = new Map(profiles.map((p: any) => [String(p.user), p]));
 
@@ -549,14 +570,24 @@ export async function getReceivedInterests(req: AuthRequest, res: Response, next
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const interests = await Interest.find({ receiver: userId })
+    const query: any = { receiver: userId };
+    if (req.query.status) {
+      const s = String(req.query.status).toUpperCase();
+      if (s === 'REJECTED' || s === 'DECLINED') {
+        query.status = { $in: ['REJECTED', 'DECLINED'] };
+      } else {
+        query.status = s;
+      }
+    }
+
+    const interests = await Interest.find(query)
       .populate('sender', 'fullName verificationStatus email')
       .sort({ createdAt: -1 })
       .lean();
 
     const senderIds = interests.map((i: any) => i.sender?._id).filter(Boolean);
     const profiles = await Profile.find({ user: { $in: senderIds } })
-      .select('user displayName profession city state primaryPhoto photos age education')
+      .select('user displayName profession specialization degree education city state primaryPhoto photos age dob gender')
       .lean();
     const profileMap = new Map(profiles.map((p: any) => [String(p.user), p]));
 
@@ -564,6 +595,52 @@ export async function getReceivedInterests(req: AuthRequest, res: Response, next
       ...i,
       senderProfile: i.sender ? profileMap.get(String(i.sender._id)) || null : null,
     }));
+
+    res.json({ success: true, data: enriched });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Get Accepted Connections (Interests accepted in either direction)
+ */
+export async function getAcceptedConnections(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    const interests = await Interest.find({
+      $or: [{ sender: userId }, { receiver: userId }],
+      status: 'ACCEPTED',
+    })
+      .populate('sender', 'fullName verificationStatus email')
+      .populate('receiver', 'fullName verificationStatus email')
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const otherUserIds = interests.map((i: any) =>
+      String(i.sender?._id) === String(userId) ? i.receiver?._id : i.sender?._id
+    ).filter(Boolean);
+
+    const profiles = await Profile.find({ user: { $in: otherUserIds } })
+      .select('user displayName profession specialization degree education city state primaryPhoto photos age dob gender')
+      .lean();
+    const profileMap = new Map(profiles.map((p: any) => [String(p.user), p]));
+
+    const enriched = interests.map((i: any) => {
+      const isSender = String(i.sender?._id) === String(userId);
+      const otherUser = isSender ? i.receiver : i.sender;
+      const otherProfile = otherUser ? profileMap.get(String(otherUser._id)) || null : null;
+      return {
+        ...i,
+        isSender,
+        otherUser,
+        otherProfile,
+      };
+    });
 
     res.json({ success: true, data: enriched });
   } catch (error) {

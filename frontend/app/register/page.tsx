@@ -155,6 +155,7 @@ function RegisterForm() {
   const [globalError, setGlobalError] = useState('');
   const [step1Errors, setStep1Errors] = useState<Record<string, string>>({});
   const [termsModalOpen, setTermsModalOpen] = useState(false);
+  const [referralCode, setReferralCode] = useState<string>('');
 
   // Password Strength Calculation
   const passwordStrength = useMemo(() => {
@@ -173,6 +174,21 @@ function RegisterForm() {
 
   const validateEmail = (val: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
   const validateMobile = (val: string) => /^[6-9]\d{9}$/.test(val.replace(/\D/g, ''));
+
+  // ─── 0. Capture Referral Code from URL or Local Storage ───
+  useEffect(() => {
+    const refParam = searchParams.get('ref') || searchParams.get('referralCode');
+    const storedRef = typeof window !== 'undefined' ? localStorage.getItem('wj_referral_code') : null;
+    const activeRef = (refParam || storedRef || '').trim().toUpperCase();
+    if (activeRef) {
+      setReferralCode(activeRef);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('wj_referral_code', activeRef);
+      }
+      // Track referral click event securely on backend (Part 15)
+      api.post('/referrals/track-click', { referralCode: activeRef }).catch(() => {});
+    }
+  }, [searchParams]);
 
   // ─── 1. Check for Existing Registration to Resume on Mount ───
   useEffect(() => {
@@ -470,12 +486,14 @@ function RegisterForm() {
           dob,
           lookingFor: gender === 'Female' ? 'Male' : 'Female',
           agreeTerms,
+          referralCode: referralCode || undefined,
           rawFormData: {
             fullName: cleanName,
             email: email.trim().toLowerCase(),
             mobile: cleanMobile,
             gender,
             dob,
+            referralCode: referralCode || undefined,
           },
         });
       } else {
@@ -611,9 +629,11 @@ function RegisterForm() {
 
       const finalResult = await completeRegistration({
         registrationId,
+        referralCode: referralCode || undefined,
         finalData: {
           agreeTerms: true,
           termsAccepted: true,
+          referralCode: referralCode || undefined,
           preferences: {
             lookingFor,
             prefAgeMin,

@@ -78,6 +78,14 @@ export function AdminHeader({ onOpenMobileMenu }: AdminHeaderProps) {
         return 'Broadcasts & Alerts';
       case 'admins':
         return 'Admin Team & Roles';
+      case 'campaigns':
+        return 'Seasonal Campaigns & Rule Engine';
+      case 'coupons':
+        return 'Coupon Management';
+      case 'referrals':
+        return 'Referrals & Member Attribution';
+      case 'referral-rewards':
+        return 'Referral Reward Configuration';
       case 'settings':
         return 'Platform Settings';
       default:

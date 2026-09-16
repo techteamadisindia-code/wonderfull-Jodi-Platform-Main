@@ -21,7 +21,9 @@ import {
   AlertCircle,
   Loader2,
   CheckCircle2,
+  X,
 } from 'lucide-react';
+import { fetchMySubscription } from '../../services/membershipApi';
 import {
   fetchConversations,
   fetchConversationMessages,
@@ -60,6 +62,8 @@ function ChatContent() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [moderationWarning, setModerationWarning] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isPaidMember, setIsPaidMember] = useState<boolean>(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -89,23 +93,45 @@ function ChatContent() {
 
     setLoadingConversations(true);
     try {
-      const list = await fetchConversations();
+      const [list, sub] = await Promise.all([
+        fetchConversations().catch(() => []),
+        fetchMySubscription().catch(() => null),
+      ]);
       setConversations(list);
+
+      const isPaid =
+        sub?.status === 'ACTIVE' &&
+        sub.planKey !== 'FREE' &&
+        sub.slug !== 'free' &&
+        (!sub.expiryDate || new Date(sub.expiryDate) > new Date());
+      setIsPaidMember(Boolean(isPaid));
 
       // If user came with ?user=... param, check if conversation already exists or initiate one
       if (targetUserIdParam || targetProfileIdParam) {
-        try {
-          const initRes = await initiateConversation({
-            targetUserId: targetUserIdParam || undefined,
-            profileId: targetProfileIdParam || undefined,
-          });
-          if (initRes.conversationId) {
-            setSelectedConversationId(initRes.conversationId);
+        if (!isPaid) {
+          setErrorMessage('Chat is available for paid members only.');
+          setShowUpgradeModal(true);
+        } else {
+          try {
+            const initRes = await initiateConversation({
+              targetUserId: targetUserIdParam || undefined,
+              profileId: targetProfileIdParam || undefined,
+            });
+            if (initRes.conversationId) {
+              setSelectedConversationId(initRes.conversationId);
+            }
+          } catch (initErr: any) {
+            console.error('Failed to initiate conversation:', initErr);
+            const errCode = initErr.response?.data?.code;
+            if (errCode === 'PREMIUM_REQUIRED') {
+              setErrorMessage('Chat is available for paid members only.');
+              setShowUpgradeModal(true);
+            } else if (errCode === 'INTEREST_NOT_ACCEPTED') {
+              setErrorMessage('Your interest must be accepted before chat can start.');
+            } else {
+              setErrorMessage(initErr.response?.data?.message || 'Chat requires an accepted interest between both members.');
+            }
           }
-        } catch (initErr: any) {
-          console.error('Failed to initiate conversation:', initErr);
-          const msg = initErr.response?.data?.message || 'Chat requires an accepted interest between both members.';
-          setErrorMessage(msg);
         }
       } else if (!selectedConversationId && list.length > 0) {
         setSelectedConversationId(list[0]._id);
@@ -156,8 +182,9 @@ function ChatContent() {
     e.preventDefault();
     if (!inputMessage.trim() || sending || !selectedConversationId) return;
 
-    if (!stats.isPremium && stats.messagesSentByMe >= stats.freeLimit) {
-      setErrorMessage('You have reached the free chat limit of 3 messages. Upgrade to Premium to continue chatting.');
+    if (!isPaidMember) {
+      setErrorMessage('Chat is available for paid members only.');
+      setShowUpgradeModal(true);
       return;
     }
 
@@ -190,14 +217,11 @@ function ChatContent() {
           data.message ||
             'Sharing direct phone numbers, email addresses, or contact handles is not allowed for your privacy and safety.'
         );
-      } else if (data?.code === 'CHAT_LIMIT_REACHED' || data?.upgradeRequired) {
-        setErrorMessage('You have reached the free chat limit of 3 messages. Upgrade to Premium to continue chatting.');
-        setStats((prev) => ({
-          ...prev,
-          messagesSentByMe: data.sentCount || 3,
-          canSendMessage: false,
-          remainingFreeMessages: 0,
-        }));
+      } else if (data?.code === 'PREMIUM_REQUIRED') {
+        setErrorMessage('Chat is available for paid members only.');
+        setShowUpgradeModal(true);
+      } else if (data?.code === 'INTEREST_NOT_ACCEPTED') {
+        setErrorMessage('Your interest must be accepted before chat can start.');
       } else {
         setErrorMessage(data?.message || 'Failed to send message. Please try again.');
       }
@@ -330,12 +354,10 @@ function ChatContent() {
                         </p>
                       </div>
 
-                      {/* Free Limit Counter Badge */}
-                      {conv.stats && !conv.stats.isPremium && (
-                        <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                          {conv.stats.messagesSentByMe}/3
-                        </span>
-                      )}
+                      {/* Connected indicator */}
+                      <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        Connected
+                      </span>
                     </div>
                   );
                 })
@@ -392,36 +414,25 @@ function ChatContent() {
                   )}
                 </div>
 
-                {/* Free Message Limit & Plan Status Banner (Requirement 10) */}
+                {/* Membership Plan Status Banner */}
                 <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-xs">
-                  {stats.isPremium ? (
-                    <div className="flex items-center gap-1.5 text-amber-700 font-semibold">
-                      <Crown className="w-4 h-4 text-amber-500" />
-                      <span>Premium Member • Unlimited messaging</span>
+                  {isPaidMember ? (
+                    <div className="flex items-center gap-1.5 text-emerald-700 font-semibold">
+                      <Crown className="w-4 h-4 text-emerald-600" />
+                      <span>Paid Member • Chat Unlocked</span>
                     </div>
                   ) : (
                     <div className="flex items-center justify-between w-full">
-                      <div className="flex items-center gap-1.5 text-slate-700 font-medium">
-                        <Info className="w-3.5 h-3.5 text-[#E51F3E]" />
-                        <span>
-                          {stats.messagesSentByMe >= stats.freeLimit ? (
-                            <strong className="text-[#E51F3E] font-bold">Free messages used</strong>
-                          ) : (
-                            <strong className="text-slate-900 font-bold">
-                              {stats.freeLimit - stats.messagesSentByMe} of {stats.freeLimit} free messages remaining
-                            </strong>
-                          )}
-                        </span>
+                      <div className="flex items-center gap-1.5 text-amber-800 font-medium">
+                        <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>Chat is available for paid members only.</span>
                       </div>
-                      {stats.messagesSentByMe >= stats.freeLimit ? (
-                        <span className="text-[11px] font-bold text-[#E51F3E] bg-rose-100 px-2 py-0.5 rounded-full">
-                          Limit Reached
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-slate-500 font-medium">
-                          {stats.freeLimit - stats.messagesSentByMe} of 3 remaining
-                        </span>
-                      )}
+                      <Link
+                        href="/membership"
+                        className="text-xs font-bold text-[#E51F3E] hover:underline shrink-0 ml-2"
+                      >
+                        Upgrade Membership →
+                      </Link>
                     </div>
                   )}
                 </div>
@@ -502,19 +513,19 @@ function ChatContent() {
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* ─── Bottom Area: Chat Limit Reached vs Message Composer ─── */}
-                {!stats.isPremium && stats.messagesSentByMe >= stats.freeLimit ? (
-                  /* ─── Premium Upgrade Panel (Requirement 9) ─── */
+                {/* ─── Bottom Area: Paid Upgrade Panel vs Message Composer ─── */}
+                {!isPaidMember ? (
+                  /* ─── Paid Membership Required Banner (Requirement 1 & 11) ─── */
                   <div className="p-5 sm:p-6 bg-gradient-to-br from-[#FFF5F7] via-white to-[#FFF0F3] border-t border-rose-200 text-center space-y-3 shadow-inner">
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-100 text-[#E51F3E] text-xs font-extrabold uppercase tracking-wider">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-extrabold uppercase tracking-wider">
                       <Lock className="w-3.5 h-3.5" />
-                      <span>Chat Limit Reached</span>
+                      <span>Paid Membership Required</span>
                     </div>
                     <h3 className="font-serif text-lg sm:text-xl font-bold text-slate-900">
-                      Continue Your Conversation ❤️
+                      Chat is available for paid members only
                     </h3>
                     <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
-                      You've used your 3 free messages with this match. Upgrade to Premium to continue chatting and unlock more matchmaking features.
+                      Chat is available for paid members only. Upgrade your membership to start chatting with your accepted matches and exchange verified communications.
                     </p>
                     <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
                       <Link
@@ -522,15 +533,8 @@ function ChatContent() {
                         className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-gradient-to-r from-[#E51F3E] via-[#E21838] to-[#CC1432] text-white text-xs sm:text-sm font-bold shadow-md shadow-red-600/25 hover:shadow-lg hover:shadow-red-600/35 hover:-translate-y-0.5 transition cursor-pointer"
                       >
                         <Crown className="w-4 h-4" />
-                        <span>Upgrade to Premium</span>
+                        <span>Upgrade Membership</span>
                       </Link>
-                      <button
-                        type="button"
-                        onClick={() => router.push('/search')}
-                        className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition cursor-pointer"
-                      >
-                        <span>Maybe Later</span>
-                      </button>
                     </div>
                   </div>
                 ) : (
@@ -538,11 +542,7 @@ function ChatContent() {
                   <form onSubmit={handleSendMessage} className="p-3.5 bg-white border-t border-slate-100 flex items-center gap-2.5">
                     <input
                       type="text"
-                      placeholder={
-                        !stats.isPremium
-                          ? `Type a message (${stats.freeLimit - stats.messagesSentByMe} free remaining)...`
-                          : 'Type a message...'
-                      }
+                      placeholder="Type a verified message..."
                       value={inputMessage}
                       onChange={(e) => setInputMessage(e.target.value)}
                       disabled={sending}
@@ -573,6 +573,62 @@ function ChatContent() {
             )}
           </section>
         </div>
+        {/* Upgrade Modal */}
+        {showUpgradeModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl border border-rose-100 space-y-5 text-center relative animate-scale-up">
+              <button
+                type="button"
+                onClick={() => setShowUpgradeModal(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-400 to-amber-600 text-white flex items-center justify-center mx-auto shadow-md shadow-amber-500/30">
+                <Crown className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="font-serif text-xl font-bold text-slate-900">
+                  Paid Membership Required
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  Chat is available for paid members only. Upgrade your membership to start chatting with your accepted matches and exchange verified communications.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-left space-y-1.5 text-xs text-amber-900">
+                <div className="flex items-center gap-2 font-bold">
+                  <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Premium Matchmaking Benefits:</span>
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-[11.5px] text-amber-800 pl-1">
+                  <li>Direct unlimited messaging with accepted doctors</li>
+                  <li>Direct contact requests and verified details</li>
+                  <li>Instant real-time message notifications</li>
+                </ul>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowUpgradeModal(false)}
+                  className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <Link
+                  href="/membership"
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[#E51F3E] via-[#E21838] to-[#CC1432] text-white text-xs font-bold shadow-md shadow-red-600/25 hover:shadow-lg transition text-center inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Crown className="w-3.5 h-3.5" />
+                  <span>Upgrade Membership</span>
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );

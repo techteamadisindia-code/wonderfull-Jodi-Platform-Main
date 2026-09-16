@@ -4,12 +4,16 @@ export interface InterestProfilePreview {
   user: string;
   displayName: string;
   profession?: string;
+  specialization?: string;
+  degree?: string;
+  education?: string;
   city?: string;
   state?: string;
   primaryPhoto?: string;
   photos?: string[];
   age?: number;
-  education?: string;
+  dob?: string | Date;
+  gender?: string;
 }
 
 export interface InterestItem {
@@ -29,6 +33,9 @@ export interface InterestItem {
   status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'REJECTED' | 'CANCELLED';
   senderProfile?: InterestProfilePreview;
   receiverProfile?: InterestProfilePreview;
+  isSender?: boolean;
+  otherUser?: any;
+  otherProfile?: InterestProfilePreview;
   createdAt: string;
   updatedAt: string;
 }
@@ -78,19 +85,30 @@ export async function acceptInterest(interestId: string): Promise<{ interest: In
   return response.data.data;
 }
 
-export async function declineInterest(interestId: string): Promise<InterestItem> {
+export async function rejectInterest(interestId: string): Promise<InterestItem> {
   const response = await apiClient.patch<{ success: boolean; message: string; data: InterestItem }>(
-    `/interests/${interestId}/decline`
+    `/interests/${interestId}/reject`
   );
   return response.data.data;
 }
 
-export async function fetchSentInterests(): Promise<InterestItem[]> {
-  const response = await apiClient.get<{ success: boolean; data: InterestItem[] }>('/interests/sent');
+export async function declineInterest(interestId: string): Promise<InterestItem> {
+  return rejectInterest(interestId);
+}
+
+export async function fetchSentInterests(status?: string): Promise<InterestItem[]> {
+  const url = status ? `/interests/sent?status=${encodeURIComponent(status)}` : '/interests/sent';
+  const response = await apiClient.get<{ success: boolean; data: InterestItem[] }>(url);
   return response.data.data || [];
 }
 
-export async function fetchReceivedInterests(): Promise<InterestItem[]> {
-  const response = await apiClient.get<{ success: boolean; data: InterestItem[] }>('/interests/received');
+export async function fetchReceivedInterests(status?: string): Promise<InterestItem[]> {
+  const url = status ? `/interests/received?status=${encodeURIComponent(status)}` : '/interests/received';
+  const response = await apiClient.get<{ success: boolean; data: InterestItem[] }>(url);
+  return response.data.data || [];
+}
+
+export async function fetchAcceptedConnections(): Promise<InterestItem[]> {
+  const response = await apiClient.get<{ success: boolean; data: InterestItem[] }>('/interests/accepted');
   return response.data.data || [];
 }

@@ -5,6 +5,7 @@ import { HeroSearchBar } from '../components/HeroSearchBar';
 import { FeaturedProfilesSection } from '../components/FeaturedProfilesSection';
 import { WeddingSearch } from '../components/WeddingSearch';
 import { Testimonials } from '../components/Testimonials';
+import { AwardsSection } from '../components/AwardsSection';
 import { AnimatedStatCounter } from '../components/AnimatedStatCounter';
 import {
   Heart,
@@ -438,6 +439,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* ── Section 6.8: Awards & Recognition ───────── */}
+      <AwardsSection />
 
       {/* ── Section 7: Call to Action ───────── */}
       <section className="relative py-8 sm:py-10 px-4 sm:px-6 lg:px-8 overflow-hidden bg-[#FAF8F5]">

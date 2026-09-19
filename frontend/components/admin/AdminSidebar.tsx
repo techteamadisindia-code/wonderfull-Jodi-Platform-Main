@@ -29,6 +29,7 @@ import {
   ExternalLink,
   Briefcase,
   BookOpen,
+  Trophy,
 } from 'lucide-react';
 import { adminLogout, getAdminUser } from '../../services/authApi';
 import { Logo } from '../Logo';
@@ -182,6 +183,11 @@ export function AdminSidebar({
           href: '/admin/blogs',
           label: 'Blogs & Articles',
           icon: BookOpen,
+        },
+        {
+          href: '/admin/awards',
+          label: 'Awards Management',
+          icon: Trophy,
         },
         {
           href: '/admin/settings',

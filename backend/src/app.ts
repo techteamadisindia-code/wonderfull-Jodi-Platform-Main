@@ -39,6 +39,8 @@ import { publicCareerRouter, adminCareerRouter } from './routes/careerRoutes';
 import { seedDefaultCareersIfEmpty } from './controllers/careerController';
 import { publicBlogRouter, adminBlogRouter } from './routes/blogRoutes';
 import { seedDefaultBlogsIfEmpty } from './controllers/blogController';
+import { publicAwardRouter, adminAwardRouter } from './routes/awardRoutes';
+import { seedDefaultAwardsIfEmpty } from './controllers/awardController';
 import { globalLimiter } from './middleware/rateLimiters';
 import { errorHandler } from './middleware/errorHandler';
 import { checkMaintenanceMode } from './middleware/maintenanceMiddleware';
@@ -103,9 +105,10 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 import verificationRoutes from './routes/verificationRoutes';
 
-// Serve uploaded profile photos and blog cover photos statically
+// Serve uploaded profile photos, blog covers, and award logos statically
 app.use('/uploads/profiles', express.static(path.join(process.cwd(), 'uploads', 'profiles')));
 app.use('/uploads/blogs', express.static(path.join(process.cwd(), 'uploads', 'blogs')));
+app.use('/uploads/awards', express.static(path.join(process.cwd(), 'uploads', 'awards')));
 
 // Health check endpoints
 app.get('/api/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -160,6 +163,8 @@ app.use('/api/careers', publicCareerRouter);
 app.use('/api/admin/careers', adminCareerRouter);
 app.use('/api/blogs', publicBlogRouter);
 app.use('/api/admin/blogs', adminBlogRouter);
+app.use('/api/awards', publicAwardRouter);
+app.use('/api/admin/awards', adminAwardRouter);
 
 // Centralized Error Handler
 app.use(errorHandler);
@@ -169,6 +174,7 @@ connectDatabase()
     console.log('MongoDB connected');
     await seedDefaultCareersIfEmpty();
     await seedDefaultBlogsIfEmpty();
+    await seedDefaultAwardsIfEmpty();
   })
   .catch((error) => {
     console.error('Database connection failed:', error);

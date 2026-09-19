@@ -72,23 +72,38 @@ export function Logo({
 }: LogoProps) {
   const sizeConfig = typeof size === 'string' ? SIZE_MAP[size] || SIZE_MAP.md : null;
   const customImgStyle = typeof size === 'number' ? { width: `${size}px`, height: `${size}px` } : undefined;
-  const emblemSrc = src || (variant === 'dark' ? '/images/wonderful-jodi-logo-light.png' : '/images/wonderful-jodi-logo.png');
+  const emblemSrc = src || '/images/wonderful-jodi-logo.png';
 
   const content = (
     <div
-      className={`inline-flex items-center gap-2.5 sm:gap-3 group select-none shrink-0 whitespace-nowrap ${className}`}
+      className={`inline-flex items-center gap-2.5 sm:gap-3 select-none shrink-0 whitespace-nowrap ${className}`}
       onClick={onClick}
     >
       {/* Official Uploaded Logo Emblem */}
       <div className="relative shrink-0 flex items-center justify-center">
-        <img
-          src={emblemSrc}
-          alt="Wonderful Jodi Official Logo"
-          className={`object-contain transition-transform duration-300 group-hover:scale-105 ${
-            sizeConfig ? sizeConfig.img : ''
-          } ${imageClassName}`}
-          style={customImgStyle}
-        />
+        {variant === 'dark' ? (
+          <div
+            className={`rounded-full bg-white p-1 sm:p-1.5 shadow-sm border border-white/30 flex items-center justify-center shrink-0 ${
+              sizeConfig ? sizeConfig.img : 'w-10 h-10 sm:w-11 sm:h-11'
+            } ${imageClassName}`}
+            style={customImgStyle}
+          >
+            <img
+              src={emblemSrc}
+              alt="Wonderful Jodi Official Logo"
+              className="w-full h-full object-contain block select-none"
+            />
+          </div>
+        ) : (
+          <img
+            src={emblemSrc}
+            alt="Wonderful Jodi Official Logo"
+            className={`object-contain block select-none ${
+              sizeConfig ? sizeConfig.img : 'w-10 h-10 sm:w-11 sm:h-11'
+            } ${imageClassName}`}
+            style={customImgStyle}
+          />
+        )}
       </div>
 
       {/* Brand Typography (Optional) */}
@@ -105,13 +120,13 @@ export function Logo({
 
           {subtitle && (
             <span
-              className={`uppercase tracking-[0.2em] font-bold mt-0.5 sm:mt-1 whitespace-nowrap ${
+              className={`uppercase tracking-[0.25em] font-extrabold mt-0.5 sm:mt-1 whitespace-nowrap ${
                 sizeConfig ? sizeConfig.sub : 'text-[8.5px]'
               } ${
                 subtitle === 'ADMIN CONSOLE'
                   ? 'text-amber-400'
                   : variant === 'dark'
-                  ? 'text-[#FDA4AF]'
+                  ? 'text-[#FF385C]'
                   : 'text-[#C99635]'
               }`}
             >

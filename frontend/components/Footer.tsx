@@ -11,8 +11,10 @@ import {
   Lock,
   Stethoscope,
   Headphones,
-  Crown,
-  Sparkles,
+  Users,
+  ChevronRight,
+  Shield,
+  Heart,
   Linkedin,
   Instagram,
   Facebook,
@@ -48,7 +50,7 @@ export function Footer() {
       ariaLabel: 'Wonderful Jodi on LinkedIn',
       title: 'Follow Wonderful Jodi on LinkedIn',
       icon: Linkedin,
-      hoverClass: 'hover:bg-[#0A66C2]/15 hover:border-[#0A66C2] hover:text-[#0A66C2]',
+      bgClass: 'bg-[#0077B5] hover:bg-[#006399] text-white hover:shadow-[0_0_12px_rgba(0,119,181,0.5)]',
     },
     {
       name: 'Instagram',
@@ -56,7 +58,7 @@ export function Footer() {
       ariaLabel: 'Wonderful Jodi on Instagram',
       title: 'Follow Wonderful Jodi on Instagram',
       icon: Instagram,
-      hoverClass: 'hover:bg-[#E4405F]/15 hover:border-[#E4405F] hover:text-[#E4405F]',
+      bgClass: 'bg-gradient-to-tr from-[#FD1D1D] via-[#E1306C] to-[#833AB4] text-white hover:shadow-[0_0_12px_rgba(225,48,108,0.5)]',
     },
     {
       name: 'Facebook',
@@ -64,7 +66,7 @@ export function Footer() {
       ariaLabel: 'Wonderful Jodi on Facebook',
       title: 'Follow Wonderful Jodi on Facebook',
       icon: Facebook,
-      hoverClass: 'hover:bg-[#1877F2]/15 hover:border-[#1877F2] hover:text-[#1877F2]',
+      bgClass: 'bg-[#1877F2] hover:bg-[#1263cf] text-white hover:shadow-[0_0_12px_rgba(24,119,242,0.5)]',
     },
     {
       name: 'X',
@@ -72,67 +74,100 @@ export function Footer() {
       ariaLabel: 'Wonderful Jodi on X',
       title: 'Follow Wonderful Jodi on X (formerly Twitter)',
       icon: XIcon,
-      hoverClass: 'hover:bg-white/15 hover:border-slate-300 hover:text-white',
+      bgClass: 'bg-[#000000] border border-slate-700 hover:border-slate-500 text-white hover:shadow-[0_0_12px_rgba(255,255,255,0.2)]',
     },
   ];
 
   return (
-    <footer className="bg-[#0B1424] text-slate-300 border-t border-slate-800/80 overflow-hidden text-left w-full">
-      {/* ── Top & Main Content Container ── */}
-      <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 pt-7 sm:pt-8 pb-5">
-        {/* ── Top Brand Area: Logo, Tagline & CTAs (Height approx 70-90px) ── */}
-        <div className="pb-6 border-b border-slate-800/80 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
-          {/* Brand Left: Logo + Short description */}
-          <div className="space-y-2 max-w-xl">
+    <footer className="bg-[#07111E] text-slate-300 border-t border-slate-800/80 overflow-hidden text-left w-full relative">
+      {/* Background Decorative Heart Watermark on the Right (matches visual inspiration) */}
+      <div 
+        className="absolute -right-8 top-12 w-80 h-80 pointer-events-none opacity-[0.045] select-none hidden lg:block"
+        aria-hidden="true"
+      >
+        <svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
+          <path
+            d="M100 170 C100 170 20 120 20 65 C20 30 50 15 80 35 C100 50 100 50 100 50 C100 50 100 50 120 35 C150 15 180 30 180 65 C180 120 100 170 100 170 Z"
+            stroke="#E51F3E"
+            strokeWidth="7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
+
+      {/* ── Main Footer Grid Container ── */}
+      <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 pt-10 sm:pt-12 pb-8 relative z-10">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-8 lg:gap-8">
+          
+          {/* ── SECTION A: BRAND INTRODUCTION (approx 32% desktop width) ── */}
+          <div className="lg:col-span-4 space-y-5 pr-0 lg:pr-4">
+            {/* Logo with high contrast dark emblem */}
             <div className="inline-block">
               <Logo
-                size="md"
+                size="lg"
                 variant="dark"
                 subtitle="DOCTOR MATRIMONY"
-                imageClassName="w-10 h-10 sm:w-11 sm:h-11"
-                textClassName="text-xl sm:text-[22px]"
+                imageClassName="w-12 h-12 sm:w-[52px] sm:h-[52px]"
+                textClassName="text-xl sm:text-2xl"
               />
             </div>
-            <p className="text-[13.5px] sm:text-sm text-slate-300 leading-relaxed max-w-lg">
+
+            {/* Brand Mission Statement */}
+            <p className="text-[13.5px] sm:text-sm text-slate-300/90 leading-relaxed">
               Bringing medical professionals together for meaningful, secure, and compatible lifelong connections.
             </p>
-          </div>
 
-          {/* Action CTAs Right (Height ~38px) */}
-          <div className="flex flex-wrap items-center gap-3 shrink-0 self-stretch sm:self-auto">
+            {/* 3 Mini Trust Indicators */}
+            <div className="pt-1 pb-1 flex items-center justify-between text-slate-300 text-[11px] sm:text-[11.5px] max-w-[380px]">
+              <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+                <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Verified Profiles</span>
+              </div>
+              <div className="h-4 w-px bg-slate-700/60 shrink-0 mx-1" aria-hidden="true" />
+              <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+                <Stethoscope className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Doctors Community</span>
+              </div>
+              <div className="h-4 w-px bg-slate-700/60 shrink-0 mx-1" aria-hidden="true" />
+              <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+                <Heart className="w-3.5 h-3.5 text-[#E51F3E] shrink-0 fill-[#E51F3E]/20" />
+                <span>Safe &amp; Secure</span>
+              </div>
+            </div>
+
+            {/* Compact Promotional Card */}
             <Link
               href="/register"
-              className="inline-flex items-center justify-center gap-2 h-9 sm:h-10 px-4 rounded-full bg-slate-900/80 hover:bg-emerald-950/40 border border-emerald-500/40 text-xs sm:text-[13px] font-semibold text-emerald-400 shadow-2xs transition-all duration-200 hover:border-emerald-400 hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+              className="group flex items-center justify-between gap-3 p-3 sm:p-3.5 rounded-xl bg-gradient-to-r from-rose-950/40 via-slate-900/70 to-slate-900/90 border border-rose-500/25 hover:border-rose-500/50 hover:shadow-[0_4px_20px_rgba(229,31,62,0.15)] transition-all duration-200"
             >
-              <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>Join Doctor Community</span>
-            </Link>
-
-            <Link
-              href="/membership"
-              className="inline-flex items-center justify-center gap-2 h-9 sm:h-10 px-4 rounded-full bg-slate-900/80 hover:bg-rose-950/40 border border-rose-500/40 text-xs sm:text-[13px] font-semibold text-rose-300 shadow-2xs transition-all duration-200 hover:border-rose-400 hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
-            >
-              <Crown className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-              <span>Upgrade to Premium</span>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-rose-900/60 border border-rose-500/30 flex items-center justify-center text-rose-300 shrink-0 group-hover:scale-105 transition-transform duration-200">
+                  <Users className="w-4 h-4 text-[#FF4D6D]" />
+                </div>
+                <div className="text-left">
+                  <p className="text-xs sm:text-[13px] font-medium text-slate-200 group-hover:text-white transition-colors">
+                    Join doctors looking for meaningful connections.
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-rose-400 shrink-0 group-hover:translate-x-0.5 transition-transform duration-200" />
             </Link>
           </div>
-        </div>
 
-        {/* ── 4 Main Footer Columns (Height approx 150-190px) ── */}
-        <div className="pt-6 sm:pt-7 pb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-7 lg:gap-8">
-          {/* Column 1: COMPANY */}
-          <section aria-labelledby="footer-company-heading">
+          {/* ── SECTION B: COMPANY (approx 17% width) ── */}
+          <section aria-labelledby="footer-company-heading" className="lg:col-span-2">
             <h3
               id="footer-company-heading"
-              className="font-bold uppercase text-[13px] sm:text-[14px] tracking-wider text-[#FDA4AF] mb-3 flex items-center gap-1.5"
+              className="font-bold uppercase text-[13px] sm:text-[14px] tracking-wider text-white mb-4 relative pb-2 after:content-[''] after:absolute after:bottom-0 after:left-0 after:w-5 after:h-[2px] after:bg-[#E51F3E] after:rounded-full"
             >
-              <span>Company</span>
+              Company
             </h3>
-            <ul className="space-y-2 text-[13.5px] sm:text-[14px]">
+            <ul className="space-y-2.5 text-[13.5px] sm:text-[14px]">
               <li>
                 <Link
                   href="/about"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
                   About Us
                 </Link>
@@ -140,7 +175,7 @@ export function Footer() {
               <li>
                 <Link
                   href="/how-it-works"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
                   How It Works
                 </Link>
@@ -148,23 +183,39 @@ export function Footer() {
               <li>
                 <Link
                   href="/stories"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
                   Success Stories
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/membership"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  href="/careers"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
-                  Pricing & Plans
+                  Careers
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/awards"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
+                >
+                  Awards &amp; Recognition
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/blog"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
+                >
+                  Blog
                 </Link>
               </li>
               <li>
                 <Link
                   href="/contact"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
                   Contact Us
                 </Link>
@@ -172,19 +223,19 @@ export function Footer() {
             </ul>
           </section>
 
-          {/* Column 2: SERVICES */}
-          <section aria-labelledby="footer-services-heading">
+          {/* ── SECTION C: SERVICES (approx 17% width) ── */}
+          <section aria-labelledby="footer-services-heading" className="lg:col-span-2">
             <h3
               id="footer-services-heading"
-              className="font-bold uppercase text-[13px] sm:text-[14px] tracking-wider text-[#FDA4AF] mb-3 flex items-center gap-1.5"
+              className="font-bold uppercase text-[13px] sm:text-[14px] tracking-wider text-white mb-4 relative pb-2 after:content-[''] after:absolute after:bottom-0 after:left-0 after:w-5 after:h-[2px] after:bg-[#E51F3E] after:rounded-full"
             >
-              <span>Services</span>
+              Services
             </h3>
-            <ul className="space-y-2 text-[13.5px] sm:text-[14px]">
+            <ul className="space-y-2.5 text-[13.5px] sm:text-[14px]">
               <li>
                 <Link
                   href="/search"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
                   Search Doctors
                 </Link>
@@ -192,7 +243,7 @@ export function Footer() {
               <li>
                 <Link
                   href="/register"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
                   Create Your Profile
                 </Link>
@@ -200,67 +251,83 @@ export function Footer() {
               <li>
                 <Link
                   href="/membership"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
                   Membership Plans
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/blog"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  href="/centres"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
-                  Matrimony Blog
+                  Matchmaking Centres
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/kundali"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  href="/kundali-match"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
-                  Kundali & Astrology
+                  Kundali &amp; Astrology
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/live"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
+                >
+                  Live Meetups
                 </Link>
               </li>
               <li>
                 <Link
                   href="/about"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
                   Doctor Community
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/membership"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
+                >
+                  Premium Benefits
                 </Link>
               </li>
             </ul>
           </section>
 
-          {/* Column 3: TRUST & SAFETY */}
-          <section aria-labelledby="footer-safety-heading">
+          {/* ── SECTION D: SUPPORT & SAFETY (approx 17% width) ── */}
+          <section aria-labelledby="footer-support-heading" className="lg:col-span-2">
             <h3
-              id="footer-safety-heading"
-              className="font-bold uppercase text-[13px] sm:text-[14px] tracking-wider text-[#FDA4AF] mb-3 flex items-center gap-1.5"
+              id="footer-support-heading"
+              className="font-bold uppercase text-[13px] sm:text-[14px] tracking-wider text-white mb-4 relative pb-2 after:content-[''] after:absolute after:bottom-0 after:left-0 after:w-5 after:h-[2px] after:bg-[#E51F3E] after:rounded-full"
             >
-              <span>Trust & Safety</span>
+              Support
             </h3>
-            <ul className="space-y-2 text-[13.5px] sm:text-[14px]">
+            <ul className="space-y-2.5 text-[13.5px] sm:text-[14px]">
               <li>
                 <Link
-                  href="/verification-policy"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  href="/help"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
-                  Profile Verification
+                  Help &amp; Contact
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/verification-policy"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  href="/help"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
-                  Medical Verification
+                  FAQs
                 </Link>
               </li>
               <li>
                 <Link
                   href="/safety"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
                   Safety Guidelines
                 </Link>
@@ -268,7 +335,7 @@ export function Footer() {
               <li>
                 <Link
                   href="/safety"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
                   Report a Profile
                 </Link>
@@ -276,7 +343,7 @@ export function Footer() {
               <li>
                 <Link
                   href="/privacy"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
                   Privacy Policy
                 </Link>
@@ -284,24 +351,40 @@ export function Footer() {
               <li>
                 <Link
                   href="/terms-and-conditions"
-                  className="text-slate-300 hover:text-[#E51F3E] inline-flex items-center transition-all duration-200 ease-out hover:translate-x-0.5 focus-visible:outline-none focus-visible:text-rose-400"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
                 >
-                  Terms & Conditions
+                  Terms &amp; Conditions
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/terms-and-conditions#refund-policy"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
+                >
+                  Refund Policy
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/privacy#cookies"
+                  className="text-slate-300/90 hover:text-white hover:translate-x-1 inline-flex items-center transition-all duration-150 focus-visible:outline-none focus-visible:text-rose-400"
+                >
+                  Cookie Policy
                 </Link>
               </li>
             </ul>
           </section>
 
-          {/* Column 4: CONTACT US & FOLLOW US */}
-          <section aria-labelledby="footer-contact-heading" className="space-y-4">
+          {/* ── SECTION E: CONTACT US & FOLLOW US (approx 20% width) ── */}
+          <section aria-labelledby="footer-contact-heading" className="lg:col-span-2 space-y-6">
             <div>
               <h3
                 id="footer-contact-heading"
-                className="font-bold uppercase text-[13px] sm:text-[14px] tracking-wider text-[#FDA4AF] mb-3 flex items-center gap-1.5"
+                className="font-bold uppercase text-[13px] sm:text-[14px] tracking-wider text-white mb-4 relative pb-2 after:content-[''] after:absolute after:bottom-0 after:left-0 after:w-5 after:h-[2px] after:bg-[#E51F3E] after:rounded-full"
               >
-                <span>Contact Us</span>
+                Contact Us
               </h3>
-              <div className="space-y-2 text-[13.5px] sm:text-[14px] text-slate-300">
+              <div className="space-y-3 text-[13px] sm:text-[13.5px] text-slate-300">
                 {/* Phone */}
                 <div>
                   <a
@@ -309,7 +392,7 @@ export function Footer() {
                     className="inline-flex items-center gap-2.5 py-0.5 text-slate-300 hover:text-white font-medium transition-colors group focus-visible:ring-2 focus-visible:ring-[#E51F3E] rounded"
                     aria-label="Call customer support at +91 096075 59547"
                   >
-                    <span className="w-7 h-7 rounded-md bg-rose-950/60 border border-rose-900/60 flex items-center justify-center text-[#E51F3E] shrink-0 group-hover:scale-105 group-hover:border-rose-500/50 group-hover:bg-rose-900/70 transition-all duration-200 shadow-2xs">
+                    <span className="w-7 h-7 rounded-full bg-rose-950/80 border border-rose-500/30 flex items-center justify-center text-[#E51F3E] shrink-0 group-hover:scale-105 group-hover:bg-rose-900 transition-all duration-200">
                       <Phone className="w-3.5 h-3.5" />
                     </span>
                     <span className="tracking-wide">+91 096075 59547</span>
@@ -323,10 +406,10 @@ export function Footer() {
                     className="inline-flex items-center gap-2.5 py-0.5 text-slate-300 hover:text-white font-medium transition-colors group focus-visible:ring-2 focus-visible:ring-[#E51F3E] rounded"
                     aria-label="Email customer support at support@wonderfuljodi.com"
                   >
-                    <span className="w-7 h-7 rounded-md bg-rose-950/60 border border-rose-900/60 flex items-center justify-center text-[#E51F3E] shrink-0 group-hover:scale-105 group-hover:border-rose-500/50 group-hover:bg-rose-900/70 transition-all duration-200 shadow-2xs">
+                    <span className="w-7 h-7 rounded-full bg-rose-950/80 border border-rose-500/30 flex items-center justify-center text-[#E51F3E] shrink-0 group-hover:scale-105 group-hover:bg-rose-900 transition-all duration-200">
                       <Mail className="w-3.5 h-3.5" />
                     </span>
-                    <span className="truncate">support@wonderfuljodi.com</span>
+                    <span className="break-all sm:break-normal">support@wonderfuljodi.com</span>
                   </a>
                 </div>
 
@@ -339,10 +422,10 @@ export function Footer() {
                     className="inline-flex items-start gap-2.5 py-0.5 text-slate-300 hover:text-white transition-colors group focus-visible:ring-2 focus-visible:ring-[#E51F3E] rounded"
                     aria-label="View office location on Google Maps"
                   >
-                    <span className="w-7 h-7 rounded-md bg-rose-950/60 border border-rose-900/60 flex items-center justify-center text-[#E51F3E] shrink-0 mt-0.5 group-hover:scale-105 group-hover:border-rose-500/50 group-hover:bg-rose-900/70 transition-all duration-200 shadow-2xs">
+                    <span className="w-7 h-7 rounded-full bg-rose-950/80 border border-rose-500/30 flex items-center justify-center text-[#E51F3E] shrink-0 mt-0.5 group-hover:scale-105 group-hover:bg-rose-900 transition-all duration-200">
                       <MapPin className="w-3.5 h-3.5" />
                     </span>
-                    <span className="leading-snug text-[13px] text-slate-400 group-hover:text-slate-300 transition-colors">
+                    <span className="leading-snug text-xs sm:text-[12.5px] text-slate-400 group-hover:text-slate-200 transition-colors">
                       A303, Gera Imperium Gateway,<br />
                       Nashik Phata, PMC, Pune 411034
                     </span>
@@ -351,12 +434,12 @@ export function Footer() {
               </div>
             </div>
 
-            {/* ── Follow Us Social Media Section (40px x 40px, 10px gap) ── */}
-            <div className="pt-2 border-t border-slate-800/80">
-              <span className="font-bold uppercase text-[11px] sm:text-[12px] tracking-wider text-[#FDA4AF] mb-2.5 block">
+            {/* ── FOLLOW US Social Media Section ── */}
+            <div className="pt-2">
+              <h4 className="font-bold uppercase text-[12px] sm:text-[13px] tracking-wider text-white mb-3 relative pb-1.5 after:content-[''] after:absolute after:bottom-0 after:left-0 after:w-4 after:h-[2px] after:bg-[#E51F3E] after:rounded-full">
                 Follow Us
-              </span>
-              <div className="flex items-center gap-[10px]">
+              </h4>
+              <div className="flex items-center gap-2.5">
                 {socialLinks.map((social) => {
                   const Icon = social.icon;
                   return (
@@ -367,92 +450,56 @@ export function Footer() {
                       rel="noopener noreferrer"
                       aria-label={social.ariaLabel}
                       title={social.title}
-                      className={`w-10 h-10 rounded-full bg-slate-900/80 border border-slate-700/80 text-slate-300 flex items-center justify-center transition-all duration-200 ease-out shadow-2xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E51F3E] ${social.hoverClass}`}
+                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 hover:scale-110 active:scale-95 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 ${social.bgClass}`}
                     >
-                      <Icon className="w-4.5 h-4.5 transition-transform duration-200 group-hover:scale-110" />
+                      <Icon className="w-4 h-4" />
                     </a>
                   );
                 })}
               </div>
             </div>
           </section>
-        </div>
 
-        {/* ── Compact Trust Row (Small & Subtle) ── */}
-        <div className="py-3.5 border-t border-slate-800/80 grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-slate-300 text-xs sm:text-[13px]">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="font-medium text-slate-200">Verified Profiles</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="font-medium text-slate-200">Secure &amp; Private</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Stethoscope className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="font-medium text-slate-200">Doctor Community</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Headphones className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="font-medium text-slate-200">Dedicated Support</span>
+        </div>
+      </div>
+
+      {/* ── SECTION F: FOOTER TRUST FEATURES ROW ── */}
+      <div className="border-t border-slate-800/80 bg-[#050D18]/90">
+        <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:divide-x md:divide-slate-800/80 text-xs sm:text-[13px] text-slate-300">
+            <div className="flex items-center justify-center gap-2.5 py-1 px-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-medium text-slate-200">Verified Profiles</span>
+            </div>
+            <div className="flex items-center justify-center gap-2.5 py-1 px-2">
+              <Lock className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-medium text-slate-200">Secure &amp; Private</span>
+            </div>
+            <div className="flex items-center justify-center gap-2.5 py-1 px-2">
+              <Stethoscope className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-medium text-slate-200">Doctor Community</span>
+            </div>
+            <div className="flex items-center justify-center gap-2.5 py-1 px-2">
+              <Headphones className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-medium text-slate-200">Dedicated Support</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ── Copyright Bar (Height approx 60-70px, background #070D18) ── */}
-      <div className="border-t border-slate-800/90 bg-[#070D18] py-4 text-xs sm:text-[13px] text-slate-400">
-        <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-3 text-center md:text-left">
-          {/* Copyright & Tagline Left */}
-          <div className="space-y-0.5">
-            <p className="text-slate-300 font-medium tracking-wide">
-              © 2026 Wonderful Jodi. All rights reserved.
-            </p>
-            <p className="text-[12px] text-emerald-400/90 font-medium">
-              Trusted connections. Healthier tomorrows.
-            </p>
-          </div>
-
-          {/* Bottom Legal Navigation Right */}
-          <nav aria-label="Legal & Information Navigation" className="flex flex-wrap items-center justify-center md:justify-end gap-x-4 sm:gap-x-5 gap-y-1.5 text-[12.5px] sm:text-[13px] text-slate-400">
-            <Link
-              href="/"
-              className="hover:text-[#E51F3E] transition-colors duration-150 focus-visible:outline-none focus-visible:text-rose-400"
-            >
-              Home
-            </Link>
-            <Link
-              href="/search"
-              className="hover:text-[#E51F3E] transition-colors duration-150 focus-visible:outline-none focus-visible:text-rose-400"
-            >
-              Search
-            </Link>
-            <Link
-              href="/privacy"
-              className="hover:text-[#E51F3E] transition-colors duration-150 focus-visible:outline-none focus-visible:text-rose-400"
-            >
-              Privacy Policy
-            </Link>
-            <Link
-              href="/terms-and-conditions"
-              className="hover:text-[#E51F3E] transition-colors duration-150 focus-visible:outline-none focus-visible:text-rose-400"
-            >
-              Terms &amp; Conditions
-            </Link>
-            <Link
-              href="/terms-and-conditions#refund-policy"
-              className="hover:text-[#E51F3E] transition-colors duration-150 focus-visible:outline-none focus-visible:text-rose-400"
-            >
-              Refund Policy
-            </Link>
-            <Link
-              href="/contact"
-              className="hover:text-[#E51F3E] transition-colors duration-150 focus-visible:outline-none focus-visible:text-rose-400"
-            >
-              Contact Us
-            </Link>
-          </nav>
+      {/* ── SECTION G: COPYRIGHT SECTION (Clean, Centered, No Raw Links) ── */}
+      <div className="border-t border-slate-800/90 bg-[#030810] py-4 text-xs sm:text-[13px] text-center">
+        <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 space-y-1">
+          <p className="text-slate-200 font-medium tracking-wide">
+            © 2026 Wonderful Jodi. All rights reserved.
+          </p>
+          <p className="text-[12px] text-emerald-400/90 font-medium tracking-normal">
+            Trusted connections. Healthier tomorrows.
+          </p>
         </div>
       </div>
     </footer>
   );
 }
+
+export default Footer;

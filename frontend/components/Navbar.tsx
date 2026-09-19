@@ -59,12 +59,12 @@ export function Navbar() {
 
   const navLinks = [
     { href: '/', label: 'Home' },
-    { href: '/how-it-works', label: 'How It Works' },
     { href: '/search', label: 'Search' },
     { href: '/membership', label: 'Membership' },
-    { href: '/referrals', label: 'Refer & Earn' },
-    { href: '/astrology', label: 'Kundali' },
-    { href: '/about', label: 'About Us' },
+    { href: '/kundali-match', label: 'Kundali & Astrology' },
+    { href: '/success-stories', label: 'Success Stories' },
+    { href: '/blog', label: 'Blog' },
+    { href: '/contact', label: 'Contact' },
   ];
 
   if (pathname?.startsWith('/admin') || pathname === '/login') {
@@ -87,14 +87,16 @@ export function Navbar() {
           {/* Desktop Navigation Links - Centered & Clean Horizontal Row */}
           <nav className="hidden lg:flex items-center justify-center gap-0.5 xl:gap-1.5 2xl:gap-2 flex-nowrap shrink-0 mx-auto">
             {navLinks.map((link) => {
-              const isActive = pathname === link.href;
+              const isActive =
+                pathname === link.href ||
+                (link.href === '/kundali-match' && (pathname === '/astrology' || pathname?.startsWith('/kundali-match')));
               return (
                 <Link
                   key={link.href}
                   href={link.href}
                   className={`whitespace-nowrap px-2.5 py-1.5 xl:px-3.5 xl:py-2 rounded-full text-[13px] xl:text-[14px] 2xl:text-[14.5px] font-medium transition-all duration-200 relative border-0 outline-none shrink-0 ${
                     isActive
-                      ? 'text-[#E9232E] bg-[#FFF0F3] font-semibold'
+                      ? 'text-[#E9232E] bg-[#FFF0F3] font-semibold border-b-2 border-[#E9232E]'
                       : 'text-[#334155] hover:text-[#E9232E] hover:bg-slate-50/80'
                   }`}
                 >
@@ -267,7 +269,9 @@ export function Navbar() {
               </p>
               <nav className="flex flex-col gap-1 text-slate-800 font-medium">
                 {navLinks.map((link) => {
-                  const isActive = pathname === link.href;
+                  const isActive =
+                    pathname === link.href ||
+                    (link.href === '/kundali-match' && (pathname === '/astrology' || pathname?.startsWith('/kundali-match')));
                   return (
                     <Link
                       key={link.href}

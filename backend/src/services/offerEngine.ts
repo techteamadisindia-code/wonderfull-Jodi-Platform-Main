@@ -517,7 +517,7 @@ export async function calculateOffer(params: {
       coupon.applicablePlans.length > 0 &&
       !coupon.applicablePlans.includes('ALL') &&
       !coupon.applicablePlans.some(
-        (p) =>
+        (p: string) =>
           p.toLowerCase() === plan.slug.toLowerCase() ||
           p.toUpperCase() === plan.key.toUpperCase()
       )

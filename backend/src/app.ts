@@ -35,6 +35,10 @@ import contactAccessRoutes from './routes/contactAccessRoutes';
 import campaignRoutes from './routes/campaignRoutes';
 import couponRoutes from './routes/couponRoutes';
 import referralRoutes from './routes/referralRoutes';
+import { publicCareerRouter, adminCareerRouter } from './routes/careerRoutes';
+import { seedDefaultCareersIfEmpty } from './controllers/careerController';
+import { publicBlogRouter, adminBlogRouter } from './routes/blogRoutes';
+import { seedDefaultBlogsIfEmpty } from './controllers/blogController';
 import { globalLimiter } from './middleware/rateLimiters';
 import { errorHandler } from './middleware/errorHandler';
 import { checkMaintenanceMode } from './middleware/maintenanceMiddleware';
@@ -99,8 +103,9 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 import verificationRoutes from './routes/verificationRoutes';
 
-// Serve uploaded profile photos statically (verifications are stored privately and streamed via /api/verifications/document/:filename)
+// Serve uploaded profile photos and blog cover photos statically
 app.use('/uploads/profiles', express.static(path.join(process.cwd(), 'uploads', 'profiles')));
+app.use('/uploads/blogs', express.static(path.join(process.cwd(), 'uploads', 'blogs')));
 
 // Health check endpoints
 app.get('/api/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -151,12 +156,20 @@ app.use('/api/locations', locationRoutes);
 app.use('/api/community', communityMasterRoutes);
 app.use('/api/admin/master-data', adminMasterDataRoutes);
 app.use('/api/biodata', biodataRoutes);
+app.use('/api/careers', publicCareerRouter);
+app.use('/api/admin/careers', adminCareerRouter);
+app.use('/api/blogs', publicBlogRouter);
+app.use('/api/admin/blogs', adminBlogRouter);
 
 // Centralized Error Handler
 app.use(errorHandler);
 
 connectDatabase()
-  .then(() => console.log('MongoDB connected'))
+  .then(async () => {
+    console.log('MongoDB connected');
+    await seedDefaultCareersIfEmpty();
+    await seedDefaultBlogsIfEmpty();
+  })
   .catch((error) => {
     console.error('Database connection failed:', error);
     process.exit(1);

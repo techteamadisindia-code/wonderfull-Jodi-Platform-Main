@@ -27,6 +27,8 @@ import {
   Share2,
   Gift,
   ExternalLink,
+  Briefcase,
+  BookOpen,
 } from 'lucide-react';
 import { adminLogout, getAdminUser } from '../../services/authApi';
 import { Logo } from '../Logo';
@@ -170,6 +172,16 @@ export function AdminSidebar({
           href: '/admin/admins',
           label: 'Admin Team & Roles',
           icon: ShieldAlert,
+        },
+        {
+          href: '/admin/careers',
+          label: 'Careers & Openings',
+          icon: Briefcase,
+        },
+        {
+          href: '/admin/blogs',
+          label: 'Blogs & Articles',
+          icon: BookOpen,
         },
         {
           href: '/admin/settings',

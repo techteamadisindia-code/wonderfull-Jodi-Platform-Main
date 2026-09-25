@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -90,7 +90,7 @@ const REJECTION_REASONS = [
   'Other (see custom note below)',
 ];
 
-export default function AdminProfileDetailsPage() {
+function AdminProfileDetailsContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -2517,5 +2517,20 @@ export default function AdminProfileDetailsPage() {
         }}
       />
     </div>
+  );
+}
+
+export default function AdminProfileDetailsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-16 text-center text-slate-400">
+          <div className="w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-xs font-bold">Loading doctor profile details...</p>
+        </div>
+      }
+    >
+      <AdminProfileDetailsContent />
+    </Suspense>
   );
 }

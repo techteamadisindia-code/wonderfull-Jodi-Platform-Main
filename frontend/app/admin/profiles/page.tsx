@@ -468,7 +468,7 @@ export default function AdminProfilesPage() {
                             {profile.primaryPhoto ? (
                               <img
                                 src={profile.primaryPhoto}
-                                alt={profile.displayName}
+                                alt={profile.displayName || 'Profile'}
                                 className="w-11 h-11 rounded-full object-cover border border-slate-200/90 shadow-2xs"
                               />
                             ) : (
@@ -496,7 +496,7 @@ export default function AdminProfilesPage() {
                               <span
                                 className="font-bold text-slate-900 text-xs sm:text-sm truncate max-w-[160px] group-hover:text-[#E51F3E] transition-colors cursor-pointer"
                                 onClick={() => setSelectedProfile(profile)}
-                                title={profile.displayName}
+                                title={profile.displayName || ''}
                               >
                                 {profile.displayName}
                               </span>
@@ -724,7 +724,7 @@ export default function AdminProfilesPage() {
                         return (
                           <img
                             src={displayImg}
-                            alt={selectedProfile.displayName}
+                            alt={selectedProfile.displayName || 'Profile'}
                             className="w-full h-full object-cover"
                           />
                         );

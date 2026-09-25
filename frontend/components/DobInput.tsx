@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Calendar, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { validateDateOfBirth } from '../lib/doctorConstants';
 
@@ -13,6 +13,7 @@ interface DobInputProps {
   className?: string;
   error?: string | null;
   disabled?: boolean;
+  gender?: string;
 }
 
 export function DobInput({
@@ -24,6 +25,7 @@ export function DobInput({
   className = '',
   error: externalError,
   disabled = false,
+  gender,
 }: DobInputProps) {
   // Split internal state into Day, Month, Year
   const [day, setDay] = useState('');
@@ -37,93 +39,118 @@ export function DobInput({
   const yearRef = useRef<HTMLInputElement>(null);
   const hiddenDateInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync from incoming ISO string `YYYY-MM-DD`
+  // Track the last value emitted to parent to prevent re-render loop/wiping
+  const lastEmittedValueRef = useRef<string>('');
+  const isTypingRef = useRef<boolean>(false);
+
+  // Sync from incoming ISO string `YYYY-MM-DD` or reset when externally cleared
   useEffect(() => {
+    // If the change came from our own onChange emission, skip overwriting local state
+    if (value === lastEmittedValueRef.current && isTypingRef.current) {
+      return;
+    }
+
     if (value && typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
       const [y, m, d] = value.split('-');
       setYear(y);
       setMonth(m);
       setDay(d);
       setLocalError(null);
+      lastEmittedValueRef.current = value;
     } else if (!value) {
-      setDay('');
-      setMonth('');
-      setYear('');
-      setLocalError(null);
+      // If external value is completely empty and user is not currently typing in a field
+      if (!isTypingRef.current) {
+        setDay('');
+        setMonth('');
+        setYear('');
+        setLocalError(null);
+        lastEmittedValueRef.current = '';
+      }
     }
   }, [value]);
 
-  // Validate whenever day, month, or year changes
-  const handlePartChange = (newDay: string, newMonth: string, newYear: string, triggerTouch = true) => {
-    if (triggerTouch) setTouched(true);
+  // Core validation & emission logic
+  const handlePartChange = useCallback(
+    (newDay: string, newMonth: string, newYear: string, triggerTouch = true) => {
+      if (triggerTouch) setTouched(true);
+      isTypingRef.current = true;
 
-    const cleanDay = newDay.replace(/\D/g, '').slice(0, 2);
-    const cleanMonth = newMonth.replace(/\D/g, '').slice(0, 2);
-    const cleanYear = newYear.replace(/\D/g, '').slice(0, 4);
+      const cleanDay = newDay.replace(/\D/g, '').slice(0, 2);
+      const cleanMonth = newMonth.replace(/\D/g, '').slice(0, 2);
+      const cleanYear = newYear.replace(/\D/g, '').slice(0, 4);
 
-    setDay(cleanDay);
-    setMonth(cleanMonth);
-    setYear(cleanYear);
+      setDay(cleanDay);
+      setMonth(cleanMonth);
+      setYear(cleanYear);
 
-    // If empty and not required
-    if (!cleanDay && !cleanMonth && !cleanYear) {
-      setLocalError(null);
-      onChange('', !required);
-      return;
-    }
-
-    // Check if partial
-    if (cleanYear.length > 0 && cleanYear.length < 4 && (cleanDay.length === 2 && cleanMonth.length === 2)) {
-      setLocalError('Year must contain exactly 4 digits.');
-      onChange('', false);
-      return;
-    }
-
-    if (cleanDay.length === 2 && cleanMonth.length === 2 && cleanYear.length === 4) {
-      const dNum = parseInt(cleanDay, 10);
-      const mNum = parseInt(cleanMonth, 10);
-      const yNum = parseInt(cleanYear, 10);
-
-      if (dNum < 1 || dNum > 31 || mNum < 1 || mNum > 12) {
-        setLocalError('Please enter a valid date of birth.');
-        onChange('', false);
-        return;
-      }
-
-      const isoStr = `${cleanYear}-${cleanMonth.padStart(2, '0')}-${cleanDay.padStart(2, '0')}`;
-      const parsedDate = new Date(isoStr);
-      if (isNaN(parsedDate.getTime())) {
-        setLocalError('Please enter a valid date of birth.');
-        onChange('', false);
-        return;
-      }
-
-      if (parsedDate > new Date()) {
-        setLocalError('Date of birth cannot be in the future.');
-        onChange('', false);
-        return;
-      }
-
-      const validation = validateDateOfBirth(isoStr);
-      if (!validation.isValid) {
-        setLocalError(validation.error || 'Please enter a valid date of birth.');
-        onChange('', false);
-      } else {
+      // If all fields are cleared
+      if (!cleanDay && !cleanMonth && !cleanYear) {
         setLocalError(null);
-        onChange(validation.formattedDate || isoStr, true);
+        lastEmittedValueRef.current = '';
+        onChange('', !required);
+        setTimeout(() => {
+          isTypingRef.current = false;
+        }, 100);
+        return;
       }
-    } else {
-      if (cleanDay || cleanMonth || cleanYear) {
-        if (cleanYear.length === 4) {
-          setLocalError('Please complete Day (DD) and Month (MM).');
+
+      // Check for partial year
+      if (cleanYear.length > 0 && cleanYear.length < 4 && cleanDay.length === 2 && cleanMonth.length === 2) {
+        setLocalError('Date of birth year must be exactly 4 digits.');
+        lastEmittedValueRef.current = '';
+        onChange('', false);
+        return;
+      }
+
+      // Complete date entered: validate full calendar date
+      if (cleanDay.length === 2 && cleanMonth.length === 2 && cleanYear.length === 4) {
+        const dNum = parseInt(cleanDay, 10);
+        const mNum = parseInt(cleanMonth, 10);
+
+        if (dNum < 1 || dNum > 31) {
+          setLocalError('Please enter a valid day between 01 and 31.');
+          lastEmittedValueRef.current = '';
+          onChange('', false);
+          return;
+        }
+
+        if (mNum < 1 || mNum > 12) {
+          setLocalError('Please enter a valid month between 01 and 12.');
+          lastEmittedValueRef.current = '';
+          onChange('', false);
+          return;
+        }
+
+        const isoStr = `${cleanYear}-${cleanMonth.padStart(2, '0')}-${cleanDay.padStart(2, '0')}`;
+        const validation = validateDateOfBirth(isoStr, gender);
+
+        if (!validation.isValid) {
+          setLocalError(validation.error || 'Please enter a valid date of birth.');
+          lastEmittedValueRef.current = '';
+          onChange('', false);
         } else {
           setLocalError(null);
+          const normalized = validation.formattedDate || isoStr;
+          lastEmittedValueRef.current = normalized;
+          onChange(normalized, true);
         }
+      } else {
+        // Intermediate typing state
+        if (cleanDay || cleanMonth || cleanYear) {
+          if (cleanYear.length === 4 && (cleanDay.length < 2 || cleanMonth.length < 2)) {
+            setLocalError('Please enter both Day (DD) and Month (MM).');
+          } else {
+            setLocalError(null);
+          }
+        }
+        lastEmittedValueRef.current = '';
+        onChange('', false);
       }
-      onChange('', false);
-    }
-  };
+    },
+    [required, gender, onChange]
+  );
 
+  // Day Input Handler
   const handleDayChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value.replace(/\D/g, '').slice(0, 2);
     handlePartChange(val, month, year);
@@ -132,6 +159,7 @@ export function DobInput({
     }
   };
 
+  // Month Input Handler
   const handleMonthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value.replace(/\D/g, '').slice(0, 2);
     handlePartChange(day, val, year);
@@ -140,11 +168,80 @@ export function DobInput({
     }
   };
 
+  // Year Input Handler
   const handleYearChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value.replace(/\D/g, '').slice(0, 4);
     handlePartChange(day, month, val);
   };
 
+  // Backspace and Arrow Key Navigation
+  const handleDayKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === day.length && monthRef.current) {
+      monthRef.current.focus();
+    }
+  };
+
+  const handleMonthKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace' && !month && dayRef.current) {
+      e.preventDefault();
+      dayRef.current.focus();
+    } else if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0 && dayRef.current) {
+      dayRef.current.focus();
+    } else if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === month.length && yearRef.current) {
+      yearRef.current.focus();
+    }
+  };
+
+  const handleYearKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace' && !year && monthRef.current) {
+      e.preventDefault();
+      monthRef.current.focus();
+    } else if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0 && monthRef.current) {
+      monthRef.current.focus();
+    }
+  };
+
+  // Paste Event Handler (supports DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, or DDMMYYYY)
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData('text').trim();
+    if (!text) return;
+
+    let pDay = '';
+    let pMonth = '';
+    let pYear = '';
+
+    // Match DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
+    const dmyMatch = text.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+    if (dmyMatch) {
+      pDay = dmyMatch[1].padStart(2, '0');
+      pMonth = dmyMatch[2].padStart(2, '0');
+      pYear = dmyMatch[3];
+    } else {
+      // Match YYYY-MM-DD or YYYY/MM/DD
+      const ymdMatch = text.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+      if (ymdMatch) {
+        pYear = ymdMatch[1];
+        pMonth = ymdMatch[2].padStart(2, '0');
+        pDay = ymdMatch[3].padStart(2, '0');
+      } else {
+        // Match 8 contiguous digits: DDMMYYYY
+        const rawMatch = text.match(/^(\d{2})(\d{2})(\d{4})$/);
+        if (rawMatch) {
+          pDay = rawMatch[1];
+          pMonth = rawMatch[2];
+          pYear = rawMatch[3];
+        }
+      }
+    }
+
+    if (pDay && pMonth && pYear) {
+      e.preventDefault();
+      handlePartChange(pDay, pMonth, pYear, true);
+      yearRef.current?.focus();
+    }
+  };
+
+  // Optional Calendar Picker Handler
   const handleDatePickerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const pickerVal = e.target.value; // YYYY-MM-DD
     if (pickerVal && /^\d{4}-\d{2}-\d{2}$/.test(pickerVal)) {
@@ -157,8 +254,22 @@ export function DobInput({
   const displayError = externalError || (touched ? localError : null);
 
   // Dynamic max date calculation (no future dates)
-  const maxYear = new Date().getFullYear();
   const maxIsoDate = new Date().toISOString().split('T')[0];
+
+  // Age calculation for UI feedback
+  const calculatedAge = (() => {
+    if (!isCompleteAndValid) return null;
+    const d = parseInt(day, 10);
+    const m = parseInt(month, 10);
+    const y = parseInt(year, 10);
+    const today = new Date();
+    let calculated = today.getFullYear() - y;
+    const monthDiff = today.getMonth() + 1 - m;
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < d)) {
+      calculated--;
+    }
+    return calculated;
+  })();
 
   return (
     <div className={`space-y-1.5 ${className}`}>
@@ -167,11 +278,11 @@ export function DobInput({
           <label className="text-xs font-bold text-slate-700 block">
             {label} {required && <span className="text-[#E51F3E]">*</span>}
           </label>
-          <span className="text-[11px] text-slate-400 font-medium">DD / MM / YYYY</span>
+          <span className="text-[11px] text-slate-400 font-semibold tracking-wider">DD / MM / YYYY</span>
         </div>
       )}
 
-      {/* 3-Part Manual Numeric Inputs with Calendar Picker Icon */}
+      {/* 3-Part Manual Numeric Inputs with Optional Calendar Picker Icon */}
       <div
         className={`flex items-center gap-1.5 p-1 rounded-2xl bg-white border transition shadow-2xs ${
           displayError
@@ -181,10 +292,12 @@ export function DobInput({
             : 'border-slate-200 focus-within:border-[#E51F3E] focus-within:ring-2 focus-within:ring-[#E51F3E]/10'
         } ${disabled ? 'opacity-60 bg-slate-50 cursor-not-allowed' : ''}`}
       >
-        {/* Day Input */}
-        <div className="flex-1 min-w-[50px]">
+        {/* Day Input [ DD ] */}
+        <div className="flex-1 min-w-[52px]">
           <input
             ref={dayRef}
+            id="dob_day"
+            name="dob_day"
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"
@@ -192,18 +305,29 @@ export function DobInput({
             placeholder="DD"
             value={day}
             disabled={disabled}
+            autoComplete="off"
+            data-lpignore="true"
+            data-form-type="other"
             onChange={handleDayChange}
-            onBlur={() => setTouched(true)}
+            onKeyDown={handleDayKeyDown}
+            onPaste={handlePaste}
+            onBlur={() => {
+              setTouched(true);
+              isTypingRef.current = false;
+            }}
             className="w-full text-center py-2 text-sm font-semibold text-slate-900 placeholder:text-slate-300 bg-transparent focus:outline-none"
+            aria-label="Day of birth"
           />
         </div>
 
-        <span className="text-slate-300 font-bold select-none">/</span>
+        <span className="text-slate-300 font-bold select-none text-base">/</span>
 
-        {/* Month Input */}
-        <div className="flex-1 min-w-[50px]">
+        {/* Month Input [ MM ] */}
+        <div className="flex-1 min-w-[52px]">
           <input
             ref={monthRef}
+            id="dob_month"
+            name="dob_month"
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"
@@ -211,18 +335,29 @@ export function DobInput({
             placeholder="MM"
             value={month}
             disabled={disabled}
+            autoComplete="off"
+            data-lpignore="true"
+            data-form-type="other"
             onChange={handleMonthChange}
-            onBlur={() => setTouched(true)}
+            onKeyDown={handleMonthKeyDown}
+            onPaste={handlePaste}
+            onBlur={() => {
+              setTouched(true);
+              isTypingRef.current = false;
+            }}
             className="w-full text-center py-2 text-sm font-semibold text-slate-900 placeholder:text-slate-300 bg-transparent focus:outline-none"
+            aria-label="Month of birth"
           />
         </div>
 
-        <span className="text-slate-300 font-bold select-none">/</span>
+        <span className="text-slate-300 font-bold select-none text-base">/</span>
 
-        {/* Year Input (Strictly Max 4 Digits) */}
-        <div className="flex-[1.4] min-w-[70px]">
+        {/* Year Input [ YYYY ] */}
+        <div className="flex-[1.4] min-w-[72px]">
           <input
             ref={yearRef}
+            id="dob_year"
+            name="dob_year"
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"
@@ -230,20 +365,30 @@ export function DobInput({
             placeholder="YYYY"
             value={year}
             disabled={disabled}
+            autoComplete="off"
+            data-lpignore="true"
+            data-form-type="other"
             onChange={handleYearChange}
-            onBlur={() => setTouched(true)}
+            onKeyDown={handleYearKeyDown}
+            onPaste={handlePaste}
+            onBlur={() => {
+              setTouched(true);
+              isTypingRef.current = false;
+            }}
             className="w-full text-center py-2 text-sm font-semibold text-slate-900 placeholder:text-slate-300 bg-transparent focus:outline-none"
+            aria-label="Year of birth"
           />
         </div>
 
-        {/* Calendar Picker Trigger */}
+        {/* Optional Calendar Picker Trigger */}
         <div className="relative shrink-0 pr-1.5">
           <button
             type="button"
             disabled={disabled}
             onClick={() => hiddenDateInputRef.current?.showPicker?.() || hiddenDateInputRef.current?.click()}
             className="w-8 h-8 rounded-xl bg-slate-50 hover:bg-rose-50 text-slate-500 hover:text-[#E51F3E] flex items-center justify-center transition cursor-pointer"
-            title="Choose from calendar"
+            title="Choose from calendar (optional)"
+            aria-label="Choose date from calendar"
           >
             <Calendar className="w-4 h-4" />
           </button>
@@ -251,7 +396,7 @@ export function DobInput({
             ref={hiddenDateInputRef}
             type="date"
             max={maxIsoDate}
-            min="1940-01-01"
+            min="1920-01-01"
             value={isCompleteAndValid ? `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}` : ''}
             onChange={handleDatePickerChange}
             className="absolute inset-0 opacity-0 pointer-events-none w-0 h-0"
@@ -263,27 +408,14 @@ export function DobInput({
 
       {/* Validation / Helper Feedback */}
       {displayError ? (
-        <p className="text-xs font-semibold text-rose-600 flex items-center gap-1.5 pt-0.5">
+        <p className="text-xs font-semibold text-rose-600 flex items-center gap-1.5 pt-0.5" role="alert">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
           <span>✕ {displayError}</span>
         </p>
       ) : isCompleteAndValid ? (
         <p className="text-xs font-semibold text-emerald-600 flex items-center gap-1.5 pt-0.5">
           <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-          <span>
-            ✓ Valid Date of Birth ({(() => {
-              const d = parseInt(day, 10);
-              const m = parseInt(month, 10);
-              const y = parseInt(year, 10);
-              const today = new Date();
-              let age = today.getFullYear() - y;
-              const monthDiff = (today.getMonth() + 1) - m;
-              if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < d)) {
-                age--;
-              }
-              return age;
-            })()} years old)
-          </span>
+          <span>✓ Valid Date of Birth ({calculatedAge} years old)</span>
         </p>
       ) : helperText ? (
         <p className="text-[11px] text-slate-400 font-medium">{helperText}</p>

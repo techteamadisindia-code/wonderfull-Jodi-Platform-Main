@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { Profile } from '../models/Profile';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { User } from '../models/User';
+import { Subscription } from '../models/Subscription';
 import { ContactRequest } from '../models/ContactRequest';
 import { z } from 'zod';
 import {
@@ -170,6 +171,54 @@ const profileSchema = z.object({
       otherPreferences: z.string().trim().max(1000).optional(),
     })
     .optional(),
+  aboutMe: z.string().trim().max(3000).optional(),
+  personalityValues: z.string().trim().max(2000).optional(),
+  hobbiesInterests: z.string().trim().max(2000).optional(),
+  careerGoals: z.string().trim().max(2000).optional(),
+  familyBackground: z
+    .object({
+      familyType: z.string().trim().max(100).optional(),
+      familyStatus: z.string().trim().max(100).optional(),
+      fatherName: z.string().trim().max(150).optional(),
+      fatherProfession: z.string().trim().max(150).optional(),
+      motherName: z.string().trim().max(150).optional(),
+      motherProfession: z.string().trim().max(150).optional(),
+      familyLocation: z.string().trim().max(150).optional(),
+      familyValues: z.string().trim().max(200).optional(),
+      aboutFamily: z.string().trim().max(2000).optional(),
+    })
+    .optional(),
+  siblingsDetails: z
+    .object({
+      brothersCount: z.number().min(0).max(20).optional(),
+      sistersCount: z.number().min(0).max(20).optional(),
+      brothers: z.array(z.any()).optional(),
+      sisters: z.array(z.any()).optional(),
+    })
+    .optional(),
+  medicalQualifications: z
+    .object({
+      undergraduate: z.array(z.any()).optional(),
+      postgraduate: z.array(z.any()).optional(),
+      doctorate: z.array(z.any()).optional(),
+    })
+    .optional(),
+  partnerExpectations: z
+    .object({
+      ageMin: z.number().min(18).max(80).optional(),
+      ageMax: z.number().min(18).max(80).optional(),
+      heightMin: z.string().trim().max(50).optional(),
+      heightMax: z.string().trim().max(50).optional(),
+      qualification: z.string().trim().max(150).optional(),
+      specialization: z.string().trim().max(150).optional(),
+      location: z.any().optional(),
+      willingToRelocate: z.any().optional(),
+      maritalStatus: z.string().trim().max(100).optional(),
+      lifestyle: z.any().optional(),
+      familyExpectations: z.string().trim().max(2000).optional(),
+      additionalExpectations: z.string().trim().max(2000).optional(),
+    })
+    .optional(),
   privacySettings: z
     .object({
       profileVisibility: z.enum(['all', 'verified_only', 'members_only', 'hidden']).optional(),
@@ -191,7 +240,7 @@ export async function getMyProfile(req: AuthRequest, res: Response, next: NextFu
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const [profile, user] = await Promise.all([
+    const [profile, user, subscription] = await Promise.all([
       Profile.findOne({ user: userId })
         .populate('currentLocation.countryId', 'name code')
         .populate('currentLocation.stateId', 'name code')
@@ -210,6 +259,7 @@ export async function getMyProfile(req: AuthRequest, res: Response, next: NextFu
         .populate('communityDetails.subCasteId', 'name')
         .populate('languageDetails.motherTongueId', 'name nativeNames'),
       User.findById(userId).select('-password'),
+      Subscription.findOne({ user: userId, status: 'ACTIVE' }),
     ]);
 
     if (!profile) {
@@ -218,7 +268,7 @@ export async function getMyProfile(req: AuthRequest, res: Response, next: NextFu
 
     res.json({
       success: true,
-      data: serializePrivateProfile(profile, user),
+      data: serializePrivateProfile(profile, user, subscription),
     });
   } catch (error) {
     next(error);
@@ -297,14 +347,14 @@ export async function updateMyProfile(req: AuthRequest, res: Response, next: Nex
         dob: new Date('1996-05-15'),
         height: `5' 6"`,
         maritalStatus: 'Never Married',
-        motherTongue: 'Hindi',
-        religion: 'Hindu',
-        caste: 'General',
-        education: 'MBBS',
-        degree: 'MBBS',
-        profession: 'General Physician',
-        country: 'India',
-        state: 'Maharashtra',
+        motherTongue: data.motherTongue || '',
+        religion: data.religion || '',
+        caste: data.caste || '',
+        education: data.education || 'MBBS',
+        degree: data.degree || 'MBBS',
+        profession: data.profession || 'General Physician',
+        country: data.country || 'India',
+        state: data.state || '',
         city: 'Mumbai',
         verificationStatus: 'UNVERIFIED',
         lastActiveAt: new Date(),
@@ -348,7 +398,13 @@ export async function updateMyProfile(req: AuthRequest, res: Response, next: Nex
     }
 
     if (data.dob) {
-      const parsedDob = validateDateOfBirth(data.dob);
+      const parsedDob = validateDateOfBirth(data.dob, data.gender || profile.gender);
+      if (!parsedDob.isValid) {
+        return res.status(400).json({
+          success: false,
+          message: parsedDob.error || 'Date of birth year must be exactly 4 digits.',
+        });
+      }
       profile.dob = parsedDob.parsedDate || new Date(parsedDob.formattedDate || data.dob);
     }
 
@@ -365,11 +421,15 @@ export async function updateMyProfile(req: AuthRequest, res: Response, next: Nex
       details: { profileId: profile._id },
     });
 
-    const user = await User.findById(userId).select('-password');
+    const [user, subscription] = await Promise.all([
+      User.findById(userId).select('-password'),
+      Subscription.findOne({ user: userId, status: 'ACTIVE' }),
+    ]);
+
     res.json({
       success: true,
       message: 'Profile updated successfully',
-      data: serializePrivateProfile(profile, user),
+      data: serializePrivateProfile(profile, user, subscription),
     });
   } catch (error) {
     next(error);

@@ -280,8 +280,8 @@ export async function getPublicBlogBySlug(req: Request, res: Response, next: Nex
 
     // Fetch related articles in same category or latest published
     const relatedPosts = await BlogPost.find({
-      _id: { $ne: post._id },
-      category: post.category,
+      _id: { $ne: (post as any)._id },
+      category: (post as any).category,
       status: 'PUBLISHED',
       isDeleted: false,
     })

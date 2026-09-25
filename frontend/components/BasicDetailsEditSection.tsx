@@ -86,7 +86,7 @@ export function BasicDetailsEditSection({ formData, onChange }: BasicDetailsEdit
   const religionName = formData.religion || 'Hindu';
   const casteName = formData.caste || '';
   const subCasteName = formData.subCaste || '';
-  const motherTongueName = formData.motherTongue || 'Marathi';
+  const motherTongueName = formData.motherTongue || '';
 
   // ─── MODAL OPENERS WITH CASCADING CONSTRAINTS ───
 

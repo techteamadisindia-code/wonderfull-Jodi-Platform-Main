@@ -1,6 +1,8 @@
 import apiClient from './api';
 
 export interface InterestProfilePreview {
+  _id?: string;
+  id?: string;
   user: string;
   displayName: string;
   profession?: string;
@@ -14,6 +16,7 @@ export interface InterestProfilePreview {
   age?: number;
   dob?: string | Date;
   gender?: string;
+  [key: string]: any;
 }
 
 export interface InterestItem {

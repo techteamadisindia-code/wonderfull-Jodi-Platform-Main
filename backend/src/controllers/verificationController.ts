@@ -19,6 +19,7 @@ const ALLOWED_DOCUMENT_TYPES = [
   'GOVERNMENT_ID',
   'DEGREE',
   'PROFESSIONAL',
+  'MEDICAL_REGISTRATION',
   'EMPLOYMENT',
   'OTHER',
 ];
@@ -141,6 +142,7 @@ export async function submitVerification(req: AuthRequest, res: Response, next: 
         documentType: verification.documentType,
         documentName: verification.documentName,
         documentUrl: verification.documentUrl,
+        storageKey: verification.storageKey,
         fileType: verification.fileType,
         fileSize: verification.fileSize,
         status: verification.status,
@@ -169,19 +171,24 @@ export async function getUserVerifications(req: AuthRequest, res: Response, next
     const profile = await Profile.findOne({ user: userId }).select('verificationStatus');
 
     // Summary breakdown by document category
-    const categories = ['GOVERNMENT_ID', 'DEGREE', 'PROFESSIONAL', 'EMPLOYMENT'];
+    const categories = ['MEDICAL_REGISTRATION', 'DEGREE', 'GOVERNMENT_ID', 'EMPLOYMENT', 'PROFESSIONAL'];
     const summary: Record<string, any> = {};
 
     for (const cat of categories) {
-      const latest = verifications.find((v) => v.documentType === cat);
+      const latest = verifications.find(
+        (v) => v.documentType === cat || (cat === 'MEDICAL_REGISTRATION' && v.documentType === 'PROFESSIONAL')
+      );
       summary[cat] = latest
         ? {
+            id: latest._id,
             status: latest.status,
             documentName: latest.documentName,
             submittedAt: latest.submittedAt,
             reviewedAt: latest.reviewedAt,
             rejectionReason: latest.rejectionReason,
+            adminNotes: latest.adminNotes,
             attemptNumber: latest.attemptNumber,
+            documentUrl: latest.documentUrl,
           }
         : { status: 'NOT_SUBMITTED' };
     }

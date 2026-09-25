@@ -72,6 +72,7 @@ async function runTests() {
     mobile: `98${Math.floor(10000000 + Math.random() * 90000000)}`,
     password: 'Password123!',
     gender: 'Female',
+    termsAccepted: true,
   });
   assert(regRes.status === 201 && (regRes.body.data?.token || regRes.body.token), 'Test Doctor Registered successfully');
   const userToken = regRes.body.data?.token || regRes.body.token;

@@ -36,6 +36,62 @@ export interface IRegistrationEducationProfession {
   company?: string;
   workLocation?: string;
   annualIncome?: string;
+  medicalRegistrationNumber?: string;
+  medicalCollege?: string;
+  medicalExperience?: string;
+}
+
+export interface ISiblingEntry {
+  name?: string;
+  age?: number;
+  profession?: string;
+  maritalStatus?: string;
+  location?: string;
+}
+
+export interface IRegistrationSiblings {
+  brothersCount?: number;
+  sistersCount?: number;
+  brothers?: ISiblingEntry[];
+  sisters?: ISiblingEntry[];
+}
+
+export interface IQualificationEntry {
+  qualification: string;
+  specialization?: string;
+  college: string;
+  collegeId?: mongoose.Types.ObjectId | string;
+  passingYear?: string;
+  status?: 'Completed' | 'Pursuing' | string;
+}
+
+export interface IRegistrationMedicalQualifications {
+  undergraduate?: IQualificationEntry[];
+  postgraduate?: IQualificationEntry[];
+  doctorate?: IQualificationEntry[];
+}
+
+export interface IRegistrationPartnerExpectations {
+  ageMin?: number | string;
+  ageMax?: number | string;
+  heightMin?: string;
+  heightMax?: string;
+  qualification?: string;
+  specialization?: string;
+  location?: {
+    country?: string;
+    state?: string;
+    city?: string;
+  };
+  willingToRelocate?: boolean | string;
+  maritalStatus?: string;
+  lifestyle?: {
+    diet?: string;
+    smoking?: string;
+    drinking?: string;
+  };
+  familyExpectations?: string;
+  additionalExpectations?: string;
 }
 
 export interface IRegistrationFamilyDetails {
@@ -43,6 +99,14 @@ export interface IRegistrationFamilyDetails {
   motherOccupation?: string;
   siblings?: string;
   familyType?: string;
+  familyStatus?: string;
+  fatherName?: string;
+  fatherProfession?: string;
+  motherName?: string;
+  motherProfession?: string;
+  familyLocation?: string;
+  familyValues?: string;
+  aboutFamily?: string;
 }
 
 export interface IRegistrationPreferences {
@@ -63,9 +127,17 @@ export interface IRegistrationPhotos {
 
 export interface IRegistrationStepData {
   basicInfo?: IRegistrationBasicInfo;
-  personalInfo?: IRegistrationPersonalInfo;
+  personalInfo?: IRegistrationPersonalInfo & {
+    aboutMe?: string;
+    personalityValues?: string;
+    hobbiesInterests?: string;
+    careerGoals?: string;
+  };
   educationProfession?: IRegistrationEducationProfession;
   familyDetails?: IRegistrationFamilyDetails;
+  siblings?: IRegistrationSiblings;
+  medicalQualifications?: IRegistrationMedicalQualifications;
+  partnerExpectations?: IRegistrationPartnerExpectations;
   preferences?: IRegistrationPreferences;
   photos?: IRegistrationPhotos;
   rawFormData?: Record<string, any>;
@@ -173,6 +245,10 @@ const registrationSchema = new Schema<IRegistration>(
         state: { type: String },
         country: { type: String },
         about: { type: String },
+        aboutMe: { type: String },
+        personalityValues: { type: String },
+        hobbiesInterests: { type: String },
+        careerGoals: { type: String },
         foodPreference: { type: String },
         smoking: { type: String },
         drinking: { type: String },
@@ -184,12 +260,98 @@ const registrationSchema = new Schema<IRegistration>(
         company: { type: String },
         workLocation: { type: String },
         annualIncome: { type: String },
+        medicalRegistrationNumber: { type: String, trim: true },
+        medicalCollege: { type: String, trim: true },
+        medicalExperience: { type: String, trim: true },
       },
       familyDetails: {
         fatherOccupation: { type: String },
         motherOccupation: { type: String },
         siblings: { type: String },
         familyType: { type: String },
+        familyStatus: { type: String },
+        fatherName: { type: String },
+        fatherProfession: { type: String },
+        motherName: { type: String },
+        motherProfession: { type: String },
+        familyLocation: { type: String },
+        familyValues: { type: String },
+        aboutFamily: { type: String },
+      },
+      siblings: {
+        brothersCount: { type: Number, default: 0 },
+        sistersCount: { type: Number, default: 0 },
+        brothers: [
+          {
+            name: { type: String },
+            age: { type: Number },
+            profession: { type: String },
+            maritalStatus: { type: String },
+            location: { type: String },
+          },
+        ],
+        sisters: [
+          {
+            name: { type: String },
+            age: { type: Number },
+            profession: { type: String },
+            maritalStatus: { type: String },
+            location: { type: String },
+          },
+        ],
+      },
+      medicalQualifications: {
+        undergraduate: [
+          {
+            qualification: { type: String },
+            college: { type: String },
+            collegeId: { type: Schema.Types.ObjectId, ref: 'Institution' },
+            passingYear: { type: String },
+            status: { type: String },
+          },
+        ],
+        postgraduate: [
+          {
+            qualification: { type: String },
+            specialization: { type: String },
+            college: { type: String },
+            collegeId: { type: Schema.Types.ObjectId, ref: 'Institution' },
+            passingYear: { type: String },
+            status: { type: String },
+          },
+        ],
+        doctorate: [
+          {
+            qualification: { type: String },
+            specialization: { type: String },
+            college: { type: String },
+            collegeId: { type: Schema.Types.ObjectId, ref: 'Institution' },
+            passingYear: { type: String },
+            status: { type: String },
+          },
+        ],
+      },
+      partnerExpectations: {
+        ageMin: { type: Schema.Types.Mixed },
+        ageMax: { type: Schema.Types.Mixed },
+        heightMin: { type: String },
+        heightMax: { type: String },
+        qualification: { type: String },
+        specialization: { type: String },
+        location: {
+          country: { type: String },
+          state: { type: String },
+          city: { type: String },
+        },
+        willingToRelocate: { type: Schema.Types.Mixed },
+        maritalStatus: { type: String },
+        lifestyle: {
+          diet: { type: String },
+          smoking: { type: String },
+          drinking: { type: String },
+        },
+        familyExpectations: { type: String },
+        additionalExpectations: { type: String },
       },
       preferences: {
         prefAgeMin: { type: String },

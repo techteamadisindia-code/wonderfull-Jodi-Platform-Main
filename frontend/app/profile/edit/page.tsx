@@ -105,7 +105,7 @@ export default function EditProfilePage() {
     dob: '',
     height: `5' 6"`,
     maritalStatus: 'Never Married',
-    motherTongue: 'Hindi',
+    motherTongue: '',
     religion: 'Hindu',
     caste: '',
     subCaste: '',
@@ -119,7 +119,7 @@ export default function EditProfilePage() {
     workLocation: '',
     annualIncome: '₹ 25 - 35 Lakhs',
     country: 'India',
-    state: 'Maharashtra',
+    state: '',
     city: 'Mumbai',
     about: '',
     familyType: 'Nuclear',
@@ -162,10 +162,10 @@ export default function EditProfilePage() {
           setFormData({
             displayName: profile.displayName || '',
             gender: profile.gender || 'Female',
-            dob: formattedDob || '1996-05-15',
+            dob: formattedDob || '',
             height: profile.height || `5' 6"`,
             maritalStatus: profile.maritalStatus || 'Never Married',
-            motherTongue: profile.motherTongue || 'Hindi',
+            motherTongue: profile.motherTongue || '',
             religion: profile.religion || 'Hindu',
             caste: profile.caste || '',
             subCaste: profile.subCaste || '',
@@ -179,7 +179,7 @@ export default function EditProfilePage() {
             workLocation: profile.workLocation || profile.city || '',
             annualIncome: profile.annualIncome || '',
             country: profile.country || 'India',
-            state: profile.state || 'Maharashtra',
+            state: profile.state || '',
             city: profile.city || 'Mumbai',
             about: profile.about || '',
             familyType: profile.familyType || 'Nuclear',
@@ -468,6 +468,7 @@ export default function EditProfilePage() {
                 <DobInput
                   label="Date of Birth"
                   value={formData.dob}
+                  gender={formData.gender}
                   required={true}
                   onChange={(isoDate, isValid) => {
                     setFormData((prev) => ({ ...prev, dob: isoDate }));

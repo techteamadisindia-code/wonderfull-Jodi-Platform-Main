@@ -185,7 +185,7 @@ export function serializeUserPublic(user: any, options?: { allowFullName?: boole
 
 export const sanitizeUser = serializeUserPublic;
 
-import { calculateProfileCompletion } from './doctorValidation';
+import { calculateProfileCompletion, calculateProfileCompletionDetails } from './doctorValidation';
 
 export interface SerializeProfileOptions {
   isContactUnlocked?: boolean;
@@ -443,7 +443,7 @@ export function serializePublicProfile(
       alcohol: p.drinking || 'Non-Drinker',
       exercise: 'Regular',
       hobbies: p.hobbies || [],
-      languages: [p.motherTongue || 'Hindi', 'English'],
+      languages: [p.motherTongue, 'English'].filter(Boolean) as string[],
     },
     partnerPreferences: p.partnerPreferences || {
       preferredAgeMin: 24,
@@ -470,7 +470,15 @@ export function serializePublicProfile(
     smoking: p.smoking,
     drinking: p.drinking,
     hobbies: p.hobbies || [],
-    about: p.about,
+    about: p.about || p.aboutMe,
+    aboutMe: p.aboutMe || p.about,
+    personalityValues: p.personalityValues,
+    hobbiesInterests: p.hobbiesInterests,
+    careerGoals: p.careerGoals,
+    familyBackground: isAuthenticatedViewer ? p.familyBackground : undefined,
+    siblingsDetails: isAuthenticatedViewer ? p.siblingsDetails : undefined,
+    medicalQualifications: p.medicalQualifications,
+    partnerExpectations: p.partnerExpectations,
     photos: safePhotos,
     primaryPhoto: safePrimaryPhoto,
     photo: safePrimaryPhoto,
@@ -484,14 +492,18 @@ export function serializePublicProfile(
 /**
  * Safe private profile serializer (for authenticated owner / admin)
  */
-export function serializePrivateProfile(profile: any, user: any) {
+export function serializePrivateProfile(profile: any, user: any, subscription?: any) {
   if (!profile) return null;
   const p = typeof profile.toObject === 'function' ? profile.toObject() : profile;
-  const completionPercentage = calculateProfileCompletion(p, user);
+  const completionResult = calculateProfileCompletionDetails(p, user);
+
+  const candidateId =
+    p.candidateId || (p._id ? `WJ-${p._id.toString().slice(-6).toUpperCase()}` : 'WJ-100000');
 
   return {
     _id: p._id,
     id: p._id,
+    candidateId,
     displayName: p.displayName,
     gender: p.gender,
     dob: p.dob,
@@ -539,7 +551,7 @@ export function serializePrivateProfile(profile: any, user: any) {
       alcohol: p.drinking || 'Non-Drinker',
       exercise: 'Regular',
       hobbies: p.hobbies || [],
-      languages: [p.motherTongue || 'Hindi', 'English'],
+      languages: [p.motherTongue, 'English'].filter(Boolean) as string[],
     },
     partnerPreferences: p.partnerPreferences || {
       preferredAgeMin: 24,
@@ -565,13 +577,32 @@ export function serializePrivateProfile(profile: any, user: any) {
     smoking: p.smoking,
     drinking: p.drinking,
     hobbies: p.hobbies || [],
-    about: p.about,
+    about: p.about || p.aboutMe,
+    aboutMe: p.aboutMe || p.about,
+    personalityValues: p.personalityValues,
+    hobbiesInterests: p.hobbiesInterests,
+    careerGoals: p.careerGoals,
+    familyBackground: p.familyBackground,
+    siblingsDetails: p.siblingsDetails,
+    medicalQualifications: p.medicalQualifications,
+    partnerExpectations: p.partnerExpectations,
     photos: p.photos || [],
     primaryPhoto: p.primaryPhoto,
     verificationStatus: p.verificationStatus,
-    completionPercentage,
+    completionPercentage: completionResult.score,
+    completionScore: completionResult.score,
+    completionBreakdown: completionResult.categories,
     lastActiveAt: p.lastActiveAt,
     createdAt: p.createdAt,
+    membership: subscription?.plan || (user as any)?.membership || 'FREE',
+    subscription: subscription
+      ? {
+          plan: subscription.plan,
+          status: subscription.status,
+          expiryDate: subscription.expiryDate,
+          contactRequestsRemaining: subscription.contactRequestsRemaining,
+        }
+      : null,
     user: {
       _id: user?._id?.toString?.() || user?._id,
       id: user?._id?.toString?.() || user?.id,

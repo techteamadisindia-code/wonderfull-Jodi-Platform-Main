@@ -79,7 +79,7 @@ export default function ReferralRewardsConfigPage() {
       if (data) {
         setConfig(data);
         setRequiredReferrals(data.requiredReferrals || 5);
-        setQualificationTrigger(data.qualificationTrigger || 'REGISTERED');
+        setQualificationTrigger((data.qualificationTrigger || data.qualificationEvent || 'REGISTERED') as any);
         setRewardType(data.rewardType || 'PERCENTAGE_DISCOUNT');
         setRewardValue(data.rewardValue ?? 50);
         setRewardPlanKey(data.rewardPlanKey || 'ALL');

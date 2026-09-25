@@ -138,8 +138,24 @@ export async function getCities(req: Request, res: Response, next: NextFunction)
     if (subDistrictId && mongoose.isValidObjectId(subDistrictId)) {
       filter.subDistrictId = subDistrictId;
     }
-    if (stateId && mongoose.isValidObjectId(stateId)) {
-      filter.stateId = stateId;
+    const targetState = stateId || req.query.state;
+    if (targetState) {
+      if (mongoose.isValidObjectId(targetState)) {
+        filter.stateId = targetState;
+      } else {
+        const stateDoc = await State.findOne({
+          name: { $regex: new RegExp(`^${escapeRegex(String(targetState).trim())}$`, 'i') },
+        });
+        if (stateDoc) {
+          filter.stateId = stateDoc._id;
+        } else {
+          return res.json({
+            success: true,
+            data: [],
+            pagination: { total: 0, page: 1, limit: 30, pages: 0 },
+          });
+        }
+      }
     }
 
     if (search && typeof search === 'string' && search.trim()) {
@@ -153,6 +169,8 @@ export async function getCities(req: Request, res: Response, next: NextFunction)
     const [total, cities] = await Promise.all([
       City.countDocuments(filter),
       City.find(filter)
+        .populate('districtId', 'name')
+        .populate('stateId', 'name code')
         .sort({ sortOrder: 1, name: 1 })
         .skip(skip)
         .limit(limitNum)

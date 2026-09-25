@@ -22,6 +22,10 @@ export interface StepData {
     state?: string;
     country?: string;
     about?: string;
+    aboutMe?: string;
+    personalityValues?: string;
+    hobbiesInterests?: string;
+    careerGoals?: string;
     foodPreference?: string;
     smoking?: string;
     drinking?: string;
@@ -33,12 +37,88 @@ export interface StepData {
     company?: string;
     workLocation?: string;
     annualIncome?: string;
+    medicalRegistrationNumber?: string;
+    medicalCollege?: string;
+    medicalExperience?: string;
   };
   familyDetails?: {
     fatherOccupation?: string;
     motherOccupation?: string;
     siblings?: string;
     familyType?: string;
+    familyStatus?: string;
+    fatherName?: string;
+    fatherProfession?: string;
+    motherName?: string;
+    motherProfession?: string;
+    familyLocation?: string;
+    familyValues?: string;
+    aboutFamily?: string;
+  };
+  siblings?: {
+    brothersCount?: number;
+    sistersCount?: number;
+    brothers?: Array<{
+      name?: string;
+      age?: number;
+      profession?: string;
+      maritalStatus?: string;
+      location?: string;
+    }>;
+    sisters?: Array<{
+      name?: string;
+      age?: number;
+      profession?: string;
+      maritalStatus?: string;
+      location?: string;
+    }>;
+  };
+  medicalQualifications?: {
+    undergraduate?: Array<{
+      qualification: string;
+      college: string;
+      collegeId?: string;
+      passingYear?: string;
+      status?: string;
+    }>;
+    postgraduate?: Array<{
+      qualification: string;
+      specialization?: string;
+      college: string;
+      collegeId?: string;
+      passingYear?: string;
+      status?: string;
+    }>;
+    doctorate?: Array<{
+      qualification: string;
+      specialization?: string;
+      college: string;
+      collegeId?: string;
+      passingYear?: string;
+      status?: string;
+    }>;
+  };
+  partnerExpectations?: {
+    ageMin?: number | string;
+    ageMax?: number | string;
+    heightMin?: string;
+    heightMax?: string;
+    qualification?: string;
+    specialization?: string;
+    location?: {
+      country?: string;
+      state?: string;
+      city?: string;
+    };
+    willingToRelocate?: boolean | string;
+    maritalStatus?: string;
+    lifestyle?: {
+      diet?: string;
+      smoking?: string;
+      drinking?: string;
+    };
+    familyExpectations?: string;
+    additionalExpectations?: string;
   };
   preferences?: {
     prefAgeMin?: string;
@@ -46,6 +126,8 @@ export interface StepData {
     prefCity?: string;
     prefDiet?: string;
     lookingFor?: string;
+    prefEducation?: string;
+    prefProfession?: string;
   };
   photos?: {
     primaryPhoto?: string;
@@ -201,3 +283,27 @@ export async function checkRegistrationAvailability(params: {
 
   return response.data;
 }
+
+/**
+ * 7. Server-side validation of entire registration draft across all 4 steps
+ */
+export async function validateRegistrationSession(registrationId: string): Promise<{
+  success: boolean;
+  isValid: boolean;
+  missingFields: Array<{ step: number; field: string; label: string; message: string }>;
+  completionPercentage: number;
+  registrationId: string;
+  status: string;
+}> {
+  const response = await apiClient.get<{
+    success: boolean;
+    isValid: boolean;
+    missingFields: Array<{ step: number; field: string; label: string; message: string }>;
+    completionPercentage: number;
+    registrationId: string;
+    status: string;
+  }>(`/registration/${encodeURIComponent(registrationId)}/validate`);
+
+  return response.data;
+}
+

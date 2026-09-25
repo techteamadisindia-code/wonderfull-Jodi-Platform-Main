@@ -158,7 +158,7 @@ export async function getPublicAwardBySlug(req: Request, res: Response, next: Ne
 
     // Other related active awards
     const otherAwards = await Award.find({
-      _id: { $ne: award._id },
+      _id: { $ne: (award as any)._id },
       isActive: true,
       isDeleted: false,
     })
@@ -277,7 +277,7 @@ export async function getAdminAwardById(req: AuthRequest, res: Response, next: N
       .populate('updatedBy', 'fullName email')
       .lean();
 
-    if (!award || award.isDeleted) {
+    if (!award || (award as any).isDeleted) {
       return res.status(404).json({ success: false, message: 'Award not found' });
     }
 

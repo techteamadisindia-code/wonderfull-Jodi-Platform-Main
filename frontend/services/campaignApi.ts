@@ -28,7 +28,7 @@ export interface CampaignData {
   qualification?: string[];
   specialization?: string[];
   applicablePlans: string[];
-  discountType: 'PERCENTAGE' | 'FIXED' | 'FREE' | 'NONE';
+  discountType: 'PERCENTAGE' | 'FIXED' | 'FREE' | 'NONE' | 'FREE_100_PERCENT' | 'FIXED_AMOUNT';
   discountValue: number;
   couponRequired?: boolean;
   couponCode?: string;
@@ -76,6 +76,7 @@ export interface EligibilityPreviewResult {
   member: {
     id: string;
     name: string;
+    fullName?: string;
     candidateId?: string;
     gender?: string;
     age?: number;
@@ -94,9 +95,11 @@ export interface EligibilityPreviewResult {
   };
   pricing: {
     originalPrice: number;
+    originalAmount?: number;
     discountAmount: number;
     discountPercentage: number;
     finalPrice: number;
+    finalAmount?: number;
     isFree: boolean;
   };
   appliedCampaign?: any;
@@ -104,6 +107,8 @@ export interface EligibilityPreviewResult {
   couponValidation?: any;
   specificCampaignPreview?: any;
   evaluationReasons?: string[];
+  criteriaBreakdown?: Record<string, any>;
+  [key: string]: any;
 }
 
 export async function previewMemberEligibility(payload: {

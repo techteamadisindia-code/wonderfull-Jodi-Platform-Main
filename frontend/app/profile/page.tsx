@@ -41,6 +41,7 @@ import {
   Layers,
   CheckSquare,
   Ban,
+  FileCheck,
 } from 'lucide-react';
 import {
   getMyProfile,
@@ -51,6 +52,11 @@ import {
   logoutUser,
 } from '../../lib/api';
 import {
+  fetchUserVerifications,
+  submitUserVerification,
+  UserVerificationSummaryResponse,
+} from '../../services/verificationApi';
+import {
   DOCTOR_QUALIFICATIONS,
   DOCTOR_SPECIALIZATIONS,
   validateDateOfBirth,
@@ -59,6 +65,8 @@ import {
 import { DobInput } from '../../components/DobInput';
 import { DoctorAvatar } from '../../components/DoctorAvatar';
 import { BasicDetailsEditSection } from '../../components/BasicDetailsEditSection';
+import { ProfileBanner } from '../../components/profile/ProfileBanner';
+import { ProfileSummaryCard } from '../../components/profile/ProfileSummaryCard';
 
 const HEIGHTS = [
   `5' 0"`, `5' 1"`, `5' 2"`, `5' 3"`, `5' 4"`, `5' 5"`, `5' 6"`, `5' 7"`, `5' 8"`, `5' 9"`, `5' 10"`, `5' 11"`, `6' 0"`, `6' 1"`, `6' 2"`, `6' 3"`, `6' 4"`
@@ -100,10 +108,10 @@ const RASHIS = [
   'Dhanu (Sagittarius)', 'Makar (Capricorn)', 'Kumbh (Aquarius)', 'Meen (Pisces)'
 ];
 
-function getAge(dob?: string | Date): number {
-  if (!dob) return 26;
+function getAge(dob?: string | Date): number | null {
+  if (!dob) return null;
   const date = new Date(dob);
-  if (isNaN(date.getTime())) return 26;
+  if (isNaN(date.getTime())) return null;
   const diff = Date.now() - date.getTime();
   const ageDate = new Date(diff);
   return Math.abs(ageDate.getUTCFullYear() - 1970);
@@ -120,125 +128,160 @@ function formatDateLong(dob?: string | Date): string {
   });
 }
 
+export interface ProfileCategoryItem {
+  id: string;
+  label: string;
+  weight: number;
+  completed: boolean;
+  status: 'completed' | 'pending' | 'incomplete';
+}
+
+const VERIFICATION_DOC_CONFIG = [
+  {
+    key: 'MEDICAL_REGISTRATION',
+    title: 'Medical Council Registration Certificate',
+    badge: 'MCI / State Council • Mandatory',
+    description: 'Registration certificate with State Medical Council (e.g. MMC, DMC, KMC, TNMC) or National Medical Commission (NMC/MCI).',
+    examples: 'Permanent Registration Certificate or valid Council Renewal Certificate',
+  },
+  {
+    key: 'DEGREE',
+    title: 'Medical Degree / Convocation Certificate',
+    badge: 'Medical Qualification',
+    description: 'Passing certificate or university convocation certificate for MBBS, MD, MS, DNB, or Super-Specialty.',
+    examples: 'MBBS Convocation Certificate, MD/MS Degree, DNB Passing Certificate',
+  },
+  {
+    key: 'GOVERNMENT_ID',
+    title: 'Government Identity / KYC Proof',
+    badge: 'Identity Verification',
+    description: 'Government-issued photo identification verifying candidate legal name, age, and identity.',
+    examples: 'Aadhaar Card (first 8 digits masked), Passport, Voter ID, Driving License',
+  },
+  {
+    key: 'EMPLOYMENT',
+    title: 'Hospital / Clinical Practice Affiliation',
+    badge: 'Practice Authenticity',
+    description: 'Proof of clinical practice, current hospital consultant appointment, or clinic setup.',
+    examples: 'Hospital Consultant ID Card, Clinic Registration Certificate, Official Appointment Letter',
+  },
+];
+
 /**
- * Weighted Profile Completion scoring prioritizing medical matrimonial criteria.
+ * Weighted Profile Completion scoring prioritizing medical matrimonial criteria (Total: 100%).
  */
 function calculateWeightedCompletion(profile: any, user?: any) {
-  if (!profile) return { score: 0, categories: [] };
+  if (!profile) return { score: 0, categories: [] as ProfileCategoryItem[] };
 
-  const checks = [
-    {
-      id: 'basic-details',
-      label: 'Basic Information',
-      weight: 10,
-      completed: Boolean(
-        profile.displayName &&
-        profile.gender &&
-        profile.dob &&
-        profile.height &&
-        (profile.city || profile.state) &&
-        profile.maritalStatus &&
-        profile.religion
-      ),
-    },
-    {
-      id: 'about-me',
-      label: 'About Me',
-      weight: 10,
-      completed: Boolean(profile.about && profile.about.trim().length >= 20),
-    },
-    {
-      id: 'medical-education',
-      label: 'Medical Education',
-      weight: 15,
-      completed: Boolean(
-        profile.education &&
-        (profile.degree || profile.medicalCollege || profile.medicalUniversity)
-      ),
-    },
-    {
-      id: 'medical-career',
-      label: 'Medical Career & Practice',
-      weight: 10,
-      completed: Boolean(
-        profile.profession &&
-        (profile.currentHospital || profile.company || profile.workLocation || profile.currentRole)
-      ),
-    },
-    {
-      id: 'medical-registration',
-      label: 'Medical Registration',
-      weight: 15,
-      completed: Boolean(profile.medicalRegistrationNumber || profile.medicalCouncil),
-    },
-    {
-      id: 'family',
-      label: 'Family Details',
-      weight: 10,
-      completed: Boolean(
-        profile.familyType &&
-        (profile.fatherOccupation || profile.motherOccupation || profile.nativePlace || profile.siblings)
-      ),
-    },
-    {
-      id: 'preferences',
-      label: 'Partner Preferences',
-      weight: 10,
-      completed: Boolean(
-        profile.partnerPreferences &&
-        (profile.partnerPreferences.preferredLocation ||
-          profile.partnerPreferences.preferredQualification ||
-          profile.partnerPreferences.preferredSpecialization ||
-          profile.partnerPreferences.preferredAgeMin)
-      ),
-    },
-    {
-      id: 'horoscope',
-      label: 'Horoscope / Kundali',
-      weight: 5,
-      completed: Boolean(profile.horoscope?.rashi || profile.horoscope?.timeOfBirth),
-    },
-    {
-      id: 'lifestyle',
-      label: 'Lifestyle & Interests',
-      weight: 5,
-      completed: Boolean(
-        profile.lifestyleInterests?.diet ||
-        profile.foodPreference ||
-        (profile.lifestyleInterests?.hobbies && profile.lifestyleInterests.hobbies.length > 0)
-      ),
-    },
-    {
-      id: 'photos',
-      label: 'Photos',
-      weight: 5,
-      completed: Boolean(
-        (profile.primaryPhoto && profile.primaryPhoto.trim() !== '') ||
-        (Array.isArray(profile.photos) && profile.photos.length > 0)
-      ),
-    },
-    {
-      id: 'verification',
-      label: 'Medical Verification',
-      weight: 5,
-      completed: Boolean(
-        profile.verificationStatus === 'VERIFIED' ||
-        profile.verificationStatus === 'DOCTOR_VERIFIED' ||
-        user?.verified === true ||
-        user?.verificationStatus === 'VERIFIED'
-      ),
-    },
+  // 1. Basic Details (10%)
+  const hasBasic = Boolean(
+    profile.displayName &&
+    profile.gender &&
+    profile.dob &&
+    profile.height &&
+    profile.maritalStatus &&
+    profile.religion &&
+    (profile.city || profile.state)
+  );
+
+  // 2. About Me (10%)
+  const hasAbout = Boolean(profile.about && profile.about.trim().length >= 20);
+
+  // 3. Medical Education (10%)
+  const hasEducation = Boolean(
+    profile.education &&
+    (profile.degree || profile.medicalCollege || profile.medicalUniversity)
+  );
+
+  // 4. Medical Career & Practice (10%)
+  const hasCareer = Boolean(
+    profile.profession &&
+    (profile.currentHospital || profile.company || profile.workLocation || profile.currentRole || profile.medicalExperience)
+  );
+
+  // 5. Medical Registration (15%)
+  const hasRegistration = Boolean(
+    profile.medicalRegistrationNumber &&
+    (profile.medicalCouncil || profile.registrationState)
+  );
+
+  // 6. Family Details (10%)
+  const hasFamily = Boolean(
+    profile.familyType &&
+    (profile.fatherOccupation || profile.motherOccupation || profile.nativePlace || profile.siblings || profile.familyValues || profile.familyStatus)
+  );
+
+  // 7. Partner Preferences (10%)
+  const hasPreferences = Boolean(
+    profile.partnerPreferences &&
+    (profile.partnerPreferences.preferredLocation ||
+      profile.partnerPreferences.preferredQualification ||
+      profile.partnerPreferences.preferredSpecialization ||
+      profile.partnerPreferences.preferredAgeMin ||
+      profile.partnerPreferences.preferredAgeMax)
+  );
+
+  // 8. Horoscope & Kundali (5%)
+  const hasHoroscope = Boolean(
+    profile.horoscope?.rashi ||
+    profile.horoscope?.nakshatra ||
+    profile.horoscope?.lagna ||
+    profile.horoscope?.timeOfBirth ||
+    profile.horoscope?.placeOfBirth
+  );
+
+  // 9. Lifestyle & Interests (5%)
+  const hasLifestyle = Boolean(
+    profile.lifestyleInterests?.diet ||
+    profile.foodPreference ||
+    (Array.isArray(profile.lifestyleInterests?.hobbies) && profile.lifestyleInterests.hobbies.length > 0) ||
+    (Array.isArray(profile.hobbies) && profile.hobbies.length > 0)
+  );
+
+  // 10. Photos (5%)
+  const hasPhotos = Boolean(
+    (profile.primaryPhoto && profile.primaryPhoto.trim() !== '') ||
+    (Array.isArray(profile.photos) && profile.photos.length > 0)
+  );
+
+  // 11. Medical Verification (10%)
+  const rawStatus = (profile.verificationStatus || user?.verificationStatus || 'UNVERIFIED').toUpperCase();
+  const isApproved =
+    rawStatus === 'VERIFIED' ||
+    rawStatus === 'DOCTOR_VERIFIED' ||
+    user?.verified === true;
+  const isPending = !isApproved && rawStatus === 'PENDING';
+
+  let verStatus: 'completed' | 'pending' | 'incomplete' = 'incomplete';
+  if (isApproved) {
+    verStatus = 'completed';
+  } else if (isPending) {
+    verStatus = 'pending';
+  }
+
+  const categories: ProfileCategoryItem[] = [
+    { id: 'basic-details', label: 'Basic Details', weight: 10, completed: hasBasic, status: hasBasic ? 'completed' : 'incomplete' },
+    { id: 'about-me', label: 'About Me', weight: 10, completed: hasAbout, status: hasAbout ? 'completed' : 'incomplete' },
+    { id: 'medical-education', label: 'Medical Education', weight: 10, completed: hasEducation, status: hasEducation ? 'completed' : 'incomplete' },
+    { id: 'medical-career', label: 'Medical Career & Practice', weight: 10, completed: hasCareer, status: hasCareer ? 'completed' : 'incomplete' },
+    { id: 'medical-registration', label: 'Medical Registration', weight: 15, completed: hasRegistration, status: hasRegistration ? 'completed' : 'incomplete' },
+    { id: 'family', label: 'Family Details', weight: 10, completed: hasFamily, status: hasFamily ? 'completed' : 'incomplete' },
+    { id: 'preferences', label: 'Partner Preferences', weight: 10, completed: hasPreferences, status: hasPreferences ? 'completed' : 'incomplete' },
+    { id: 'horoscope', label: 'Horoscope / Kundali', weight: 5, completed: hasHoroscope, status: hasHoroscope ? 'completed' : 'incomplete' },
+    { id: 'lifestyle', label: 'Lifestyle & Interests', weight: 5, completed: hasLifestyle, status: hasLifestyle ? 'completed' : 'incomplete' },
+    { id: 'photos', label: 'Photos', weight: 5, completed: hasPhotos, status: hasPhotos ? 'completed' : 'incomplete' },
+    { id: 'medical-verification', label: 'Medical Verification', weight: 10, completed: isApproved, status: verStatus },
   ];
 
   let totalScore = 0;
-  for (const c of checks) {
-    if (c.completed) totalScore += c.weight;
+  for (const c of categories) {
+    if (c.completed) {
+      totalScore += c.weight;
+    }
   }
 
-  return {
-    score: Math.min(100, Math.max(0, totalScore)),
-    categories: checks,
-  };
+  const score = Math.min(100, Math.max(0, totalScore));
+  return { score, categories };
 }
 
 type ModalType =
@@ -259,6 +302,8 @@ export default function MyProfilePage() {
 
   const [profile, setProfile] = useState<any>(null);
   const [membership, setMembership] = useState<any>({ plan: 'FREE', isPremium: false, status: 'ACTIVE' });
+  const [verifications, setVerifications] = useState<UserVerificationSummaryResponse | null>(null);
+  const [completionFilter, setCompletionFilter] = useState<'all' | 'completed' | 'pending' | 'incomplete'>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -268,6 +313,17 @@ export default function MyProfilePage() {
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+
+  // Document Upload Modal
+  const [isDocUploadOpen, setIsDocUploadOpen] = useState(false);
+  const [uploadCategory, setUploadCategory] = useState('MEDICAL_REGISTRATION');
+  const [uploadDocName, setUploadDocName] = useState('');
+  const [uploadFileBase64, setUploadFileBase64] = useState<string | null>(null);
+  const [uploadFileName, setUploadFileName] = useState('');
+  const [uploadFileSize, setUploadFileSize] = useState(0);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const docFileInputRef = useRef<HTMLInputElement>(null);
 
   // Form data
   const [modalFormData, setModalFormData] = useState<any>({});
@@ -283,8 +339,8 @@ export default function MyProfilePage() {
       return;
     }
 
-    Promise.all([getMyProfile(), getMyMembershipStatus()])
-      .then(([profData, memberData]) => {
+    Promise.all([getMyProfile(), getMyMembershipStatus(), fetchUserVerifications()])
+      .then(([profData, memberData, verifData]) => {
         if (!isMounted) return;
         if (profData) {
           setProfile(profData);
@@ -293,6 +349,9 @@ export default function MyProfilePage() {
         }
         if (memberData) {
           setMembership(memberData);
+        }
+        if (verifData) {
+          setVerifications(verifData);
         }
       })
       .catch((err) => {
@@ -328,6 +387,111 @@ export default function MyProfilePage() {
     }
   };
 
+  const handleOpenDocUploadModal = (categoryKey: string = 'MEDICAL_REGISTRATION') => {
+    setUploadCategory(categoryKey);
+    const conf = VERIFICATION_DOC_CONFIG.find((c) => c.key === categoryKey);
+    setUploadDocName(conf ? conf.title : '');
+    setUploadFileBase64(null);
+    setUploadFileName('');
+    setUploadFileSize(0);
+    setUploadError('');
+    setIsDocUploadOpen(true);
+  };
+
+  const handleDocFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError('Document file size exceeds the 10MB limit.');
+      return;
+    }
+
+    const allowed = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.type.toLowerCase())) {
+      setUploadError('Invalid format. Please upload a genuine PDF document or JPG/PNG/WebP image.');
+      return;
+    }
+
+    setUploadError('');
+    setUploadFileName(file.name);
+    setUploadFileSize(file.size);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setUploadFileBase64(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmitVerificationDoc = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uploadFileBase64) {
+      setUploadError('Please choose a valid document file to upload.');
+      return;
+    }
+
+    setUploadingDoc(true);
+    setUploadError('');
+    try {
+      const res = await submitUserVerification({
+        documentType: uploadCategory,
+        documentName: uploadDocName.trim() || undefined,
+        file: uploadFileBase64,
+        filename: uploadFileName,
+      });
+
+      if (res && res.success !== false) {
+        showToast('Document uploaded successfully! It is now queued for administrator review.');
+        setIsDocUploadOpen(false);
+        setUploadFileBase64(null);
+        setUploadFileName('');
+
+        // Reload verification data and profile
+        const [verifRes, profRes] = await Promise.all([
+          fetchUserVerifications(),
+          getMyProfile(),
+        ]);
+        if (verifRes) setVerifications(verifRes);
+        if (profRes) setProfile(profRes);
+      } else {
+        setUploadError(res?.message || 'Failed to submit document. Please try again.');
+      }
+    } catch (err: any) {
+      console.error('Failed to submit verification document:', err);
+      setUploadError(err?.response?.data?.message || 'Error uploading document. Please check file format and size.');
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
+
+  const openModalForSection = (sectionId: string) => {
+    if (sectionId === 'basic-details') {
+      openSectionModal('basic');
+    } else if (sectionId === 'about-me') {
+      openSectionModal('about');
+    } else if (sectionId === 'medical-education') {
+      openSectionModal('medical_edu');
+    } else if (sectionId === 'medical-career') {
+      openSectionModal('medical_career');
+    } else if (sectionId === 'medical-registration') {
+      openSectionModal('medical_reg');
+    } else if (sectionId === 'family') {
+      openSectionModal('family');
+    } else if (sectionId === 'preferences') {
+      openSectionModal('preferences');
+    } else if (sectionId === 'horoscope') {
+      openSectionModal('horoscope');
+    } else if (sectionId === 'lifestyle') {
+      openSectionModal('lifestyle');
+    } else if (sectionId === 'photos') {
+      setIsPhotoModalOpen(true);
+    } else if (sectionId === 'medical-verification') {
+      scrollToSection('medical-verification');
+      handleOpenDocUploadModal('MEDICAL_REGISTRATION');
+    }
+  };
+
   const openSectionModal = (type: ModalType) => {
     if (!profile) return;
     setActiveModal(type);
@@ -341,13 +505,13 @@ export default function MyProfilePage() {
     }
 
     setModalFormData({
-      displayName: profile.displayName || '',
+      displayName: profile.displayName || profile.user?.fullName || '',
       gender: profile.gender || 'Male',
       dob: formattedDob,
-      height: profile.height || `5' 10"`,
-      maritalStatus: profile.maritalStatus || 'Never Married',
-      motherTongue: profile.motherTongue || 'Marathi',
-      religion: profile.religion || 'Hindu',
+      height: profile.height || '',
+      maritalStatus: profile.maritalStatus || '',
+      motherTongue: profile.motherTongue || '',
+      religion: profile.religion || '',
       caste: profile.caste || '',
       subCaste: profile.subCaste || '',
       city: profile.city || '',
@@ -399,7 +563,7 @@ export default function MyProfilePage() {
       communityDetails: profile.communityDetails
         ? {
             religionId: profile.communityDetails.religionId?._id || profile.communityDetails.religionId,
-            religionName: profile.communityDetails.religionId?.name || profile.religion || 'Hindu',
+            religionName: profile.communityDetails.religionId?.name || profile.religion || '',
             casteId: profile.communityDetails.casteId?._id || profile.communityDetails.casteId,
             casteName: profile.communityDetails.casteId?.name || profile.caste || '',
             casteCategory: profile.communityDetails.casteCategory || profile.communityDetails.casteId?.category || '',
@@ -407,34 +571,34 @@ export default function MyProfilePage() {
             subCasteName: profile.communityDetails.subCasteId?.name || profile.subCaste || '',
           }
         : {
-            religionName: profile.religion || 'Hindu',
+            religionName: profile.religion || '',
             casteName: profile.caste || '',
             subCasteName: profile.subCaste || '',
           },
       languageDetails: profile.languageDetails
         ? {
             motherTongueId: profile.languageDetails.motherTongueId?._id || profile.languageDetails.motherTongueId,
-            motherTongueName: profile.languageDetails.motherTongueId?.name || profile.motherTongue || 'Marathi',
+            motherTongueName: profile.languageDetails.motherTongueId?.name || profile.motherTongue || '',
           }
         : {
-            motherTongueName: profile.motherTongue || 'Marathi',
+            motherTongueName: profile.motherTongue || '',
           },
       about: profile.about || '',
       // Medical Education
-      education: profile.education || 'MBBS',
-      degree: profile.degree || 'MBBS',
+      education: profile.education || '',
+      degree: profile.degree || '',
       medicalCollege: profile.medicalCollege || '',
       medicalUniversity: profile.medicalUniversity || '',
       graduationYear: profile.graduationYear || '',
       additionalQualification: profile.additionalQualification || '',
       // Medical Career
-      profession: profile.profession || 'Medical Specialist',
+      profession: profile.profession || '',
       currentRole: profile.currentRole || '',
       currentHospital: profile.currentHospital || '',
       company: profile.company || '',
       workLocation: profile.workLocation || '',
       medicalExperience: profile.medicalExperience || '',
-      workType: profile.workType || 'Hospital Consultant',
+      workType: profile.workType || '',
       currentlyPracticing: profile.currentlyPracticing ?? true,
       // Medical Registration
       medicalRegistrationNumber: profile.medicalRegistrationNumber || '',
@@ -442,19 +606,19 @@ export default function MyProfilePage() {
       registrationState: profile.registrationState || '',
       registrationYear: profile.registrationYear || '',
       // Family
-      familyType: profile.familyType || 'Nuclear Family',
-      familyStatus: profile.familyStatus || 'Upper Middle Class',
-      familyValues: profile.familyValues || 'Moderate',
+      familyType: profile.familyType || '',
+      familyStatus: profile.familyStatus || '',
+      familyValues: profile.familyValues || '',
       fatherOccupation: profile.fatherOccupation || '',
       motherOccupation: profile.motherOccupation || '',
       siblings: profile.siblings || '',
       familyLocation: profile.familyLocation || '',
       // Partner Preferences
-      preferredAgeMin: profile.partnerPreferences?.preferredAgeMin || 22,
-      preferredAgeMax: profile.partnerPreferences?.preferredAgeMax || 32,
-      preferredLocation: profile.partnerPreferences?.preferredLocation || 'Pune / Mumbai / Maharashtra',
-      preferredQualification: profile.partnerPreferences?.preferredQualification || 'MBBS / MD / MS / DNB',
-      preferredSpecialization: profile.partnerPreferences?.preferredSpecialization || 'Open to all specialties',
+      preferredAgeMin: profile.partnerPreferences?.preferredAgeMin || 24,
+      preferredAgeMax: profile.partnerPreferences?.preferredAgeMax || 36,
+      preferredLocation: profile.partnerPreferences?.preferredLocation || '',
+      preferredQualification: profile.partnerPreferences?.preferredQualification || '',
+      preferredSpecialization: profile.partnerPreferences?.preferredSpecialization || '',
       preferredMaritalStatus: profile.partnerPreferences?.preferredMaritalStatus || 'Never Married',
       otherPreferences: profile.partnerPreferences?.otherPreferences || '',
       // Horoscope
@@ -467,14 +631,14 @@ export default function MyProfilePage() {
       gotra: profile.horoscope?.gotra || '',
       horoscopeDocument: profile.horoscope?.horoscopeDocument || '',
       // Lifestyle
-      diet: profile.lifestyleInterests?.diet || profile.foodPreference || 'Vegetarian',
-      smoking: profile.lifestyleInterests?.smoking || profile.smoking || 'Non-Smoker',
-      alcohol: profile.lifestyleInterests?.alcohol || profile.drinking || 'Non-Drinker',
-      exercise: profile.lifestyleInterests?.exercise || 'Regular Fitness',
+      diet: profile.lifestyleInterests?.diet || profile.foodPreference || '',
+      smoking: profile.lifestyleInterests?.smoking || profile.smoking || '',
+      alcohol: profile.lifestyleInterests?.alcohol || profile.drinking || '',
+      exercise: profile.lifestyleInterests?.exercise || '',
       hobbies: (profile.lifestyleInterests?.hobbies || profile.hobbies || []).join(', '),
       travel: (profile.lifestyleInterests?.travel || []).join(', '),
-      languages: (profile.lifestyleInterests?.languages || [profile.motherTongue || 'Marathi', 'English']).join(', '),
-      pets: profile.lifestyleInterests?.pets || 'None',
+      languages: (profile.lifestyleInterests?.languages || (profile.motherTongue ? [profile.motherTongue] : [])).join(', '),
+      pets: profile.lifestyleInterests?.pets || '',
       otherInterests: profile.lifestyleInterests?.otherInterests || '',
     });
   };
@@ -780,25 +944,51 @@ export default function MyProfilePage() {
   const age = getAge(profile.dob);
   const formattedDob = formatDateLong(profile.dob);
   const heightMeters = HEIGHT_METERS[profile.height] ? ` (${HEIGHT_METERS[profile.height]})` : '';
-  const heightDisplay = profile.height ? `${profile.height}${heightMeters}` : `5' 10" (1.78 m)`;
+  const heightDisplay = profile.height ? `${profile.height}${heightMeters}` : 'Height Not Specified';
+  const candidateNameDisplay = profile.displayName || profile.user?.fullName || 'Doctor Candidate';
+  const candidateLocationDisplay =
+    profile.currentLocation?.formattedAddress ||
+    [profile.city, profile.state, profile.country].filter(Boolean).join(', ') ||
+    'Location Not Specified';
+  const qualificationDisplay = profile.education || profile.degree || 'Medical Qualification Not Specified';
+  const professionDisplay = profile.profession || 'Medical Profession Not Specified';
 
-  const { score: completionScore, categories: completionCategories } = calculateWeightedCompletion(
-    profile,
-    profile.user
-  );
+  const completionData = calculateWeightedCompletion(profile, profile.user);
+  const completionScore = profile.completionScore ?? profile.completionPercentage ?? completionData.score;
+  const completionCategories: ProfileCategoryItem[] = profile.completionBreakdown || completionData.categories;
+
+  // Filter categories
+  const filteredCategories = completionCategories.filter((c) => {
+    if (completionFilter === 'completed') return c.completed;
+    if (completionFilter === 'pending') return c.status === 'pending';
+    if (completionFilter === 'incomplete') return c.status === 'incomplete';
+    return true;
+  });
 
   // Verification states
-  const rawStatus = (profile.verificationStatus || profile.user?.verificationStatus || 'UNVERIFIED').toUpperCase();
-  const isDoctorVerified = rawStatus === 'VERIFIED' || rawStatus === 'DOCTOR_VERIFIED';
-  const isPending = rawStatus === 'PENDING';
-  const isFullyVerified = Boolean(profile.user?.verified && isDoctorVerified);
+  const rawStatus = (
+    verifications?.overallStatus ||
+    profile.verificationStatus ||
+    profile.user?.verificationStatus ||
+    'UNVERIFIED'
+  ).toUpperCase();
+  const isDoctorVerified =
+    rawStatus === 'VERIFIED' ||
+    rawStatus === 'DOCTOR_VERIFIED' ||
+    Boolean(verifications?.isVerified) ||
+    Boolean(profile.user?.verified);
+  const isPending = !isDoctorVerified && rawStatus === 'PENDING';
+  const isRejected = !isDoctorVerified && rawStatus === 'REJECTED';
+  const isFullyVerified = Boolean(
+    (profile.user?.verified || verifications?.isVerified) && isDoctorVerified
+  );
 
-  const profileIdDisplay = `WJ${String(profile._id || '000000').slice(-6).toUpperCase()}`;
+  const profileIdDisplay = profile.candidateId || `WJ${String(profile._id || '000000').slice(-6).toUpperCase()}`;
 
   // Membership states
-  const planName = (membership.plan || 'FREE').toUpperCase();
+  const planName = (membership.plan || profile.membership || 'FREE').toUpperCase();
   const isMembershipExpired = membership.status === 'EXPIRED';
-  const isPremiumActive = membership.isPremium && !isMembershipExpired;
+  const isPremiumActive = (membership.isPremium || planName !== 'FREE') && !isMembershipExpired;
 
   return (
     <main className="min-h-screen bg-[#FAF7F4] text-[#0F172A] pb-16 sm:pb-20">
@@ -829,157 +1019,36 @@ export default function MyProfilePage() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 space-y-4 sm:space-y-6">
         {/* ════════════════════════════════════════════════════
-            1. TWO-LAYER PROFILE HEADER (Subtle Top Banner + White Info Area)
+            1. SEPARATE PROFILE BANNER & PROFILE SUMMARY CARD
            ════════════════════════════════════════════════════ */}
-        <section
-          id="profile-header"
-          className="bg-white rounded-2xl border border-[#E8E1DB] shadow-2xs overflow-hidden"
-        >
-          {/* Top Layer: Premium subtle maroon/rose banner */}
-          <div className="h-24 sm:h-32 bg-gradient-to-r from-[#6B0D1E] via-[#85132A] to-[#A31835] relative overflow-hidden px-6 py-3 flex items-center justify-between">
-            <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px]" />
-            <div className="relative z-10">
-              <span className="text-white/80 text-[11px] font-bold tracking-wider uppercase">
-                Wonderful Jodi Matrimony
-              </span>
-            </div>
-            <div className="relative z-10 flex items-center gap-2">
-              <span className="px-3 py-1 rounded-full bg-black/25 backdrop-blur-md text-white text-[11px] font-bold border border-white/20 tracking-wide">
-                Profile ID: {profileIdDisplay}
-              </span>
-              <span
-                className={`px-3 py-1 rounded-full text-[11px] font-bold shadow-xs ${
-                  isMembershipExpired
-                    ? 'bg-rose-100 text-rose-900'
-                    : isPremiumActive
-                    ? 'bg-amber-400 text-amber-950'
-                    : 'bg-white/20 text-white backdrop-blur-md'
-                }`}
-              >
-                {isMembershipExpired
-                  ? 'MEMBERSHIP EXPIRED'
-                  : isPremiumActive
-                  ? `${planName} MEMBER`
-                  : 'FREE MEMBER'}
-              </span>
-            </div>
-          </div>
+        <section id="profile-header" className="space-y-6 sm:space-y-7">
+          {/* Top Banner (Standalone Premium Burgundy/Rose Container) */}
+          <ProfileBanner
+            profileId={profileIdDisplay}
+            isMembershipExpired={isMembershipExpired}
+            isPremiumActive={isPremiumActive}
+            planName={planName}
+          />
 
-          {/* Bottom Layer: Pure White Profile Information Area */}
-          <div className="px-6 sm:px-8 pb-6 pt-0 bg-white">
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-5 -mt-12 sm:-mt-16">
-              {/* Left: Profile Photo + Doctor Information */}
-              <div className="flex flex-col sm:flex-row items-center sm:items-end gap-5 text-center sm:text-left">
-                {/* Photo container (large professional portrait with DoctorAvatar fallback) */}
-                <div className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-[20px] overflow-hidden bg-white p-1 shadow-md border-2 border-white ring-1 ring-slate-200/80 shrink-0 group">
-                  <DoctorAvatar
-                    photoUrl={profile.primaryPhoto}
-                    name={profile.displayName || profile.user?.fullName || 'Rushikesh Kulkarni'}
-                    gender={profile.gender}
-                    size="xl"
-                    className="w-full h-full rounded-[16px] cursor-pointer"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setIsPhotoModalOpen(true)}
-                    className="absolute inset-1 rounded-[16px] bg-slate-900/60 backdrop-blur-2xs opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white transition-opacity duration-200 cursor-pointer"
-                  >
-                    <Camera className="w-5 h-5 mb-1" />
-                    <span className="text-[10.5px] font-bold">Manage Photos</span>
-                  </button>
-                </div>
-
-                {/* Primary Metadata */}
-                <div className="space-y-1 pb-1 pt-3 sm:pt-14 relative z-10">
-                  <div className="flex items-center justify-center sm:justify-start gap-2.5 flex-wrap">
-                    <h1 className="font-serif text-2xl sm:text-3xl font-bold text-[#0F172A]">
-                      {profile.displayName || profile.user?.fullName || 'Rushikesh Kulkarni'}
-                    </h1>
-                  </div>
-
-                  <p className="text-xs sm:text-sm font-semibold text-slate-600 flex items-center justify-center sm:justify-start gap-2 flex-wrap">
-                    <span>{age} Years</span>
-                    <span className="text-slate-300">•</span>
-                    <span>{profile.gender}</span>
-                    <span className="text-slate-300">•</span>
-                    <span>{profile.height || `5' 10"`}</span>
-                    <span className="text-slate-300">•</span>
-                    <span className="inline-flex items-center gap-1 text-slate-700">
-                      <MapPin className="w-3.5 h-3.5 text-[#E51F3E]" />
-                      <span>{profile.currentLocation?.formattedAddress || [profile.city, profile.state, profile.country].filter(Boolean).join(', ') || 'Pune, Maharashtra'}</span>
-                    </span>
-                  </p>
-
-                  <p className="text-xs font-bold text-[#800020] flex items-center justify-center sm:justify-start gap-1.5 pt-0.5">
-                    <Stethoscope className="w-3.5 h-3.5 text-[#E51F3E]" />
-                    <span>{profile.education || 'MBBS'}</span>
-                    <span className="text-slate-400">•</span>
-                    <span className="text-slate-700 font-semibold">{profile.profession || 'Medical Specialist'}</span>
-                  </p>
-
-                  {/* Verification Status Pill */}
-                  <div className="pt-1.5 flex items-center justify-center sm:justify-start gap-2 flex-wrap">
-                    {isFullyVerified ? (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700 shadow-2xs">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>✓ Fully Verified</span>
-                      </span>
-                    ) : isDoctorVerified ? (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700 shadow-2xs">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>✓ Medical Registration Verified</span>
-                      </span>
-                    ) : isPending ? (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 shadow-2xs">
-                        <Clock className="w-3.5 h-3.5 text-amber-600" />
-                        <span>○ Medical Verification Pending</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700 shadow-2xs">
-                        <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
-                        <span>! Medical Verification Pending</span>
-                      </span>
-                    )}
-
-                    {profile.photos && profile.photos.length > 0 && isDoctorVerified && (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-[11px] font-semibold text-slate-700">
-                        <Check className="w-3 h-3 text-emerald-600" />
-                        <span>✓ Photo Verified</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Right: Action Buttons (Own Profile) */}
-              <div className="flex items-center justify-center sm:justify-end gap-2.5 shrink-0 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => openSectionModal('basic')}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#E51F3E] to-[#CC1432] text-white text-xs font-bold shadow-xs hover:shadow-md transition cursor-pointer"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Edit Profile</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsPhotoModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50 transition cursor-pointer shadow-2xs"
-                >
-                  <Camera className="w-3.5 h-3.5 text-[#E51F3E]" />
-                  <span>Add Photos</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsPrivacyModalOpen(true)}
-                  className="p-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
-                  title="Photo & Contact Privacy"
-                >
-                  <Lock className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
+          {/* Profile Summary Card (Distinct Pure White Card with 24px-32px Vertical Gap) */}
+          <ProfileSummaryCard
+            primaryPhoto={profile.primaryPhoto}
+            candidateName={candidateNameDisplay}
+            age={age}
+            gender={profile.gender}
+            height={heightDisplay}
+            location={candidateLocationDisplay}
+            qualification={qualificationDisplay}
+            profession={professionDisplay}
+            isFullyVerified={isFullyVerified}
+            isDoctorVerified={isDoctorVerified}
+            isPending={isPending}
+            isRejected={isRejected}
+            hasPhotos={Boolean(profile.photos && profile.photos.length > 0)}
+            onEditProfile={() => openSectionModal('basic')}
+            onManagePhotos={() => setIsPhotoModalOpen(true)}
+            onOpenPrivacy={() => setIsPrivacyModalOpen(true)}
+          />
         </section>
 
         {/* ════════════════════════════════════════════════════
@@ -994,6 +1063,8 @@ export default function MyProfilePage() {
             onChange={(e) => scrollToSection(e.target.value)}
             className="w-full h-10 px-3 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800"
           >
+            <option value="profile-strength">Profile Strength</option>
+            <option value="medical-verification">Medical Verification</option>
             <option value="basic-details">Basic Details</option>
             <option value="about-me">About Me</option>
             <option value="medical-education">Medical Education & Qualifications</option>
@@ -1018,120 +1089,358 @@ export default function MyProfilePage() {
             {/* 2. PROFILE COMPLETION (Profile Strength & Visibility) */}
             <section
               id="profile-strength"
-              className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-4"
+              className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-5"
             >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
                 <div>
                   <h2 className="font-serif text-base sm:text-lg font-bold text-[#0F172A] flex items-center gap-2">
                     <Sparkles className="w-4.5 h-4.5 text-[#E51F3E]" />
-                    <span>Profile Strength & Visibility</span>
+                    <span>Profile Strength & Completion</span>
                   </h2>
                   <p className="text-xs text-slate-600 mt-0.5">
-                    Complete your profile to receive better doctor matches.
+                    Calculated accurately across all 11 doctor matrimonial criteria. Complete missing fields to maximize doctor match visibility.
                   </p>
                 </div>
-                <div className="text-right">
-                  <span className="text-2xl font-bold text-[#800020]">{completionScore}%</span>
-                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Complete</span>
+                <div className="text-left sm:text-right shrink-0">
+                  <span className="text-3xl font-bold text-[#800020]">{completionScore}%</span>
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">Completed</span>
                 </div>
               </div>
 
               {/* Progress Bar */}
               <div className="space-y-1.5">
-                <div className="w-full h-3 rounded-full bg-slate-100 overflow-hidden p-0.5 border border-slate-200/70">
+                <div className="w-full h-3.5 rounded-full bg-slate-100 overflow-hidden p-0.5 border border-slate-200/70">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-[#800020] via-[#A81C39] to-[#E51F3E] transition-all duration-700"
-                    style={{ width: `${completionScore}%` }}
+                    style={{ width: `${Math.max(4, completionScore)}%` }}
                   />
+                </div>
+                <div className="flex justify-between items-center text-[11px] text-slate-500 font-semibold px-1">
+                  <span>{completionCategories.filter(c => c.completed).length} of {completionCategories.length} sections complete</span>
+                  <span>{100 - completionScore}% remaining to 100%</span>
                 </div>
               </div>
 
-              {/* Category Status Badges */}
-              <div className="flex flex-wrap gap-2 pt-1">
-                {completionCategories.map((c) => (
-                  <button
+              {/* Category Status Filters */}
+              <div className="flex items-center gap-1.5 border-b border-slate-100 pb-3 overflow-x-auto text-xs">
+                <button
+                  type="button"
+                  onClick={() => setCompletionFilter('all')}
+                  className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                    completionFilter === 'all'
+                      ? 'bg-slate-900 text-white shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  All ({completionCategories.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCompletionFilter('completed')}
+                  className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                    completionFilter === 'completed'
+                      ? 'bg-emerald-700 text-white shadow-2xs'
+                      : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                  }`}
+                >
+                  ✓ Completed ({completionCategories.filter(c => c.completed).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCompletionFilter('pending')}
+                  className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                    completionFilter === 'pending'
+                      ? 'bg-amber-700 text-white shadow-2xs'
+                      : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                  }`}
+                >
+                  ⏳ Pending ({completionCategories.filter(c => c.status === 'pending').length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCompletionFilter('incomplete')}
+                  className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                    completionFilter === 'incomplete'
+                      ? 'bg-rose-700 text-white shadow-2xs'
+                      : 'bg-rose-50 text-rose-800 hover:bg-rose-100'
+                  }`}
+                >
+                  ○ Incomplete ({completionCategories.filter(c => c.status === 'incomplete').length})
+                </button>
+              </div>
+
+              {/* Category Status Badges Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                {filteredCategories.map((c) => (
+                  <div
                     key={c.id}
-                    type="button"
-                    onClick={() => scrollToSection(c.id)}
-                    className={`px-3 py-1 rounded-full text-[11px] font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                      c.completed
-                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
-                        : 'bg-slate-100 text-slate-600 border border-slate-200 hover:bg-rose-50 hover:text-[#E51F3E]'
+                    className={`p-2.5 px-3 rounded-2xl text-xs flex items-center justify-between border transition ${
+                      c.status === 'completed'
+                        ? 'bg-emerald-50/60 border-emerald-200 text-emerald-900'
+                        : c.status === 'pending'
+                        ? 'bg-amber-50/70 border-amber-200 text-amber-900'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-rose-300'
                     }`}
                   >
-                    <span>{c.completed ? '✓' : '○'}</span>
-                    <span>{c.label}</span>
-                  </button>
+                    <div className="flex items-center gap-2">
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 ${
+                        c.status === 'completed'
+                          ? 'bg-emerald-600 text-white'
+                          : c.status === 'pending'
+                          ? 'bg-amber-500 text-white animate-pulse'
+                          : 'bg-slate-200 text-slate-600'
+                      }`}>
+                        {c.status === 'completed' ? '✓' : c.status === 'pending' ? '⏳' : '○'}
+                      </span>
+                      <span className="font-semibold text-slate-800">{c.label}</span>
+                      <span className="text-[10px] text-slate-400 font-bold">({c.weight}%)</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {c.status === 'completed' ? (
+                        <button
+                          type="button"
+                          onClick={() => scrollToSection(c.id)}
+                          className="text-[11px] font-bold text-emerald-700 hover:underline cursor-pointer"
+                        >
+                          View
+                        </button>
+                      ) : c.status === 'pending' ? (
+                        <button
+                          type="button"
+                          onClick={() => scrollToSection('medical-verification')}
+                          className="text-[11px] font-bold text-amber-800 hover:underline cursor-pointer"
+                        >
+                          Reviewing
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openModalForSection(c.id)}
+                          className="px-2.5 py-1 rounded-lg bg-[#E51F3E] text-white text-[10.5px] font-bold shadow-2xs hover:bg-[#c91834] transition cursor-pointer"
+                        >
+                          + Complete
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
             </section>
 
-            {/* 3. VERIFICATION CARD */}
+            {/* 3. MEDICAL VERIFICATION SECTION */}
             <section
-              id="verification"
-              className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-4"
+              id="medical-verification"
+              className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-6"
             >
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-5 h-5 text-[#E51F3E]" />
-                  <h3 className="font-serif text-lg font-bold text-[#0F172A]">Medical Profile Verification</h3>
-                </div>
-                <Link
-                  href="/profile/verification"
-                  className="inline-flex items-center gap-1 text-xs font-bold text-[#E51F3E] hover:underline"
-                >
-                  <span>Check Verification Status</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </Link>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                <div className="p-3.5 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] font-bold text-emerald-800 block">Mobile Number</span>
-                    <span className="text-xs font-semibold text-slate-700 mt-0.5 block">
-                      {profile.user?.mobile ? `+91 •••••••${profile.user.mobile.slice(-4)}` : 'Verified on Login'}
-                    </span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-50 text-[#E51F3E] flex items-center justify-center shrink-0 border border-rose-100">
+                    <ShieldCheck className="w-5 h-5" />
                   </div>
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex items-center justify-between">
                   <div>
-                    <span className="text-[11px] font-bold text-emerald-800 block">Email Address</span>
-                    <span className="text-xs font-semibold text-slate-700 mt-0.5 block truncate max-w-[130px]">
-                      {profile.user?.email || 'Verified on signup'}
-                    </span>
+                    <h3 className="font-serif text-lg font-bold text-[#0F172A] flex items-center gap-2 flex-wrap">
+                      <span>Medical Profile Verification</span>
+                      {isFullyVerified ? (
+                        <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          ✓ Verified Doctor
+                        </span>
+                      ) : isPending ? (
+                        <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200 animate-pulse">
+                          ⏳ Verification Under Review
+                        </span>
+                      ) : isRejected ? (
+                        <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-900 border border-rose-200">
+                          ⚠️ Action Required
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                          Not Submitted
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Statutory doctor credentials and KYC verification ensuring authentic healthcare professional matrimony.
+                    </p>
                   </div>
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 </div>
 
-                <div
-                  className={`p-3.5 rounded-2xl border flex items-center justify-between ${
-                    isDoctorVerified
-                      ? 'bg-emerald-50/60 border-emerald-100 text-emerald-800'
-                      : isPending
-                      ? 'bg-amber-50/60 border-amber-100 text-amber-800'
-                      : 'bg-rose-50/60 border-rose-100 text-[#E51F3E]'
-                  }`}
-                >
-                  <div>
-                    <span className="text-[11px] font-bold block">Medical Credentials</span>
-                    <span className="text-xs font-semibold text-slate-700 mt-0.5 block">
-                      {isDoctorVerified
-                        ? '✓ Council Verified'
-                        : isPending
-                        ? '○ Under Review'
-                        : '! Verification Pending'}
-                    </span>
-                  </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenDocUploadModal('MEDICAL_REGISTRATION')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-[#E51F3E] to-[#CC1432] text-white text-xs font-bold shadow-xs hover:shadow-md transition cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload Document</span>
+                  </button>
                   <Link
                     href="/profile/verification"
-                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-[10.5px] font-bold text-slate-800 shadow-2xs hover:bg-slate-50"
+                    className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
                   >
-                    {isDoctorVerified ? 'View' : 'Submit'}
+                    <span>Verification Center</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
                   </Link>
                 </div>
+              </div>
+
+              {/* Overall Verification Status Alert */}
+              {isFullyVerified ? (
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200/80 flex items-start gap-3 text-xs text-emerald-950">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-bold text-sm text-emerald-950">Verified Doctor Matrimonial Profile</h4>
+                    <p className="mt-0.5 text-emerald-800 leading-relaxed">
+                      Your Medical Council Registration and Degree certificates have been verified by Wonderful Jodi medical compliance. Your profile displays the authentic Doctor Trust Badge.
+                    </p>
+                  </div>
+                </div>
+              ) : isPending ? (
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200/80 flex items-start gap-3 text-xs text-amber-950">
+                  <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5 animate-spin" />
+                  <div>
+                    <h4 className="font-bold text-sm text-amber-950">Documents Queued For Administrator Review</h4>
+                    <p className="mt-0.5 text-amber-800 leading-relaxed">
+                      Your submitted documents have been received and are undergoing review by our administration team. Verification typically completes within 24 to 48 business hours.
+                    </p>
+                  </div>
+                </div>
+              ) : isRejected ? (
+                <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200/80 flex items-start gap-3 text-xs text-rose-950">
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-bold text-sm text-rose-950">Verification Requires Correction</h4>
+                    <p className="mt-0.5 text-rose-800 leading-relaxed">
+                      One or more of your submitted documents was not approved by the administrator. Please inspect the rejection reason below and upload a clear, legible copy.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-start gap-3 text-xs text-slate-800">
+                  <Lock className="w-5 h-5 text-slate-500 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-bold text-sm text-slate-900">Medical Verification Pending</h4>
+                    <p className="mt-0.5 text-slate-600 leading-relaxed">
+                      Upload your Medical Council Registration Certificate and Degree to unlock the Verified Doctor Trust Badge and expand matching trust.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* 4 Document Category Cards Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {VERIFICATION_DOC_CONFIG.map((cat) => {
+                  const catSummary = verifications?.summary?.[cat.key];
+                  const docStatus = (catSummary?.status || 'NOT_SUBMITTED').toUpperCase();
+                  const isCatApproved = docStatus === 'APPROVED';
+                  const isCatPending = docStatus === 'PENDING';
+                  const isCatRejected = docStatus === 'REJECTED';
+
+                  return (
+                    <div
+                      key={cat.key}
+                      className={`p-4 rounded-2xl border flex flex-col justify-between space-y-3 transition ${
+                        isCatApproved
+                          ? 'bg-emerald-50/40 border-emerald-200'
+                          : isCatPending
+                          ? 'bg-amber-50/40 border-amber-200'
+                          : isCatRejected
+                          ? 'bg-rose-50/50 border-rose-200'
+                          : 'bg-slate-50/60 border-slate-200'
+                      }`}
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700 shadow-2xs">
+                            {cat.badge}
+                          </span>
+                          {isCatApproved ? (
+                            <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Approved</span>
+                            </span>
+                          ) : isCatPending ? (
+                            <span className="text-[11px] font-bold text-amber-700 flex items-center gap-1 animate-pulse">
+                              <Clock className="w-3.5 h-3.5 text-amber-600" />
+                              <span>Under Review</span>
+                            </span>
+                          ) : isCatRejected ? (
+                            <span className="text-[11px] font-bold text-rose-700 flex items-center gap-1">
+                              <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                              <span>Rejected</span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] font-bold text-slate-500">
+                              Not Submitted
+                            </span>
+                          )}
+                        </div>
+
+                        <h4 className="font-serif text-sm font-bold text-slate-900">{cat.title}</h4>
+                        <p className="text-xs text-slate-500 leading-relaxed">{cat.description}</p>
+                        <p className="text-[11px] text-slate-400 italic">e.g. {cat.examples}</p>
+                      </div>
+
+                      {/* Status / Actions Area */}
+                      <div className="pt-2 border-t border-slate-200/60">
+                        {isCatApproved ? (
+                          <div className="flex items-center justify-between text-xs text-emerald-800 font-semibold">
+                            <span>✓ Verified on {formatDateLong(catSummary?.reviewedAt || catSummary?.submittedAt)}</span>
+                            <span className="text-[10.5px] px-2 py-0.5 bg-emerald-100 rounded-full font-bold">Attempt #{catSummary?.attemptNumber || 1}</span>
+                          </div>
+                        ) : isCatPending ? (
+                          <div className="flex items-center justify-between text-xs text-amber-800">
+                            <span className="flex items-center gap-1 font-medium">
+                              <Clock className="w-3.5 h-3.5 text-amber-600" />
+                              <span>Submitted on {formatDateLong(catSummary?.submittedAt)}</span>
+                            </span>
+                            <span className="text-[10.5px] px-2 py-0.5 bg-amber-100 rounded-full font-bold">Attempt #{catSummary?.attemptNumber || 1}</span>
+                          </div>
+                        ) : isCatRejected ? (
+                          <div className="space-y-2">
+                            <div className="p-2.5 bg-rose-100/70 border border-rose-200 rounded-xl text-xs text-rose-900 space-y-0.5">
+                              <span className="font-bold flex items-center gap-1 text-[11px] text-rose-950">
+                                <AlertCircle className="w-3 h-3 text-rose-600" />
+                                Rejection Reason:
+                              </span>
+                              <p className="text-rose-800 font-medium">{catSummary?.rejectionReason || 'Document unreadable or invalid.'}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenDocUploadModal(cat.key)}
+                              className="w-full py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                            >
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>Resubmit Corrected Document (Attempt #{(catSummary?.attemptNumber || 1) + 1})</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDocUploadModal(cat.key)}
+                            className="w-full py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                          >
+                            <Upload className="w-3.5 h-3.5 text-[#E51F3E]" />
+                            <span>Upload Document</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* IDOR Privacy Security Assurance */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-slate-600">
+                <div className="flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-[#E51F3E] shrink-0" />
+                  <span>
+                    <strong>Strict Privacy Protection:</strong> Verification documents are encrypted and accessible exclusively to authorized Wonderful Jodi administrators. Documents are never shared with public visitors or prospective matches.
+                  </span>
+                </div>
+                <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">
+                  IDOR Protected
+                </span>
               </div>
             </section>
 
@@ -1203,27 +1512,27 @@ export default function MyProfilePage() {
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Date of Birth</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{formattedDob}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">{formattedDob || 'Not Specified'}</span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Age</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{age} Years</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">{age !== null ? `${age} Years` : 'Not Specified'}</span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Gender</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.gender}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.gender || 'Not Specified'}</span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Marital Status</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.maritalStatus || 'Never Married'}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.maritalStatus || 'Not Specified'}</span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Mother Tongue</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.motherTongue || 'Marathi'}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.motherTongue || 'Not Specified'}</span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Religion</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.religion || 'Hindu'}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.religion || 'Not Specified'}</span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Community</span>
@@ -1236,20 +1545,22 @@ export default function MyProfilePage() {
                         )}
                       </>
                     ) : (
-                      <button onClick={() => openSectionModal('basic')} className="text-[#E51F3E] font-bold">+ Add Community</button>
+                      <button onClick={() => openSectionModal('basic')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Community</button>
                     )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Current Location</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
-                    {profile.currentLocation?.formattedAddress || [profile.city, profile.state, profile.country].filter(Boolean).join(', ') || 'Pune, Maharashtra'}
+                    {candidateLocationDisplay}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Income Range</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
-                    {profile.annualIncome || '₹ 35 - 50 Lakhs'}
+                    {profile.annualIncome || (
+                      <button onClick={() => openSectionModal('basic')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Income Range</button>
+                    )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl sm:col-span-2">
@@ -1299,7 +1610,7 @@ export default function MyProfilePage() {
                   <button
                     type="button"
                     onClick={() => openSectionModal('about')}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-xs font-bold text-slate-700 hover:text-[#E51F3E] transition"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-xs font-bold text-slate-700 hover:text-[#E51F3E] transition cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Add About Me</span>
@@ -1311,10 +1622,12 @@ export default function MyProfilePage() {
                     Profile Managed By: <strong className="text-slate-900">{profile.profileManagedBy || 'Self'}</strong>
                   </span>
                   <span className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-semibold">
-                    Diet: <strong className="text-slate-900">{profile.foodPreference || 'Vegetarian'}</strong>
+                    Diet: <strong className="text-slate-900">{profile.lifestyleInterests?.diet || profile.foodPreference || 'Not Specified'}</strong>
                   </span>
                   <span className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-semibold">
-                    Smoking / Drinking: <strong className="text-slate-900">{profile.smoking || 'Non-Smoker'} • {profile.drinking || 'Non-Drinker'}</strong>
+                    Smoking / Drinking: <strong className="text-slate-900">
+                      {profile.lifestyleInterests?.smoking || profile.smoking || 'Not Specified'} • {profile.lifestyleInterests?.alcohol || profile.drinking || 'Not Specified'}
+                    </strong>
                   </span>
                 </div>
               </div>
@@ -1349,7 +1662,9 @@ export default function MyProfilePage() {
                     Highest Qualification
                   </span>
                   <span className="font-bold text-slate-900 mt-0.5 block text-sm sm:text-base">
-                    {profile.education || 'MBBS'}
+                    {profile.education || (
+                      <button onClick={() => openSectionModal('medical_edu')} className="text-[#E51F3E] font-bold text-xs cursor-pointer">+ Add Qualification</button>
+                    )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
@@ -1358,7 +1673,7 @@ export default function MyProfilePage() {
                   </span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
                     {profile.medicalCollege || (
-                      <button onClick={() => openSectionModal('medical_edu')} className="text-[#E51F3E] font-bold">+ Add Medical College</button>
+                      <button onClick={() => openSectionModal('medical_edu')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Medical College</button>
                     )}
                   </span>
                 </div>
@@ -1368,7 +1683,7 @@ export default function MyProfilePage() {
                   </span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
                     {profile.medicalUniversity || (
-                      <button onClick={() => openSectionModal('medical_edu')} className="text-[#E51F3E] font-bold">+ Add University</button>
+                      <button onClick={() => openSectionModal('medical_edu')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add University</button>
                     )}
                   </span>
                 </div>
@@ -1378,7 +1693,7 @@ export default function MyProfilePage() {
                   </span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
                     {profile.graduationYear || (
-                      <button onClick={() => openSectionModal('medical_edu')} className="text-[#E51F3E] font-bold">+ Add Year</button>
+                      <button onClick={() => openSectionModal('medical_edu')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Year</button>
                     )}
                   </span>
                 </div>
@@ -1388,7 +1703,7 @@ export default function MyProfilePage() {
                   </span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
                     {profile.additionalQualification || (
-                      <button onClick={() => openSectionModal('medical_edu')} className="text-[#E51F3E] font-bold">+ Add Additional Qualification</button>
+                      <button onClick={() => openSectionModal('medical_edu')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Additional Qualification</button>
                     )}
                   </span>
                 </div>
@@ -1421,35 +1736,59 @@ export default function MyProfilePage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs sm:text-sm">
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Profession</span>
-                  <span className="font-bold text-slate-900 mt-0.5 block">{profile.profession || 'Medical Specialist'}</span>
+                  <span className="font-bold text-slate-900 mt-0.5 block">
+                    {profile.profession || (
+                      <button onClick={() => openSectionModal('medical_career')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Profession</button>
+                    )}
+                  </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Current Designation</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
-                    {profile.currentRole || profile.profession || 'Resident Medical Specialist'}
+                    {profile.currentRole || profile.profession || (
+                      <button onClick={() => openSectionModal('medical_career')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Designation</button>
+                    )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Hospital / Clinic</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
-                    {profile.currentHospital || profile.company || 'Sassoon General Hospital'}
+                    {profile.currentHospital || profile.company || (
+                      <button onClick={() => openSectionModal('medical_career')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Hospital / Clinic</button>
+                    )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Work Location</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.workLocation || profile.city || 'Pune'}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">
+                    {profile.workLocation || profile.city || (
+                      <button onClick={() => openSectionModal('medical_career')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Work Location</button>
+                    )}
+                  </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Years of Experience</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.medicalExperience || '3+ Years Clinical Practice'}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">
+                    {profile.medicalExperience || profile.experience || (
+                      <button onClick={() => openSectionModal('medical_career')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Experience</button>
+                    )}
+                  </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Practice Type</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.workType || 'Hospital Consultant'}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">
+                    {profile.workType || (
+                      <button onClick={() => openSectionModal('medical_career')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Practice Type</button>
+                    )}
+                  </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl sm:col-span-2">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Income Range</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.annualIncome || '₹ 35 - 50 Lakhs'}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">
+                    {profile.annualIncome || (
+                      <button onClick={() => openSectionModal('medical_career')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Income Range</button>
+                    )}
+                  </span>
                 </div>
               </div>
             </section>
@@ -1483,7 +1822,9 @@ export default function MyProfilePage() {
                     Medical Council
                   </span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
-                    {profile.medicalCouncil || 'Maharashtra Medical Council / MCI'}
+                    {profile.medicalCouncil || (
+                      <button onClick={() => openSectionModal('medical_reg')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Medical Council</button>
+                    )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
@@ -1508,7 +1849,9 @@ export default function MyProfilePage() {
                     Registration Year
                   </span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
-                    {profile.registrationYear || profile.graduationYear || '2022'}
+                    {profile.registrationYear || profile.graduationYear || (
+                      <button onClick={() => openSectionModal('medical_reg')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Registration Year</button>
+                    )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
@@ -1517,7 +1860,7 @@ export default function MyProfilePage() {
                   </span>
                   <span className="font-mono text-slate-800 mt-0.5 block">
                     {profile.medicalRegistrationNumber ? `••••-${profile.medicalRegistrationNumber.slice(-4)}` : (
-                      <button onClick={() => openSectionModal('medical_reg')} className="text-[#E51F3E] font-bold font-sans">+ Add Number</button>
+                      <button onClick={() => openSectionModal('medical_reg')} className="text-[#E51F3E] font-bold font-sans cursor-pointer">+ Add Number</button>
                     )}
                   </span>
                 </div>
@@ -1550,21 +1893,33 @@ export default function MyProfilePage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs sm:text-sm">
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Family Type</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.familyType || 'Nuclear Family'}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">
+                    {profile.familyType || (
+                      <button onClick={() => openSectionModal('family')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Family Type</button>
+                    )}
+                  </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Family Status</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.familyStatus || 'Upper Middle Class'}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">
+                    {profile.familyStatus || (
+                      <button onClick={() => openSectionModal('family')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Family Status</button>
+                    )}
+                  </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Native Place</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.nativePlace || profile.city || 'Pune, Maharashtra'}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">
+                    {profile.nativePlace || profile.city || (
+                      <button onClick={() => openSectionModal('family')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Native Place</button>
+                    )}
+                  </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Father's Occupation</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
                     {profile.fatherOccupation || (
-                      <button onClick={() => openSectionModal('family')} className="text-[#E51F3E] font-bold">+ Add Father's Occupation</button>
+                      <button onClick={() => openSectionModal('family')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Father's Occupation</button>
                     )}
                   </span>
                 </div>
@@ -1572,7 +1927,7 @@ export default function MyProfilePage() {
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Mother's Occupation</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
                     {profile.motherOccupation || (
-                      <button onClick={() => openSectionModal('family')} className="text-[#E51F3E] font-bold">+ Add Mother's Occupation</button>
+                      <button onClick={() => openSectionModal('family')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Mother's Occupation</button>
                     )}
                   </span>
                 </div>
@@ -1580,13 +1935,17 @@ export default function MyProfilePage() {
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Siblings</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
                     {profile.siblings || (
-                      <button onClick={() => openSectionModal('family')} className="text-[#E51F3E] font-bold">+ Add Siblings</button>
+                      <button onClick={() => openSectionModal('family')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Siblings</button>
                     )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl sm:col-span-2">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Family Values</span>
-                  <span className="font-semibold text-slate-800 mt-0.5 block">{profile.familyValues || 'Moderate'}</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">
+                    {profile.familyValues || (
+                      <button onClick={() => openSectionModal('family')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Family Values</button>
+                    )}
+                  </span>
                 </div>
               </div>
             </section>
@@ -1618,32 +1977,42 @@ export default function MyProfilePage() {
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Preferred Age</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
-                    {profile.partnerPreferences?.preferredAgeMin || 22} - {profile.partnerPreferences?.preferredAgeMax || 32} Years
+                    {profile.partnerPreferences?.preferredAgeMin && profile.partnerPreferences?.preferredAgeMax
+                      ? `${profile.partnerPreferences.preferredAgeMin} - ${profile.partnerPreferences.preferredAgeMax} Years`
+                      : (
+                        <button onClick={() => openSectionModal('preferences')} className="text-[#E51F3E] font-bold cursor-pointer">+ Set Preferred Age</button>
+                      )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Preferred Qualification</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
-                    {profile.partnerPreferences?.preferredQualification || 'MBBS / MD / MS / DNB'}
+                    {profile.partnerPreferences?.preferredQualification || (
+                      <button onClick={() => openSectionModal('preferences')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Qualification</button>
+                    )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Preferred Specialization</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
-                    {profile.partnerPreferences?.preferredSpecialization || 'Open to all specialties'}
+                    {profile.partnerPreferences?.preferredSpecialization || (
+                      <button onClick={() => openSectionModal('preferences')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Specialization</button>
+                    )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Preferred Location</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
-                    {profile.partnerPreferences?.preferredLocation || 'Pune / Mumbai / Maharashtra'}
+                    {profile.partnerPreferences?.preferredLocation || (
+                      <button onClick={() => openSectionModal('preferences')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Preferred Location</button>
+                    )}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl sm:col-span-2">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Other Preferences</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
                     {profile.partnerPreferences?.otherPreferences || (
-                      <button onClick={() => openSectionModal('preferences')} className="text-[#E51F3E] font-bold">+ Add Preferences</button>
+                      <button onClick={() => openSectionModal('preferences')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Preferences</button>
                     )}
                   </span>
                 </div>
@@ -1687,7 +2056,7 @@ export default function MyProfilePage() {
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                     <div className="bg-slate-50 p-3 rounded-2xl">
                       <span className="text-slate-400 text-[10px] font-bold uppercase block">Date of Birth</span>
-                      <span className="font-semibold text-slate-800 mt-0.5 block">{formattedDob}</span>
+                      <span className="font-semibold text-slate-800 mt-0.5 block">{formattedDob || 'Not specified'}</span>
                     </div>
                     <div className="bg-slate-50 p-3 rounded-2xl">
                       <span className="text-slate-400 text-[10px] font-bold uppercase block">Time of Birth</span>
@@ -1695,7 +2064,7 @@ export default function MyProfilePage() {
                     </div>
                     <div className="bg-slate-50 p-3 rounded-2xl">
                       <span className="text-slate-400 text-[10px] font-bold uppercase block">Place of Birth</span>
-                      <span className="font-semibold text-slate-800 mt-0.5 block truncate">{profile.horoscope.placeOfBirth || profile.city || 'Pune'}</span>
+                      <span className="font-semibold text-slate-800 mt-0.5 block truncate">{profile.horoscope.placeOfBirth || profile.city || 'Not specified'}</span>
                     </div>
                     <div className="bg-slate-50 p-3 rounded-2xl">
                       <span className="text-slate-400 text-[10px] font-bold uppercase block">Rashi</span>
@@ -1711,7 +2080,7 @@ export default function MyProfilePage() {
                     </div>
                     <div className="bg-slate-50 p-3 rounded-2xl">
                       <span className="text-slate-400 text-[10px] font-bold uppercase block">Manglik Status</span>
-                      <span className="font-bold text-slate-800 mt-0.5 block">{profile.horoscope.manglik || 'Non-Manglik'}</span>
+                      <span className="font-bold text-slate-800 mt-0.5 block">{profile.horoscope.manglik || 'Not specified'}</span>
                     </div>
                     <div className="bg-slate-50 p-3 rounded-2xl">
                       <span className="text-slate-400 text-[10px] font-bold uppercase block">Gotra</span>
@@ -1780,17 +2149,17 @@ export default function MyProfilePage() {
                   <div className="flex flex-wrap gap-2">
                     <span className="px-3.5 py-1.5 rounded-full bg-slate-100 text-slate-800 font-semibold flex items-center gap-1.5">
                       <Utensils className="w-3.5 h-3.5 text-slate-500" />
-                      <span>{profile.lifestyleInterests?.diet || profile.foodPreference || 'Vegetarian'}</span>
+                      <span>{profile.lifestyleInterests?.diet || profile.foodPreference || 'Not Specified'}</span>
                     </span>
                     <span className="px-3.5 py-1.5 rounded-full bg-slate-100 text-slate-800 font-semibold">
-                      Smoking: {profile.lifestyleInterests?.smoking || profile.smoking || 'Non-Smoker'}
+                      Smoking: {profile.lifestyleInterests?.smoking || profile.smoking || 'Not Specified'}
                     </span>
                     <span className="px-3.5 py-1.5 rounded-full bg-slate-100 text-slate-800 font-semibold">
-                      Alcohol: {profile.lifestyleInterests?.alcohol || profile.drinking || 'Non-Drinker'}
+                      Alcohol: {profile.lifestyleInterests?.alcohol || profile.drinking || 'Not Specified'}
                     </span>
                     <span className="px-3.5 py-1.5 rounded-full bg-slate-100 text-slate-800 font-semibold flex items-center gap-1.5">
                       <Dumbbell className="w-3.5 h-3.5 text-slate-500" />
-                      <span>{profile.lifestyleInterests?.exercise || 'Regular Fitness'}</span>
+                      <span>{profile.lifestyleInterests?.exercise || 'Not Specified'}</span>
                     </span>
                   </div>
                 </div>
@@ -1804,7 +2173,7 @@ export default function MyProfilePage() {
                       ? profile.lifestyleInterests.hobbies
                       : profile.hobbies?.length
                       ? profile.hobbies
-                      : ['Reading', 'Traveling', 'Photography', 'Music']
+                      : []
                     ).map((hobby: string, idx: number) => (
                       <span
                         key={idx}
@@ -1813,6 +2182,15 @@ export default function MyProfilePage() {
                         {hobby}
                       </span>
                     ))}
+                    {!(profile.lifestyleInterests?.hobbies?.length || profile.hobbies?.length) && (
+                      <button
+                        type="button"
+                        onClick={() => openSectionModal('lifestyle')}
+                        className="text-xs font-bold text-[#E51F3E] hover:underline cursor-pointer"
+                      >
+                        + Add Hobbies & Interests
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -1820,13 +2198,17 @@ export default function MyProfilePage() {
                   <div className="bg-slate-50 p-3 rounded-2xl">
                     <span className="text-slate-400 text-[10px] font-bold uppercase block">Languages Spoken</span>
                     <span className="font-semibold text-slate-800 mt-0.5 block">
-                      {(profile.lifestyleInterests?.languages || [profile.motherTongue || 'Marathi', 'English']).join(', ')}
+                      {profile.lifestyleInterests?.languages?.length
+                        ? profile.lifestyleInterests.languages.join(', ')
+                        : profile.motherTongue || (
+                          <button onClick={() => openSectionModal('lifestyle')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Languages</button>
+                        )}
                     </span>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-2xl">
                     <span className="text-slate-400 text-[10px] font-bold uppercase block">Pets / Other</span>
                     <span className="font-semibold text-slate-800 mt-0.5 block">
-                      {profile.lifestyleInterests?.pets || 'None'}
+                      {profile.lifestyleInterests?.pets || 'Not Specified'}
                     </span>
                   </div>
                 </div>
@@ -3081,6 +3463,149 @@ export default function MyProfilePage() {
                   className="px-5 py-2.5 rounded-xl bg-[#E51F3E] text-white text-xs font-bold hover:bg-[#CC1432] shadow-xs cursor-pointer disabled:opacity-60"
                 >
                   {submitting ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════
+          DOCUMENT UPLOAD MODAL (MEDICAL VERIFICATION)
+         ════════════════════════════════════════════════════ */}
+      {isDocUploadOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 space-y-5 max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-[#E51F3E]" />
+                <h3 className="font-serif text-lg font-bold text-[#0F172A]">
+                  Upload Verification Document
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDocUploadOpen(false)}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitVerificationDoc} className="space-y-4">
+              {uploadError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{uploadError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Document Category *
+                </label>
+                <select
+                  value={uploadCategory}
+                  onChange={(e) => {
+                    const newCat = e.target.value;
+                    setUploadCategory(newCat);
+                    const conf = VERIFICATION_DOC_CONFIG.find((c) => c.key === newCat);
+                    if (conf) setUploadDocName(conf.title);
+                  }}
+                  className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                >
+                  {VERIFICATION_DOC_CONFIG.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.title} ({c.badge})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Document Label / Title (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={uploadDocName}
+                  onChange={(e) => setUploadDocName(e.target.value)}
+                  placeholder="e.g. Maharashtra Medical Council Certificate"
+                  className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Select Document File *
+                </label>
+                <div className="relative border-2 border-dashed border-slate-300 hover:border-[#E51F3E] rounded-2xl p-5 text-center transition bg-slate-50/50 cursor-pointer">
+                  <input
+                    type="file"
+                    onChange={handleDocFileChange}
+                    accept=".pdf,image/jpeg,image/png,image/webp,image/jpg"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  {uploadFileName ? (
+                    <div className="space-y-1">
+                      <FileCheck className="w-8 h-8 text-emerald-600 mx-auto" />
+                      <p className="text-xs font-bold text-slate-800 break-all">{uploadFileName}</p>
+                      <p className="text-[11px] text-slate-400 font-semibold">
+                        {(uploadFileSize / (1024 * 1024)).toFixed(2)} MB • Click or drag to replace
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <Upload className="w-8 h-8 text-slate-400 mx-auto" />
+                      <p className="text-xs font-bold text-slate-700">
+                        Click to select document or drag & drop here
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        PDF, JPG, PNG, or WebP (Max 10 MB)
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Instructions Box */}
+              <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-[11px] text-amber-900 space-y-1.5">
+                <div className="font-bold flex items-center gap-1 text-amber-950">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Document Guidelines:</span>
+                </div>
+                <ul className="list-disc pl-4 space-y-0.5 text-amber-800">
+                  <li>Ensure the certificate registration number, holder name, seal, and date are clear and legible.</li>
+                  <li>Do not upload blurred scans, cropped sections, or password-protected files.</li>
+                  <li>Medical documents are strictly IDOR protected and only accessed by authorized compliance officers.</li>
+                </ul>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsDocUploadOpen(false)}
+                  disabled={uploadingDoc}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={uploadingDoc || !uploadFileBase64}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#E51F3E] to-[#CC1432] text-white text-xs font-bold hover:shadow-md transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {uploadingDoc ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Submitting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Upload & Submit for Review</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

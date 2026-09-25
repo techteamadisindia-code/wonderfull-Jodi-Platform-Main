@@ -250,3 +250,158 @@ export async function importMasterData(type: 'locations' | 'castes', records: an
   const res = await apiClient.post('/admin/master-data/import', { type, records });
   return res.data?.report;
 }
+
+// ─── LOCATION PDF UPLOAD & IMPORT APIS ───
+
+export interface LocationExtractedRow {
+  state?: string;
+  stateCode?: string;
+  stateType?: 'State' | 'Union Territory';
+  stateLgdCode?: string;
+  district?: string;
+  districtLgdCode?: string;
+  subDistrict?: string;
+  subDistrictType?: string;
+  city?: string;
+  cityType?: string;
+  village?: string;
+  pinCode?: string;
+  officialCode?: string;
+  status: 'VALID' | 'DUPLICATE' | 'INVALID';
+  reason?: string;
+}
+
+export interface LocationImportMetrics {
+  totalExtracted: number;
+  validRecords: number;
+  duplicateRecords: number;
+  invalidRecords: number;
+  missingStateRecords: number;
+  missingDistrictRecords: number;
+  missingCityRecords: number;
+}
+
+export interface LocationImportError {
+  row?: number;
+  item?: string;
+  error: string;
+}
+
+export interface LocationImportItem {
+  _id: string;
+  importId: string;
+  fileName: string;
+  fileSize: number;
+  adminEmail: string;
+  status: 'UPLOADED' | 'PROCESSING' | 'PREVIEW_READY' | 'IMPORTED' | 'PARTIALLY_IMPORTED' | 'FAILED' | 'CANCELLED';
+  source: string;
+  sourceVersion?: string;
+  totalExtracted: number;
+  validRecords: number;
+  duplicateRecords: number;
+  invalidRecords: number;
+  insertedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  importErrors?: LocationImportError[];
+  startedAt: string;
+  completedAt?: string;
+  createdAt: string;
+}
+
+export interface UploadPdfResponse {
+  success: boolean;
+  message: string;
+  data: {
+    importId: string;
+    fileName: string;
+    fileSize: number;
+    status: string;
+    metrics: LocationImportMetrics;
+    preview: LocationExtractedRow[];
+    errors: LocationImportError[];
+  };
+}
+
+export interface ConfirmImportResponse {
+  success: boolean;
+  message: string;
+  data: {
+    importId: string;
+    status: string;
+    total: number;
+    insertedCount: number;
+    updatedCount: number;
+    skippedCount: number;
+    failedCount: number;
+    completedAt: string;
+  };
+}
+
+export function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (error) => reject(error);
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function uploadLocationPdf(file: File): Promise<UploadPdfResponse> {
+  const base64 = await fileToBase64(file);
+  const res = await apiClient.post<UploadPdfResponse>('/admin/master-data/upload-pdf', {
+    pdfBase64: base64,
+    filename: file.name,
+    fileSize: file.size,
+    mimeType: file.type,
+  });
+  return res.data;
+}
+
+export async function confirmLocationImport(
+  importId: string,
+  action: 'CONFIRM' | 'CANCEL'
+): Promise<ConfirmImportResponse> {
+  const res = await apiClient.post<ConfirmImportResponse>('/admin/master-data/import/confirm', {
+    importId,
+    action,
+  });
+  return res.data;
+}
+
+export async function fetchImportHistory(
+  page: number = 1,
+  limit: number = 20
+): Promise<{ data: LocationImportItem[]; pagination?: { total: number; page: number; limit: number } }> {
+  const res = await apiClient.get('/admin/master-data/import-history', {
+    params: { page, limit },
+  });
+  const list = res.data?.data || [];
+  return {
+    data: list,
+    pagination: {
+      total: res.data?.count ?? list.length,
+      page,
+      limit,
+    },
+  };
+}
+
+export function getImportErrorReportUrl(importId: string): string {
+  const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+  return `${baseURL}/admin/master-data/import-history/${importId}/error-report`;
+}
+
+export async function searchCitiesByState(stateNameOrId: string, search: string): Promise<CityItem[]> {
+  if (!stateNameOrId || !stateNameOrId.trim()) return [];
+  const res = await apiClient.get('/locations/cities', {
+    params: {
+      stateId: stateNameOrId.trim(),
+      search: search.trim(),
+      limit: 25,
+    },
+  });
+  return res.data?.data || [];
+}
+

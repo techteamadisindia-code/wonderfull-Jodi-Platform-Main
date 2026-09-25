@@ -41,6 +41,8 @@ import { publicBlogRouter, adminBlogRouter } from './routes/blogRoutes';
 import { seedDefaultBlogsIfEmpty } from './controllers/blogController';
 import { publicAwardRouter, adminAwardRouter } from './routes/awardRoutes';
 import { seedDefaultAwardsIfEmpty } from './controllers/awardController';
+import institutionRoutes from './routes/institutionRoutes';
+import { seedDefaultInstitutionsIfEmpty } from './controllers/institutionController';
 import { globalLimiter } from './middleware/rateLimiters';
 import { errorHandler } from './middleware/errorHandler';
 import { checkMaintenanceMode } from './middleware/maintenanceMiddleware';
@@ -149,6 +151,7 @@ app.use('/api/contact-access', contactAccessRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/registration', registrationRoutes);
 app.use('/api/registrations', registrationRoutes);
+app.use('/api/institutions', institutionRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/blocks', blockRoutes);
@@ -156,6 +159,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/report', reportRoutes);
 app.use('/api/kundali', kundaliRoutes);
 app.use('/api/locations', locationRoutes);
+app.use('/api/master-data', locationRoutes);
 app.use('/api/community', communityMasterRoutes);
 app.use('/api/admin/master-data', adminMasterDataRoutes);
 app.use('/api/biodata', biodataRoutes);
@@ -175,6 +179,7 @@ connectDatabase()
     await seedDefaultCareersIfEmpty();
     await seedDefaultBlogsIfEmpty();
     await seedDefaultAwardsIfEmpty();
+    await seedDefaultInstitutionsIfEmpty();
   })
   .catch((error) => {
     console.error('Database connection failed:', error);

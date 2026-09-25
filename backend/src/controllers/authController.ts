@@ -18,6 +18,7 @@ import {
 import { AuthRequest } from '../middleware/authMiddleware';
 
 import { CURRENT_TERMS_VERSION } from '../config/termsConfig';
+import { validateDateOfBirth } from '../utils/doctorValidation';
 
 const passwordComplexityRegex =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&^#()_\-+={}[\]:;"'<>,.~`|\\]).{8,}$/;
@@ -27,6 +28,14 @@ const registerSchema = z.object({
   email: z.string().trim().email('Please enter a valid email address').max(255),
   mobile: z.string().trim().min(10, 'Mobile number must be at least 10 digits').max(15),
   gender: z.enum(['Male', 'Female', 'Other']).optional(),
+  dob: z
+    .string()
+    .trim()
+    .optional()
+    .refine(
+      (val) => !val || validateDateOfBirth(val).isValid,
+      (val) => ({ message: (val && validateDateOfBirth(val).error) || 'Invalid date of birth' })
+    ),
   password: z
     .string()
     .min(8, 'Password must be at least 8 characters long')
@@ -171,21 +180,29 @@ export async function registerUser(req: Request, res: Response, next: NextFuncti
       termsAcceptedAt: new Date(),
     });
 
+    let userDob = new Date('1998-05-15');
+    if (data.dob) {
+      const v = validateDateOfBirth(data.dob, data.gender);
+      if (v.isValid && v.parsedDate) {
+        userDob = v.parsedDate;
+      }
+    }
+
     await Profile.create({
       user: user._id,
       displayName: user.fullName,
       gender: data.gender || 'Male',
-      dob: new Date('1998-05-15'),
+      dob: userDob,
       height: `5' 10"`,
       maritalStatus: 'Never Married',
-      motherTongue: 'Hindi',
-      religion: 'Hindu',
-      caste: 'General',
+      motherTongue: (data as any).motherTongue || '',
+      religion: (data as any).religion || '',
+      caste: (data as any).caste || '',
       education: 'MBBS',
       degree: 'MBBS',
       profession: 'General Physician',
       country: 'India',
-      state: 'Maharashtra',
+      state: (data as any).state || '',
       city: 'Mumbai',
       verificationStatus: 'UNVERIFIED',
       lastActiveAt: new Date(),

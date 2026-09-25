@@ -12,10 +12,13 @@ import {
 const router = Router();
 
 router.get('/search', searchLocationsHandler);
+router.get('/locations/search', searchLocationsHandler);
 router.get('/countries', getCountries);
 router.get('/states', getStates);
 router.get('/districts', getDistricts);
 router.get('/sub-districts', getSubDistricts);
+router.get('/talukas', getSubDistricts);
+router.get('/tehsils', getSubDistricts);
 router.get('/cities', getCities);
 router.get('/villages', getVillages);
 

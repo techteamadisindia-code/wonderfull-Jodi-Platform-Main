@@ -16,7 +16,7 @@ import {
   CheckCircle2,
   Filter,
 } from 'lucide-react';
-import { fetchCouponUsage, CouponUsageData } from '../../../../services/couponApi';
+import { fetchCouponUsage, CouponUsageData } from '../../../../../services/couponApi';
 
 export default function CouponUsagePage() {
   const params = useParams();
@@ -222,7 +222,7 @@ export default function CouponUsagePage() {
                     </tr>
                   ) : (
                     filteredRedemptions.map((r) => (
-                      <tr key={r._id} className="hover:bg-slate-50/60 transition-colors">
+                      <tr key={r._id || r.id} className="hover:bg-slate-50/60 transition-colors">
                         <td className="py-3 px-4">
                           <div className="font-bold text-slate-900">{r.memberName || 'Candidate'}</div>
                           <div className="text-[11px] font-mono text-slate-500">

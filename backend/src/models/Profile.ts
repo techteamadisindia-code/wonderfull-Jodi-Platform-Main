@@ -9,9 +9,9 @@ export interface IProfile extends Document {
   dob: Date;
   height: string;
   maritalStatus: string;
-  motherTongue: string;
-  religion: string;
-  caste: string;
+  motherTongue?: string;
+  religion?: string;
+  caste?: string;
   subCaste?: string;
   education: string;
   degree: string;
@@ -20,7 +20,7 @@ export interface IProfile extends Document {
   workLocation?: string;
   annualIncome?: string;
   country: string;
-  state: string;
+  state?: string;
   city: string;
   fatherOccupation?: string;
   motherOccupation?: string;
@@ -116,6 +116,86 @@ export interface IProfile extends Document {
     pets?: string;
     otherInterests?: string;
   };
+  aboutMe?: string;
+  personalityValues?: string;
+  hobbiesInterests?: string;
+  careerGoals?: string;
+  familyBackground?: {
+    familyType?: string;
+    familyStatus?: string;
+    fatherName?: string;
+    fatherProfession?: string;
+    motherName?: string;
+    motherProfession?: string;
+    familyLocation?: string;
+    familyValues?: string;
+    aboutFamily?: string;
+  };
+  siblingsDetails?: {
+    brothersCount?: number;
+    sistersCount?: number;
+    brothers?: Array<{
+      name?: string;
+      age?: number;
+      profession?: string;
+      maritalStatus?: string;
+      location?: string;
+    }>;
+    sisters?: Array<{
+      name?: string;
+      age?: number;
+      profession?: string;
+      maritalStatus?: string;
+      location?: string;
+    }>;
+  };
+  medicalQualifications?: {
+    undergraduate?: Array<{
+      qualification: string;
+      college: string;
+      collegeId?: mongoose.Types.ObjectId | string;
+      passingYear?: string;
+      status?: string;
+    }>;
+    postgraduate?: Array<{
+      qualification: string;
+      specialization?: string;
+      college: string;
+      collegeId?: mongoose.Types.ObjectId | string;
+      passingYear?: string;
+      status?: string;
+    }>;
+    doctorate?: Array<{
+      qualification: string;
+      specialization?: string;
+      college: string;
+      collegeId?: mongoose.Types.ObjectId | string;
+      passingYear?: string;
+      status?: string;
+    }>;
+  };
+  partnerExpectations?: {
+    ageMin?: number;
+    ageMax?: number;
+    heightMin?: string;
+    heightMax?: string;
+    qualification?: string;
+    specialization?: string;
+    location?: {
+      country?: string;
+      state?: string;
+      city?: string;
+    };
+    willingToRelocate?: boolean | string;
+    maritalStatus?: string;
+    lifestyle?: {
+      diet?: string;
+      smoking?: string;
+      drinking?: string;
+    };
+    familyExpectations?: string;
+    additionalExpectations?: string;
+  };
   partnerPreferences?: {
     preferredAgeMin?: number;
     preferredAgeMax?: number;
@@ -169,9 +249,9 @@ const profileSchema = new Schema<IProfile>(
     dob: { type: Date, required: true, index: true },
     height: { type: String, required: true },
     maritalStatus: { type: String, required: true, index: true },
-    motherTongue: { type: String, required: true, index: true },
-    religion: { type: String, required: true, index: true },
-    caste: { type: String, required: true, index: true },
+    motherTongue: { type: String, default: '', index: true },
+    religion: { type: String, default: '', index: true },
+    caste: { type: String, default: '', index: true },
     subCaste: { type: String, index: true },
     education: { type: String, required: true, index: true },
     degree: { type: String, required: true, index: true },
@@ -180,7 +260,7 @@ const profileSchema = new Schema<IProfile>(
     workLocation: { type: String, trim: true, index: true },
     annualIncome: { type: String, trim: true, index: true },
     country: { type: String, required: true, index: true },
-    state: { type: String, required: true, index: true },
+    state: { type: String, default: '', index: true },
     city: { type: String, required: true, index: true },
     medicalRegistrationNumber: { type: String, trim: true },
     medicalCouncil: { type: String, trim: true },
@@ -265,6 +345,28 @@ const profileSchema = new Schema<IProfile>(
       pets: { type: String, trim: true },
       otherInterests: { type: String, trim: true },
     },
+    partnerExpectations: {
+      ageMin: { type: Number },
+      ageMax: { type: Number },
+      heightMin: { type: String, trim: true },
+      heightMax: { type: String, trim: true },
+      qualification: { type: String, trim: true },
+      specialization: { type: String, trim: true },
+      location: {
+        country: { type: String, trim: true },
+        state: { type: String, trim: true },
+        city: { type: String, trim: true },
+      },
+      willingToRelocate: { type: Schema.Types.Mixed },
+      maritalStatus: { type: String, trim: true },
+      lifestyle: {
+        diet: { type: String, trim: true },
+        smoking: { type: String, trim: true },
+        drinking: { type: String, trim: true },
+      },
+      familyExpectations: { type: String, trim: true },
+      additionalExpectations: { type: String, trim: true },
+    },
     partnerPreferences: {
       preferredAgeMin: { type: Number, default: 24 },
       preferredAgeMax: { type: Number, default: 36 },
@@ -273,6 +375,74 @@ const profileSchema = new Schema<IProfile>(
       preferredSpecialization: { type: String, trim: true, default: 'Any Medical Specialization' },
       preferredMaritalStatus: { type: String, trim: true, default: 'Never Married' },
       otherPreferences: { type: String, trim: true, default: '' },
+    },
+    aboutMe: { type: String, trim: true },
+    personalityValues: { type: String, trim: true },
+    hobbiesInterests: { type: String, trim: true },
+    careerGoals: { type: String, trim: true },
+    familyBackground: {
+      familyType: { type: String, trim: true },
+      familyStatus: { type: String, trim: true },
+      fatherName: { type: String, trim: true },
+      fatherProfession: { type: String, trim: true },
+      motherName: { type: String, trim: true },
+      motherProfession: { type: String, trim: true },
+      familyLocation: { type: String, trim: true },
+      familyValues: { type: String, trim: true },
+      aboutFamily: { type: String, trim: true },
+    },
+    siblingsDetails: {
+      brothersCount: { type: Number, default: 0 },
+      sistersCount: { type: Number, default: 0 },
+      brothers: [
+        {
+          name: { type: String, trim: true },
+          age: { type: Number },
+          profession: { type: String, trim: true },
+          maritalStatus: { type: String, trim: true },
+          location: { type: String, trim: true },
+        },
+      ],
+      sisters: [
+        {
+          name: { type: String, trim: true },
+          age: { type: Number },
+          profession: { type: String, trim: true },
+          maritalStatus: { type: String, trim: true },
+          location: { type: String, trim: true },
+        },
+      ],
+    },
+    medicalQualifications: {
+      undergraduate: [
+        {
+          qualification: { type: String, trim: true },
+          college: { type: String, trim: true },
+          collegeId: { type: Schema.Types.ObjectId, ref: 'Institution' },
+          passingYear: { type: String, trim: true },
+          status: { type: String, trim: true },
+        },
+      ],
+      postgraduate: [
+        {
+          qualification: { type: String, trim: true },
+          specialization: { type: String, trim: true },
+          college: { type: String, trim: true },
+          collegeId: { type: Schema.Types.ObjectId, ref: 'Institution' },
+          passingYear: { type: String, trim: true },
+          status: { type: String, trim: true },
+        },
+      ],
+      doctorate: [
+        {
+          qualification: { type: String, trim: true },
+          specialization: { type: String, trim: true },
+          college: { type: String, trim: true },
+          collegeId: { type: Schema.Types.ObjectId, ref: 'Institution' },
+          passingYear: { type: String, trim: true },
+          status: { type: String, trim: true },
+        },
+      ],
     },
     privacySettings: {
       profileVisibility: {

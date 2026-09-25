@@ -23,6 +23,9 @@ import {
   Building,
   Home,
   BookOpen,
+  Clock,
+  History,
+  CheckCircle,
 } from 'lucide-react';
 import {
   fetchMasterDataSummary,
@@ -36,9 +39,12 @@ import {
   fetchSubDistricts,
   fetchReligions,
   fetchCastes,
+  fetchImportHistory,
+  getImportErrorReportUrl,
 } from '../../../services/masterDataApi';
+import LocationPdfUploadModal from '../../../components/admin/LocationPdfUploadModal';
 
-type TabType = 'locations' | 'castes' | 'languages' | 'importer';
+type TabType = 'locations' | 'castes' | 'languages' | 'importer' | 'history';
 type LocationLevel = 'countries' | 'states' | 'districts' | 'sub-districts' | 'cities' | 'villages';
 
 export default function AdminMasterDataPage() {
@@ -82,6 +88,34 @@ export default function AdminMasterDataPage() {
   const [importInput, setImportInput] = useState('');
   const [importRunning, setImportRunning] = useState(false);
   const [importReport, setImportReport] = useState<any | null>(null);
+
+  // PDF Location Upload Modal State
+  const [isPdfUploadModalOpen, setIsPdfUploadModalOpen] = useState(false);
+
+  // Import History & Audit State
+  const [importHistoryList, setImportHistoryList] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotal, setHistoryTotal] = useState(0);
+
+  const loadHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const res = await fetchImportHistory(historyPage, 20);
+      setImportHistoryList(res.data || []);
+      setHistoryTotal(res.pagination?.total || 0);
+    } catch (err) {
+      console.error('Failed to load import history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'history') {
+      loadHistory();
+    }
+  }, [activeTab, historyPage]);
 
   // Load summary and initial parents on mount
   useEffect(() => {
@@ -353,19 +387,24 @@ export default function AdminMasterDataPage() {
           </div>
         </div>
 
-        {/* Provenance Tags */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
+        {/* Header Action Buttons & Provenance */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setIsPdfUploadModalOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-red-600 to-[#E51F3E] text-white text-xs sm:text-sm font-bold shadow-md hover:from-red-700 hover:to-[#CC1432] transition active:scale-95 cursor-pointer"
+          >
+            <Upload className="w-4 h-4" />
+            <span>Upload Location Data (PDF)</span>
+          </button>
+
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
             <ShieldCheck className="w-3.5 h-3.5" />
             LGD Government Directory
           </span>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200">
             <Building className="w-3.5 h-3.5" />
             Census India Codes
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200">
-            <FileText className="w-3.5 h-3.5" />
-            Social Justice & Empowerment
           </span>
         </div>
       </div>
@@ -400,12 +439,13 @@ export default function AdminMasterDataPage() {
       </div>
 
       {/* ─── TABS NAVIGATION ─── */}
-      <div className="flex items-center gap-2 border-b border-slate-200">
+      <div className="flex items-center gap-2 border-b border-slate-200 overflow-x-auto">
         {[
           { id: 'locations', label: 'Geographical Hierarchy (LGD)', icon: MapPin },
           { id: 'castes', label: 'Community & Castes', icon: ShieldCheck },
           { id: 'languages', label: 'Languages (Eighth Schedule)', icon: BookOpen },
           { id: 'importer', label: 'Bulk Importer (CSV / JSON)', icon: Upload },
+          { id: 'history', label: 'PDF Import History & Audit', icon: History },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -535,15 +575,26 @@ export default function AdminMasterDataPage() {
               </div>
             </div>
 
-            {/* Add New Record Button */}
-            <button
-              type="button"
-              onClick={handleOpenCreateModal}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#E51F3E] text-white text-xs font-bold hover:bg-[#CC1432] shadow-xs transition"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add {locationLevel.slice(0, -1)}</span>
-            </button>
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsPdfUploadModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 text-xs font-bold shadow-xs transition cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Upload Location Data (PDF)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleOpenCreateModal}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#E51F3E] text-white text-xs font-bold hover:bg-[#CC1432] shadow-xs transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add {locationLevel.slice(0, -1)}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -940,6 +991,203 @@ export default function AdminMasterDataPage() {
         </div>
       )}
 
+      {/* ─── TAB 5: PDF IMPORT HISTORY & AUDIT TRAIL ─── */}
+      {activeTab === 'history' && (
+        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
+          {/* Header */}
+          <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <History className="w-5 h-5 text-red-600" />
+                <h3 className="font-serif text-lg font-bold text-slate-900">
+                  PDF Location Data Import History & Audit Trail
+                </h3>
+              </div>
+              <p className="text-xs text-slate-500 font-medium mt-1">
+                Audit logs for all uploaded administrative directory documents, parsing metrics, and database insertion results.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={loadHistory}
+                disabled={loadingHistory}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition disabled:opacity-50 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingHistory ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsPdfUploadModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#E51F3E] text-white text-xs font-bold hover:bg-[#CC1432] shadow-xs transition cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Upload New PDF</span>
+              </button>
+            </div>
+          </div>
+
+          {/* History Content */}
+          {loadingHistory ? (
+            <div className="p-12 flex flex-col items-center justify-center text-slate-400 gap-2">
+              <RefreshCw className="w-6 h-6 animate-spin text-red-500" />
+              <p className="text-xs font-semibold">Loading import audit history...</p>
+            </div>
+          ) : importHistoryList.length === 0 ? (
+            <div className="p-12 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                <FileText className="w-6 h-6" />
+              </div>
+              <h4 className="font-bold text-slate-800 text-sm">No Location PDF Imports Recorded Yet</h4>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Upload your first official LGD or administrative directory PDF to populate master geographical entities.
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsPdfUploadModalOpen(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#E51F3E] text-white text-xs font-bold hover:bg-[#CC1432] shadow-sm transition cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Upload Location Data (PDF)</span>
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="px-5 py-3.5">File Details</th>
+                    <th className="px-5 py-3.5">Import ID & Admin</th>
+                    <th className="px-5 py-3.5">Date & Time</th>
+                    <th className="px-5 py-3.5">Status</th>
+                    <th className="px-5 py-3.5 text-center">Total</th>
+                    <th className="px-5 py-3.5 text-center">Inserted</th>
+                    <th className="px-5 py-3.5 text-center">Updated</th>
+                    <th className="px-5 py-3.5 text-center">Skipped</th>
+                    <th className="px-5 py-3.5 text-center">Failed</th>
+                    <th className="px-5 py-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                  {importHistoryList.map((item) => {
+                    const statusColors: Record<string, string> = {
+                      IMPORTED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                      PARTIALLY_IMPORTED: 'bg-amber-50 text-amber-700 border-amber-200',
+                      PREVIEW_READY: 'bg-blue-50 text-blue-700 border-blue-200',
+                      PROCESSING: 'bg-purple-50 text-purple-700 border-purple-200',
+                      UPLOADED: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+                      FAILED: 'bg-rose-50 text-rose-700 border-rose-200',
+                      CANCELLED: 'bg-slate-100 text-slate-600 border-slate-200',
+                    };
+                    const statusClass = statusColors[item.status] || 'bg-slate-100 text-slate-600 border-slate-200';
+                    const hasErrors = (item.metrics?.invalid > 0) || (item.importErrors?.length > 0);
+
+                    return (
+                      <tr key={item._id} className="hover:bg-slate-50/50 transition">
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-red-500 shrink-0" />
+                            <div>
+                              <p className="font-bold text-slate-900 leading-tight">{item.fileName}</p>
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                {(item.fileSize / 1024).toFixed(1)} KB • {item.source || 'LGD_GOV_IN'}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <span className="font-mono text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-600 block w-fit">
+                            {item.importId}
+                          </span>
+                          <span className="text-[11px] text-slate-500 block mt-0.5">
+                            {item.uploadedBy?.name || item.uploadedBy?.email || 'Admin'}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 whitespace-nowrap text-slate-500 text-[11px]">
+                          {item.createdAt ? new Date(item.createdAt).toLocaleString('en-IN', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }) : 'N/A'}
+                        </td>
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusClass}`}>
+                            {item.status}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 text-center font-bold text-slate-800">
+                          {item.metrics?.totalRecords || 0}
+                        </td>
+                        <td className="px-5 py-4 text-center font-bold text-emerald-600">
+                          {item.metrics?.inserted || 0}
+                        </td>
+                        <td className="px-5 py-4 text-center font-bold text-blue-600">
+                          {item.metrics?.updated || 0}
+                        </td>
+                        <td className="px-5 py-4 text-center font-bold text-amber-600">
+                          {item.metrics?.duplicates || 0}
+                        </td>
+                        <td className="px-5 py-4 text-center font-bold text-rose-600">
+                          {item.metrics?.invalid || 0}
+                        </td>
+                        <td className="px-5 py-4 text-right whitespace-nowrap">
+                          {hasErrors ? (
+                            <button
+                              type="button"
+                              onClick={() => window.open(getImportErrorReportUrl(item.importId), '_blank')}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 text-[10.5px] font-bold transition cursor-pointer"
+                              title="Download Error Report CSV"
+                            >
+                              <Download className="w-3 h-3" />
+                              <span>Error CSV</span>
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              Clean
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {/* History Pagination */}
+              <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between text-xs text-slate-500 font-semibold">
+                <span>
+                  Showing {importHistoryList.length} of {historyTotal} import audit records
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={historyPage <= 1}
+                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                    className="px-3 py-1 rounded-lg border border-slate-200 bg-white font-bold disabled:opacity-40"
+                  >
+                    Prev
+                  </button>
+                  <span className="px-2">Page {historyPage}</span>
+                  <button
+                    type="button"
+                    disabled={importHistoryList.length < 20}
+                    onClick={() => setHistoryPage((p) => p + 1)}
+                    className="px-3 py-1 rounded-lg border border-slate-200 bg-white font-bold disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ─── ADD / EDIT MODAL ─── */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
@@ -1078,6 +1326,18 @@ export default function AdminMasterDataPage() {
           </div>
         </div>
       )}
+
+      {/* ─── PDF LOCATION UPLOAD MODAL ─── */}
+      <LocationPdfUploadModal
+        isOpen={isPdfUploadModalOpen}
+        onClose={() => setIsPdfUploadModalOpen(false)}
+        onSuccess={() => {
+          loadSummary();
+          loadTableItems();
+          loadHistory();
+          fetchStates().then(setStatesList);
+        }}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -44,7 +44,7 @@ function getAge(dob?: string | Date) {
   return Math.abs(ageDate.getUTCFullYear() - 1970);
 }
 
-export default function InterestsPage() {
+function InterestsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialTab = searchParams.get('tab') || 'received';
@@ -860,5 +860,19 @@ export default function InterestsPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function InterestsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#FFF9F5] flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-[#E51F3E]" />
+        </div>
+      }
+    >
+      <InterestsContent />
+    </Suspense>
   );
 }

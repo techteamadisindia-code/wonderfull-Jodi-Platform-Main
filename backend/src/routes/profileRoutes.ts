@@ -27,6 +27,8 @@ router.delete('/:id/block', requireAuth, validateObjectIdParam('id'), unblockPro
 router.get('/:id', optionalAuth, getProfile);
 router.post('/', requireAuth, createProfile);
 router.put('/:id', requireAuth, validateObjectIdParam('id'), updateProfile);
+router.patch('/:id', requireAuth, validateObjectIdParam('id'), updateProfile);
+router.patch('/me', requireAuth, updateMyProfile);
 router.delete('/:id', requireAuth, validateObjectIdParam('id'), deleteProfile);
 
 export default router;

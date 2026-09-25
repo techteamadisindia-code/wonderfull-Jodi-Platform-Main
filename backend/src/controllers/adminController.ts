@@ -1056,8 +1056,14 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
     }
 
     // 5. Field validations
-    if (updateData.dob) {
-      const dobResult = validateDateOfBirth(updateData.dob);
+    if (updateData.dob !== undefined) {
+      if (!updateData.dob || (typeof updateData.dob === 'string' && !updateData.dob.trim())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Date of birth cannot be empty.',
+        });
+      }
+      const dobResult = validateDateOfBirth(updateData.dob, updateData.gender || profile.gender);
       if (!dobResult.isValid) {
         return res.status(400).json({
           success: false,

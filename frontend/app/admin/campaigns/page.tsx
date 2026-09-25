@@ -739,7 +739,7 @@ export default function AdminCampaignsPage() {
                 <div>
                   <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">Candidate Profile</div>
                   <h4 className="text-base font-bold text-slate-900">
-                    {previewResult.member?.fullName} ({previewResult.member?.candidateId})
+                    {previewResult.member?.fullName || previewResult.member?.name} ({previewResult.member?.candidateId})
                   </h4>
                   <div className="text-xs text-slate-600 flex items-center gap-3 mt-0.5">
                     <span>Gender: <strong>{previewResult.member?.gender}</strong></span>
@@ -752,7 +752,7 @@ export default function AdminCampaignsPage() {
                 <div className="text-right">
                   <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">Final Payable Price</div>
                   <div className="text-2xl font-black text-slate-900 font-serif">
-                    ₹{previewResult.pricing?.finalAmount?.toLocaleString('en-IN')}{' '}
+                    ₹{(previewResult.pricing?.finalAmount ?? previewResult.pricing?.finalPrice)?.toLocaleString('en-IN')}{' '}
                     {previewResult.pricing?.isFree && (
                       <span className="text-xs font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
                         100% FREE

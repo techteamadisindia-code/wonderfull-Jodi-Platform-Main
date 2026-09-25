@@ -581,7 +581,7 @@ export default function AdminShortlistsPage() {
                             {profile.primaryPhoto ? (
                               <img
                                 src={profile.primaryPhoto}
-                                alt={profile.displayName}
+                                alt={profile.displayName || 'Profile'}
                                 className="w-10 h-10 rounded-xl object-cover border border-rose-100 shadow-xs shrink-0 group-hover:scale-105 transition"
                               />
                             ) : (
@@ -807,12 +807,12 @@ export default function AdminShortlistsPage() {
                 {selectedProfileForModal.primaryPhoto ? (
                   <img
                     src={selectedProfileForModal.primaryPhoto}
-                    alt={selectedProfileForModal.displayName}
+                    alt={selectedProfileForModal.displayName || 'Profile'}
                     className="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl object-cover border-2 border-rose-100 shadow-md shrink-0"
                   />
                 ) : (
                   <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 text-3xl font-bold shrink-0">
-                    {selectedProfileForModal.displayName.charAt(0)}
+                    {selectedProfileForModal.displayName?.charAt(0) || 'P'}
                   </div>
                 )}
 

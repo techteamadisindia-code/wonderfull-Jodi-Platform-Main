@@ -30,6 +30,7 @@ import {
   Briefcase,
   BookOpen,
   Trophy,
+  X,
 } from 'lucide-react';
 import { adminLogout, getAdminUser } from '../../services/authApi';
 import { Logo } from '../Logo';

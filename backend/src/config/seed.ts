@@ -4,6 +4,49 @@ import { Profile } from '../models/Profile';
 import { Registration } from '../models/Registration';
 import { seedMasterDataIfEmpty } from '../services/masterDataImporter';
 import { MembershipPlan } from '../models/MembershipPlan';
+import { Admin } from '../models/Admin';
+
+export async function ensureAdminUserExists() {
+  try {
+    const adminEmail = 'admin@wonderfuljodi.com';
+    let admin = await User.findOne({ email: adminEmail });
+    const hashedPassword = await bcrypt.hash('Password123!', 12);
+
+    if (!admin) {
+      admin = await User.create({
+        fullName: 'System Administrator',
+        email: adminEmail,
+        mobile: '+919999999999',
+        password: hashedPassword,
+        role: 'admin',
+        verified: true,
+        verificationStatus: 'VERIFIED',
+        isActive: true,
+        status: 'Active',
+      });
+      console.log('✅ Created default admin user: admin@wonderfuljodi.com / Password123!');
+    } else {
+      admin.role = 'admin';
+      admin.isActive = true;
+      admin.status = 'Active';
+      admin.password = hashedPassword;
+      admin.verified = true;
+      admin.verificationStatus = 'VERIFIED';
+      await admin.save();
+      console.log('✅ Verified/Updated default admin user: admin@wonderfuljodi.com');
+    }
+
+    const adminRecord = await Admin.findOne({ user: admin._id });
+    if (!adminRecord) {
+      await Admin.create({
+        user: admin._id,
+        permissions: ['all', 'manage_users', 'manage_verifications', 'manage_content', 'manage_finance', 'view_reports', 'manage_settings'],
+      });
+    }
+  } catch (err) {
+    console.error('Failed to ensure default admin user exists:', err);
+  }
+}
 
 export async function seedInitialData() {
   try {
@@ -12,6 +55,9 @@ export async function seedInitialData() {
 
     // Ensure all dynamic membership plans are seeded
     await seedMembershipPlansIfEmpty();
+
+    // Ensure default admin user always exists and is up to date
+    await ensureAdminUserExists();
 
     const userCount = await User.countDocuments();
     let usersList: any[] = [];

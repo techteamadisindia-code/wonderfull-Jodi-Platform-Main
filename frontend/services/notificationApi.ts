@@ -9,8 +9,10 @@ export interface UserNotificationItem {
   link?: string;
   read: boolean;
   readAt?: string;
+  metadata?: Record<string, any>;
   createdAt: string;
   updatedAt: string;
+  [key: string]: any;
 }
 
 export interface UserNotificationsResponse {

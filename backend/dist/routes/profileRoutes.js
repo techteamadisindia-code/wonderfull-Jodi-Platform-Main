@@ -1,0 +1,23 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const authMiddleware_1 = require("../middleware/authMiddleware");
+const validationMiddleware_1 = require("../middleware/validationMiddleware");
+const profileController_1 = require("../controllers/profileController");
+const blockController_1 = require("../controllers/blockController");
+const router = (0, express_1.Router)();
+router.get('/me', authMiddleware_1.requireAuth, profileController_1.getMyProfile);
+router.put('/me', authMiddleware_1.requireAuth, profileController_1.updateMyProfile);
+router.get('/my-profile', authMiddleware_1.requireAuth, profileController_1.getMyProfile);
+router.put('/my-profile', authMiddleware_1.requireAuth, profileController_1.updateMyProfile);
+router.get('/blocked', authMiddleware_1.requireAuth, blockController_1.getBlockedProfiles);
+router.post('/:id/block', authMiddleware_1.requireAuth, (0, validationMiddleware_1.validateObjectIdParam)('id'), blockController_1.blockProfileById);
+router.delete('/:id/block', authMiddleware_1.requireAuth, (0, validationMiddleware_1.validateObjectIdParam)('id'), blockController_1.unblockProfileById);
+router.get('/:id', authMiddleware_1.optionalAuth, profileController_1.getProfile);
+router.post('/', authMiddleware_1.requireAuth, profileController_1.createProfile);
+router.put('/:id', authMiddleware_1.requireAuth, (0, validationMiddleware_1.validateObjectIdParam)('id'), profileController_1.updateProfile);
+router.patch('/:id', authMiddleware_1.requireAuth, (0, validationMiddleware_1.validateObjectIdParam)('id'), profileController_1.updateProfile);
+router.patch('/me', authMiddleware_1.requireAuth, profileController_1.updateMyProfile);
+router.delete('/:id', authMiddleware_1.requireAuth, (0, validationMiddleware_1.validateObjectIdParam)('id'), profileController_1.deleteProfile);
+exports.default = router;
+//# sourceMappingURL=profileRoutes.js.map

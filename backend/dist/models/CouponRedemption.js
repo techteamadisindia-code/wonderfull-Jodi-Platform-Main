@@ -1,0 +1,63 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.CouponRedemption = void 0;
+const mongoose_1 = __importStar(require("mongoose"));
+const couponRedemptionSchema = new mongoose_1.Schema({
+    couponId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Coupon', required: true, index: true },
+    couponCode: { type: String, required: true, uppercase: true, trim: true, index: true },
+    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    candidateId: { type: String, trim: true, index: true },
+    campaignId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Campaign', index: true },
+    planKey: { type: String, required: true, trim: true },
+    originalAmount: { type: Number, required: true, min: 0 },
+    discountAmount: { type: Number, required: true, min: 0 },
+    finalAmount: { type: Number, required: true, min: 0 },
+    paymentId: { type: String, trim: true },
+    orderId: { type: String, trim: true },
+    redeemedAt: { type: Date, default: Date.now, index: true },
+    status: {
+        type: String,
+        enum: ['APPLIED', 'SUCCESS', 'CANCELLED', 'REFUNDED'],
+        default: 'SUCCESS',
+        index: true,
+    },
+    metadata: { type: mongoose_1.Schema.Types.Mixed },
+}, { timestamps: true });
+couponRedemptionSchema.index({ couponId: 1, userId: 1 });
+couponRedemptionSchema.index({ redeemedAt: -1 });
+exports.CouponRedemption = mongoose_1.default.models.CouponRedemption ||
+    mongoose_1.default.model('CouponRedemption', couponRedemptionSchema);
+//# sourceMappingURL=CouponRedemption.js.map

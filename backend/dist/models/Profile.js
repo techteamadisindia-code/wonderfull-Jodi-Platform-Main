@@ -1,0 +1,353 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Profile = void 0;
+const mongoose_1 = __importStar(require("mongoose"));
+const Counter_1 = require("./Counter");
+const profileSchema = new mongoose_1.Schema({
+    user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
+    candidateId: { type: String, unique: true, sparse: true, index: true, trim: true },
+    displayName: { type: String, required: true, trim: true, index: true },
+    gender: { type: String, enum: ['Male', 'Female', 'Other'], required: true, index: true },
+    dob: { type: Date, required: true, index: true },
+    height: { type: String, required: true },
+    maritalStatus: { type: String, required: true, index: true },
+    motherTongue: { type: String, default: '', index: true },
+    religion: { type: String, default: '', index: true },
+    caste: { type: String, default: '', index: true },
+    subCaste: { type: String, index: true },
+    education: { type: String, required: true, index: true },
+    degree: { type: String, required: true, index: true },
+    profession: { type: String, required: true, index: true },
+    company: { type: String, trim: true },
+    workLocation: { type: String, trim: true, index: true },
+    annualIncome: { type: String, trim: true, index: true },
+    country: { type: String, required: true, index: true },
+    state: { type: String, default: '', index: true },
+    city: { type: String, required: true, index: true },
+    medicalRegistrationNumber: { type: String, trim: true },
+    medicalCouncil: { type: String, trim: true },
+    registrationState: { type: String, trim: true },
+    registrationYear: { type: String, trim: true },
+    medicalExperience: { type: String, trim: true },
+    currentHospital: { type: String, trim: true },
+    medicalCollege: { type: String, trim: true },
+    medicalUniversity: { type: String, trim: true },
+    graduationYear: { type: String, trim: true },
+    additionalQualification: { type: String, trim: true },
+    currentRole: { type: String, trim: true },
+    workType: { type: String, trim: true },
+    currentlyPracticing: { type: Boolean, default: true },
+    familyStatus: { type: String, trim: true },
+    familyValues: { type: String, trim: true },
+    nativePlace: { type: String, trim: true },
+    familyLocation: { type: String, trim: true },
+    profileManagedBy: { type: String, trim: true, default: 'Self' },
+    currentLocation: {
+        countryId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Country', index: true },
+        stateId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'State', index: true },
+        districtId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'District', index: true },
+        subDistrictId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'SubDistrict', index: true },
+        cityId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'City', index: true },
+        villageId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Village', index: true },
+        pincode: { type: String, trim: true },
+        formattedAddress: { type: String, trim: true },
+    },
+    nativePlaceDetails: {
+        countryId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Country', index: true },
+        stateId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'State', index: true },
+        districtId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'District', index: true },
+        subDistrictId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'SubDistrict', index: true },
+        cityId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'City', index: true },
+        villageId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Village', index: true },
+        pincode: { type: String, trim: true },
+        description: { type: String, trim: true },
+        formattedAddress: { type: String, trim: true },
+    },
+    communityDetails: {
+        religionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Religion', index: true },
+        casteId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Caste', index: true },
+        subCasteId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'SubCaste', index: true },
+        casteCategory: { type: String, trim: true },
+        subCasteText: { type: String, trim: true },
+    },
+    languageDetails: {
+        motherTongueId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Language', index: true },
+        otherLanguagesIds: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'Language' }],
+    },
+    horoscope: {
+        timeOfBirth: { type: String, trim: true },
+        placeOfBirth: { type: String, trim: true },
+        rashi: { type: String, trim: true },
+        nakshatra: { type: String, trim: true },
+        lagna: { type: String, trim: true },
+        manglik: { type: String, trim: true, default: 'Non-Manglik' },
+        gotra: { type: String, trim: true },
+        horoscopeDocument: { type: String, trim: true },
+        pada: { type: Number },
+        birthPlaceDetails: {
+            city: { type: String, trim: true },
+            state: { type: String, trim: true },
+            country: { type: String, trim: true },
+            latitude: { type: Number },
+            longitude: { type: Number },
+            timezone: { type: Number },
+        },
+    },
+    lifestyleInterests: {
+        diet: { type: String, trim: true },
+        alcohol: { type: String, trim: true },
+        smoking: { type: String, trim: true },
+        exercise: { type: String, trim: true },
+        hobbies: [{ type: String, trim: true }],
+        travel: [{ type: String, trim: true }],
+        music: [{ type: String, trim: true }],
+        reading: [{ type: String, trim: true }],
+        sports: [{ type: String, trim: true }],
+        languages: [{ type: String, trim: true }],
+        pets: { type: String, trim: true },
+        otherInterests: { type: String, trim: true },
+    },
+    partnerExpectations: {
+        ageMin: { type: Number },
+        ageMax: { type: Number },
+        heightMin: { type: String, trim: true },
+        heightMax: { type: String, trim: true },
+        qualification: { type: String, trim: true },
+        specialization: { type: String, trim: true },
+        location: {
+            country: { type: String, trim: true },
+            state: { type: String, trim: true },
+            city: { type: String, trim: true },
+        },
+        willingToRelocate: { type: mongoose_1.Schema.Types.Mixed },
+        maritalStatus: { type: String, trim: true },
+        lifestyle: {
+            diet: { type: String, trim: true },
+            smoking: { type: String, trim: true },
+            drinking: { type: String, trim: true },
+        },
+        familyExpectations: { type: String, trim: true },
+        additionalExpectations: { type: String, trim: true },
+    },
+    partnerPreferences: {
+        preferredAgeMin: { type: Number, default: 24 },
+        preferredAgeMax: { type: Number, default: 36 },
+        preferredLocation: { type: String, trim: true, default: 'Anywhere in India' },
+        preferredQualification: { type: String, trim: true, default: 'MBBS / MD / MS / Medical Specialist' },
+        preferredSpecialization: { type: String, trim: true, default: 'Any Medical Specialization' },
+        preferredMaritalStatus: { type: String, trim: true, default: 'Never Married' },
+        otherPreferences: { type: String, trim: true, default: '' },
+    },
+    aboutMe: { type: String, trim: true },
+    personalityValues: { type: String, trim: true },
+    hobbiesInterests: { type: String, trim: true },
+    careerGoals: { type: String, trim: true },
+    familyBackground: {
+        familyType: { type: String, trim: true },
+        familyStatus: { type: String, trim: true },
+        fatherName: { type: String, trim: true },
+        fatherProfession: { type: String, trim: true },
+        motherName: { type: String, trim: true },
+        motherProfession: { type: String, trim: true },
+        familyLocation: { type: String, trim: true },
+        familyValues: { type: String, trim: true },
+        aboutFamily: { type: String, trim: true },
+    },
+    siblingsDetails: {
+        brothersCount: { type: Number, default: 0 },
+        sistersCount: { type: Number, default: 0 },
+        brothers: [
+            {
+                name: { type: String, trim: true },
+                age: { type: Number },
+                profession: { type: String, trim: true },
+                maritalStatus: { type: String, trim: true },
+                location: { type: String, trim: true },
+            },
+        ],
+        sisters: [
+            {
+                name: { type: String, trim: true },
+                age: { type: Number },
+                profession: { type: String, trim: true },
+                maritalStatus: { type: String, trim: true },
+                location: { type: String, trim: true },
+            },
+        ],
+    },
+    medicalQualifications: {
+        undergraduate: [
+            {
+                qualification: { type: String, trim: true },
+                college: { type: String, trim: true },
+                collegeId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Institution' },
+                passingYear: { type: String, trim: true },
+                status: { type: String, trim: true },
+            },
+        ],
+        postgraduate: [
+            {
+                qualification: { type: String, trim: true },
+                specialization: { type: String, trim: true },
+                college: { type: String, trim: true },
+                collegeId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Institution' },
+                passingYear: { type: String, trim: true },
+                status: { type: String, trim: true },
+            },
+        ],
+        doctorate: [
+            {
+                qualification: { type: String, trim: true },
+                specialization: { type: String, trim: true },
+                college: { type: String, trim: true },
+                collegeId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Institution' },
+                passingYear: { type: String, trim: true },
+                status: { type: String, trim: true },
+            },
+        ],
+    },
+    privacySettings: {
+        profileVisibility: {
+            type: String,
+            enum: ['all', 'verified_only', 'members_only', 'hidden'],
+            default: 'all',
+        },
+        photoVisibility: {
+            type: String,
+            enum: ['all', 'members_only', 'on_request', 'hidden'],
+            default: 'all',
+        },
+        contactVisibility: {
+            type: String,
+            enum: ['accepted_interests_only', 'members_only', 'hidden'],
+            default: 'accepted_interests_only',
+        },
+        whoCanSendInterest: {
+            type: String,
+            enum: ['all', 'verified_only', 'premium_only'],
+            default: 'all',
+        },
+        whoCanMessage: {
+            type: String,
+            enum: ['accepted_interests_only', 'all_members'],
+            default: 'accepted_interests_only',
+        },
+        horoscopeVisibility: {
+            type: String,
+            enum: ['all', 'members_only', 'verified_only', 'hidden'],
+            default: 'all',
+        },
+        birthDateVisibility: {
+            type: String,
+            enum: ['full', 'year_only', 'hidden'],
+            default: 'full',
+        },
+        birthTimeVisibility: {
+            type: String,
+            enum: ['all', 'members_only', 'hidden'],
+            default: 'all',
+        },
+        birthPlaceVisibility: {
+            type: String,
+            enum: ['all', 'members_only', 'hidden'],
+            default: 'all',
+        },
+        kundaliVisibility: {
+            type: String,
+            enum: ['all', 'members_only', 'hidden'],
+            default: 'all',
+        },
+        nameVisibility: {
+            type: String,
+            enum: ['all', 'members_only', 'hidden'],
+            default: 'members_only',
+        },
+    },
+    fatherOccupation: { type: String, trim: true },
+    motherOccupation: { type: String, trim: true },
+    siblings: { type: String, trim: true },
+    familyType: { type: String, trim: true },
+    foodPreference: { type: String, trim: true },
+    smoking: { type: String, trim: true },
+    drinking: { type: String, trim: true },
+    hobbies: [{ type: String, trim: true }],
+    about: { type: String, trim: true },
+    photos: [{ type: String, trim: true }],
+    primaryPhoto: { type: String, trim: true },
+    verificationStatus: {
+        type: String,
+        enum: ['UNVERIFIED', 'PENDING', 'VERIFIED', 'REJECTED'],
+        default: 'UNVERIFIED',
+        index: true,
+    },
+    status: {
+        type: String,
+        enum: ['Active', 'Under Review', 'Suspended', 'Blocked', 'Deleted'],
+        default: 'Active',
+        index: true,
+    },
+    statusReason: { type: String, trim: true },
+    statusChangedAt: { type: Date },
+    statusChangedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date },
+    deletedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    deletionReason: { type: String, trim: true },
+    lastActiveAt: { type: Date, default: Date.now },
+    adminNotes: [
+        {
+            note: { type: String, required: true, trim: true },
+            adminId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+            adminEmail: { type: String, required: true, trim: true },
+            adminName: { type: String, trim: true },
+            createdAt: { type: Date, default: Date.now },
+        },
+    ],
+}, { timestamps: true });
+profileSchema.pre('save', async function (next) {
+    if (!this.candidateId) {
+        try {
+            this.candidateId = await (0, Counter_1.getNextCandidateId)();
+        }
+        catch (err) {
+            return next(err);
+        }
+    }
+    next();
+});
+profileSchema.index({ gender: 1, city: 1, religion: 1, caste: 1, education: 1, profession: 1 });
+exports.Profile = mongoose_1.default.models.Profile || mongoose_1.default.model('Profile', profileSchema);
+//# sourceMappingURL=Profile.js.map

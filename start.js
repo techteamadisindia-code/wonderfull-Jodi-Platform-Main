@@ -2,8 +2,9 @@
  * Wonderful Jodi — Production Server for Hostinger
  * 
  * Orchestrates:
- * 1. Next.js Standalone frontend server on an internal port
- * 2. Express backend API and proxy on the public port (Hostinger PORT)
+ * 1. Next.js Standalone frontend server on internal port
+ * 2. Express backend API and proxy on public port (Hostinger PORT)
+ * 3. Automatic self-healing build if standalone files are missing
  * 
  * Hostinger Startup File: start.js
  */
@@ -26,13 +27,15 @@ console.log('══════════════════════�
 
 let frontendProcess = null;
 
-// ─── 1. Start Next.js Standalone ───
 const nextStandalonePath = path.join(__dirname, 'frontend', '.next', 'standalone');
 const nextServerPath = path.join(nextStandalonePath, 'server.js');
 
-if (fs.existsSync(nextServerPath)) {
+function launchNextServer() {
+  if (!fs.existsSync(nextServerPath)) {
+    console.warn('[Frontend] Standalone server file not found at:', nextServerPath);
+    return;
+  }
   console.log(`[Frontend] Launching Next.js standalone on internal port ${FRONTEND_PORT}...`);
-  
   frontendProcess = spawn(process.execPath, [nextServerPath], {
     cwd: nextStandalonePath,
     env: {
@@ -51,11 +54,32 @@ if (fs.existsSync(nextServerPath)) {
   frontendProcess.on('exit', (code, signal) => {
     console.warn(`[Frontend] Process exited with code ${code}, signal ${signal}`);
   });
-} else {
-  console.warn('[Frontend] WARNING: Next.js standalone build not found at:', nextServerPath);
-  console.warn('[Frontend] Run "npm run build" to generate the Next.js standalone build.');
-  console.warn('[Frontend] The backend API and health checks will still run on port ' + PUBLIC_PORT);
 }
+
+function startFrontend() {
+  if (fs.existsSync(nextServerPath)) {
+    launchNextServer();
+  } else {
+    console.log('[Frontend] Standalone build not found. Triggering automated build in background...');
+    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const buildProc = spawn(npmCmd, ['run', 'build:frontend'], {
+      cwd: __dirname,
+      stdio: 'inherit',
+      env: process.env,
+    });
+    buildProc.on('exit', (code) => {
+      if (code === 0 && fs.existsSync(nextServerPath)) {
+        console.log('[Frontend] Build completed successfully! Launching Next.js standalone...');
+        launchNextServer();
+      } else {
+        console.error('[Frontend] Build process completed with code', code);
+      }
+    });
+  }
+}
+
+// ─── 1. Start Frontend (Immediate or Auto-building) ───
+startFrontend();
 
 // ─── 2. Start Express API Server ───
 console.log(`\n[Backend] Starting Express server on port ${PUBLIC_PORT}...`);

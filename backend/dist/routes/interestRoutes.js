@@ -1,0 +1,20 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const authMiddleware_1 = require("../middleware/authMiddleware");
+const validationMiddleware_1 = require("../middleware/validationMiddleware");
+const interestController_1 = require("../controllers/interestController");
+const router = (0, express_1.Router)();
+router.use(authMiddleware_1.requireAuth);
+router.post('/', interestController_1.createInterest);
+router.get('/sent', interestController_1.getSentInterests);
+router.get('/received', interestController_1.getReceivedInterests);
+router.get('/accepted', interestController_1.getAcceptedConnections);
+router.get('/connections', interestController_1.getAcceptedConnections);
+router.get('/check/:targetId', interestController_1.checkInterestStatus);
+router.patch('/:id/accept', (0, validationMiddleware_1.validateObjectIdParam)('id'), interestController_1.acceptInterest);
+router.patch('/:id/decline', (0, validationMiddleware_1.validateObjectIdParam)('id'), interestController_1.declineInterest);
+router.patch('/:id/reject', (0, validationMiddleware_1.validateObjectIdParam)('id'), interestController_1.rejectInterest);
+router.put('/:id', (0, validationMiddleware_1.validateObjectIdParam)('id'), interestController_1.updateInterest);
+exports.default = router;
+//# sourceMappingURL=interestRoutes.js.map

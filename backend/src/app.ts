@@ -113,9 +113,32 @@ app.use('/uploads/profiles', express.static(path.join(process.cwd(), 'uploads', 
 app.use('/uploads/blogs', express.static(path.join(process.cwd(), 'uploads', 'blogs')));
 app.use('/uploads/awards', express.static(path.join(process.cwd(), 'uploads', 'awards')));
 
-// Health check endpoints
-app.get('/api/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
-app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+// Health check endpoints — tests real MySQL/MariaDB connectivity
+import { testSqlConnection } from './db/client';
+
+app.get('/api/health', async (_, res) => {
+  const sqlStatus = await testSqlConnection();
+  res.json({
+    status: sqlStatus.success ? 'ok' : 'degraded',
+    timestamp: new Date().toISOString(),
+    database: {
+      mysql: sqlStatus.success ? 'connected' : 'disconnected',
+      message: sqlStatus.message,
+      version: sqlStatus.version || null,
+    },
+  });
+});
+app.get('/health', async (_, res) => {
+  const sqlStatus = await testSqlConnection();
+  res.json({
+    status: sqlStatus.success ? 'ok' : 'degraded',
+    timestamp: new Date().toISOString(),
+    database: {
+      mysql: sqlStatus.success ? 'connected' : 'disconnected',
+      message: sqlStatus.message,
+    },
+  });
+});
 
 // Global Rate Limiter
 app.use(globalLimiter);

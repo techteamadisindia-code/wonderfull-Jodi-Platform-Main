@@ -13,19 +13,27 @@ export async function connectDatabase() {
     try {
       const sqlStatus = await testSqlConnection();
       if (sqlStatus.success) {
-        console.log(`[SQL Database] ${sqlStatus.message}`);
+        console.log('──────────────────────────────────────────────────');
+        console.log(`[MySQL] ✅ ${sqlStatus.message}`);
+        console.log('──────────────────────────────────────────────────');
       } else {
-        console.warn(`[SQL Database] Warning: ${sqlStatus.message}`);
+        console.warn('──────────────────────────────────────────────────');
+        console.warn(`[MySQL] ⚠️  Connection failed: ${sqlStatus.message}`);
+        console.warn('[MySQL] If connecting remotely, whitelist your IP in');
+        console.warn('        hPanel > Databases > Remote MySQL');
+        console.warn('──────────────────────────────────────────────────');
         if (isProduction) {
           throw new Error(`Production SQL Database unavailable: ${sqlStatus.message}`);
         }
       }
     } catch (sqlErr: any) {
-      console.error('[SQL Database] Connection error:', sqlErr.message);
+      console.error('[MySQL] ❌ Connection error:', sqlErr.message);
       if (isProduction) {
         throw sqlErr;
       }
     }
+  } else {
+    console.warn('[MySQL] ⚠️  DATABASE_URL not set — skipping MySQL connection');
   }
 
   // 2. Connect to MongoDB (Source / Transition Layer)

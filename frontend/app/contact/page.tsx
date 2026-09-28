@@ -38,6 +38,7 @@ export default function ContactPage() {
   const [submitted, setSubmitted] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [serverSuccessMessage, setServerSuccessMessage] = useState<string | null>(null);
+  const [inquiryRef, setInquiryRef] = useState<string | null>(null);
   const [isVvipModalOpen, setIsVvipModalOpen] = useState(false);
 
   // FAQ Accordion State
@@ -121,13 +122,14 @@ export default function ContactPage() {
       setLoading(true);
       const res = await api.post('/contact', {
         name: formData.name.trim(),
-        mobile: formData.mobile.trim(),
+        mobileNumber: formData.mobile.trim(),
         email: formData.email.trim(),
         message: formData.message.trim(),
       });
 
       if (res.data?.success) {
         setSubmitted(true);
+        setInquiryRef(res.data.data?.inquiryId || null);
         setServerSuccessMessage(
           res.data.message ||
             'Thank you for contacting Wonderful Jodi. Our support team will get back to you shortly.'
@@ -137,11 +139,12 @@ export default function ContactPage() {
       }
     } catch (err: any) {
       console.error('Contact submission error:', err);
-      // Even in offline/fallback mode, provide clear feedback
-      setSubmitted(true);
-      setServerSuccessMessage(
-        'Thank you for contacting Wonderful Jodi. Our support team will get back to you shortly.'
-      );
+      const errMsg =
+        err?.response?.data?.message ||
+        (err?.code === 'ERR_NETWORK'
+          ? 'Unable to reach our servers. Please check your internet connection and try again.'
+          : 'An unexpected error occurred. Please try again.');
+      setServerError(errMsg);
     } finally {
       setLoading(false);
     }
@@ -149,6 +152,7 @@ export default function ContactPage() {
 
   const handleResetForm = () => {
     setSubmitted(false);
+    setInquiryRef(null);
     setFormData({
       name: '',
       mobile: '',
@@ -321,6 +325,12 @@ export default function ContactPage() {
                     {serverSuccessMessage ||
                       'Thank you for contacting Wonderful Jodi. Our support team will get back to you shortly.'}
                   </p>
+                  {inquiryRef && (
+                    <div className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-100 border border-emerald-300">
+                      <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider">Reference No:</span>
+                      <span className="text-sm font-extrabold text-emerald-900 font-mono tracking-wide">{inquiryRef}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-3">

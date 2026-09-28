@@ -233,3 +233,138 @@ Wonderful Jodi Team
     html: htmlContent,
   });
 }
+
+/**
+ * Send admin-specific password reset email with admin branding.
+ * Subject: Reset Your Wonderful Jodi Admin Password
+ */
+export async function sendAdminPasswordResetEmail(to: string, fullName: string, resetUrl: string) {
+  const subject = 'Reset Your Wonderful Jodi Admin Password';
+  const greeting = fullName ? `Hello ${fullName},` : 'Hello,';
+
+  const textContent = `
+${greeting}
+
+We received a request to reset the password for your Wonderful Jodi Admin account.
+
+Click the link below to create a new password:
+${resetUrl}
+
+This link is valid for 15 minutes and can only be used once.
+
+If you did not request this password reset, you can safely ignore this email. Your current password remains secure.
+
+Wonderful Jodi Admin Team
+`.trim();
+
+  const year = new Date().getFullYear();
+  const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reset Your Wonderful Jodi Admin Password</title>
+</head>
+<body style="margin:0;padding:0;background-color:#0A0F1C;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#E2E8F0;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#0A0F1C;padding:40px 10px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width:580px;background-color:#0F172A;border-radius:20px;border:1px solid #1E293B;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,0.5);" cellspacing="0" cellpadding="0" border="0">
+
+          <!-- Header Banner -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#101828 0%,#1B2A45 100%);padding:32px 30px;text-align:center;border-bottom:1px solid #1E293B;">
+              <table role="presentation" align="center" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td style="background-color:#E51F3E;width:36px;height:36px;border-radius:10px;text-align:center;vertical-align:middle;color:#FFFFFF;font-size:18px;font-weight:bold;">❤</td>
+                  <td style="padding-left:12px;font-size:22px;font-weight:bold;color:#FFFFFF;font-family:Georgia,serif;letter-spacing:-0.5px;">
+                    Wonderful <span style="color:#E51F3E;">Jodi</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:10px 0 0 0;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:2px;font-weight:700;">Administrator Password Recovery</p>
+              <div style="display:inline-block;margin-top:10px;padding:5px 14px;background-color:#1E293B;border:1px solid #334155;border-radius:20px;">
+                <span style="color:#F59E0B;font-size:11px;font-weight:700;">🔐 ADMIN PORTAL</span>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Main Body -->
+          <tr>
+            <td style="padding:36px 36px 28px 36px;">
+              <h2 style="margin:0 0 8px 0;font-size:22px;color:#F1F5F9;font-weight:700;font-family:Georgia,serif;">
+                ${greeting}
+              </h2>
+              <p style="margin:0 0 24px 0;font-size:15px;line-height:1.7;color:#94A3B8;">
+                We received a request to reset the password for your <strong style="color:#E2E8F0;">Wonderful Jodi Admin</strong> account.
+                Click the button below to create a new password.
+              </p>
+
+              <!-- CTA Button -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:28px auto;">
+                <tr>
+                  <td align="center" style="border-radius:12px;background:linear-gradient(135deg,#E51F3E 0%,#CE102F 100%);box-shadow:0 4px 20px rgba(229,31,62,0.4);">
+                    <a href="${resetUrl}" target="_blank" style="display:inline-block;padding:16px 40px;font-size:15px;font-weight:bold;color:#FFFFFF;text-decoration:none;border-radius:12px;letter-spacing:0.3px;">
+                      Reset Admin Password
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Fallback URL -->
+              <p style="margin:20px 0 8px 0;font-size:13px;color:#64748B;line-height:1.5;">
+                Or copy and paste this secure link into your browser:
+              </p>
+              <div style="background-color:#1E293B;border:1px solid #334155;border-radius:8px;padding:12px 16px;word-break:break-all;">
+                <a href="${resetUrl}" style="color:#E51F3E;font-size:12px;text-decoration:none;">${resetUrl}</a>
+              </div>
+
+              <!-- Expiry Warning -->
+              <div style="background-color:#1A1A2E;border-left:3px solid #F59E0B;padding:14px 16px;border-radius:4px;margin:24px 0;">
+                <p style="margin:0;font-size:13px;color:#CBD5E1;line-height:1.6;">
+                  ⚠️ <strong>This link is valid for 15 minutes and can only be used once.</strong>
+                  For your security, the link will expire and cannot be reused.
+                </p>
+              </div>
+
+              <p style="margin:0;font-size:13px;line-height:1.6;color:#64748B;">
+                If you did not request this password reset, please ignore this email.
+                Your current password remains unchanged and your account is secure.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Security Notice -->
+          <tr>
+            <td style="background-color:#0A0F1C;border-top:1px solid #1E293B;padding:20px 36px;">
+              <p style="margin:0 0 4px 0;font-size:12px;color:#475569;text-align:center;">
+                🔒 All admin password reset requests are logged and audited for security.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#070C16;border-top:1px solid #1E293B;padding:20px 36px;text-align:center;">
+              <p style="margin:0 0 4px 0;font-size:13px;font-weight:700;color:#94A3B8;">Wonderful Jodi Admin Team</p>
+              <p style="margin:0;font-size:11px;color:#334155;">
+                © ${year} Wonderful Jodi Matrimonial Platform. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`.trim();
+
+  return sendMail({
+    to,
+    subject,
+    text: textContent,
+    html: htmlContent,
+  });
+}

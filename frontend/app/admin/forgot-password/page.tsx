@@ -90,9 +90,9 @@ export default function AdminForgotPasswordPage() {
 
         {/* Recovery Card */}
         <div className="mt-8 bg-slate-900/95 backdrop-blur-xl py-8 px-6 shadow-2xl rounded-2xl sm:px-10 border border-slate-800/90 relative">
-          <h2 className="text-xl font-bold text-white mb-1.5">Reset Admin Password</h2>
+          <h2 className="text-xl font-bold text-white mb-1.5">Forgot Your Password?</h2>
           <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-            Enter your authorized administrative email address. We will verify credentials and dispatch a secure recovery token.
+            Enter your registered admin email address and we will send you a password reset link.
           </p>
 
           {successMessage ? (
@@ -106,7 +106,7 @@ export default function AdminForgotPasswordPage() {
               </div>
 
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                For security reasons, admin reset links expire after <strong>20 minutes</strong> and are single-use.
+                Reset links expire after <strong>15 minutes</strong> and can only be used once.
               </p>
 
               <div className="pt-2">
@@ -115,7 +115,7 @@ export default function AdminForgotPasswordPage() {
                   className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Return to Admin Sign In</span>
+                  <span>Back to Admin Login</span>
                 </Link>
               </div>
             </div>
@@ -185,7 +185,7 @@ export default function AdminForgotPasswordPage() {
                   className="text-xs text-slate-400 hover:text-white transition flex items-center gap-1.5"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Back to Sign In</span>
+                  <span>Back to Admin Login</span>
                 </Link>
 
                 <Link href="/" className="text-xs text-slate-500 hover:text-slate-300 transition">

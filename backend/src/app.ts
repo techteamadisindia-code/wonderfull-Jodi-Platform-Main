@@ -35,6 +35,7 @@ import contactAccessRoutes from './routes/contactAccessRoutes';
 import campaignRoutes from './routes/campaignRoutes';
 import couponRoutes from './routes/couponRoutes';
 import referralRoutes from './routes/referralRoutes';
+import adminContactInquiryRoutes from './routes/adminContactInquiryRoutes';
 import { publicCareerRouter, adminCareerRouter } from './routes/careerRoutes';
 import { seedDefaultCareersIfEmpty } from './controllers/careerController';
 import { publicBlogRouter, adminBlogRouter } from './routes/blogRoutes';
@@ -168,6 +169,7 @@ app.use('/api/admin/careers', adminCareerRouter);
 app.use('/api/blogs', publicBlogRouter);
 app.use('/api/admin/blogs', adminBlogRouter);
 app.use('/api/awards', publicAwardRouter);
+app.use('/api/admin/contact-inquiries', adminContactInquiryRoutes);
 app.use('/api/admin/awards', adminAwardRouter);
 
 // Centralized Error Handler

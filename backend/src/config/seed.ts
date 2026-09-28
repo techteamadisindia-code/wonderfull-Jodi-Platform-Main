@@ -949,22 +949,25 @@ export async function seedInitialData() {
     if ((await ContactInquiry.countDocuments()) <= 1) {
       await ContactInquiry.create([
         {
+          inquiryId: 'WJ-CON-2026-0001',
           name: 'Dr. Suresh Sharma',
-          mobile: '+919820011223',
+          mobileNumber: '+919820011223',
           email: 'dr.suresh@example.com',
           message: 'Interested in the VVIP Concierge service for my daughter Dr. Priya.',
           status: 'NEW',
         },
         {
+          inquiryId: 'WJ-CON-2026-0002',
           name: 'Mrs. Rekha Singhania',
-          mobile: '+919811122334',
+          mobileNumber: '+919811122334',
           email: 'rekha.s@example.com',
           message: 'Need assistance with corporate profile verification and ID upload.',
           status: 'IN_PROGRESS',
         },
         {
+          inquiryId: 'WJ-CON-2026-0003',
           name: 'Adv. Sameer Deshpande',
-          mobile: '+919833344556',
+          mobileNumber: '+919833344556',
           email: 'sameer.d@example.com',
           message: 'Inquiring about family introduction packages.',
           status: 'RESOLVED',

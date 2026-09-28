@@ -8,7 +8,7 @@ import { RefreshToken } from '../models/RefreshToken';
 import { PasswordResetToken } from '../models/PasswordResetToken';
 import { AuditLog } from '../models/AuditLog';
 import { SecurityLog } from '../models/SecurityLog';
-import { sendPasswordResetEmail } from '../services/emailService';
+import { sendAdminPasswordResetEmail } from '../services/emailService';
 import {
   generateRandomToken,
   hashToken,
@@ -385,7 +385,7 @@ export async function adminForgotPassword(req: Request, res: Response, next: Nex
       // Generate secure 32-byte token
       const rawToken = generateRandomToken(32);
       const tokenHash = hashToken(rawToken);
-      const expiresAt = new Date(Date.now() + 20 * 60 * 1000); // 20 minutes expiration
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes expiration
 
       await PasswordResetToken.create({
         user: user._id,
@@ -408,7 +408,7 @@ export async function adminForgotPassword(req: Request, res: Response, next: Nex
       );
 
       try {
-        await sendPasswordResetEmail(user.email, user.fullName, resetUrl);
+        await sendAdminPasswordResetEmail(user.email, user.fullName, resetUrl);
       } catch (mailErr) {
         console.error('Failed to send admin reset email:', mailErr);
       }

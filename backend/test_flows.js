@@ -21,6 +21,7 @@ async function runTests() {
     email: userAEmail,
     mobile: userAMobile,
     password: password,
+    termsAccepted: true,
   });
   const tokenA = regARes.data.token || regARes.data.data.token;
   const userA = regARes.data.user || regARes.data.data.user;
@@ -32,6 +33,7 @@ async function runTests() {
     email: userBEmail,
     mobile: userBMobile,
     password: password,
+    termsAccepted: true,
   });
   const tokenB = regBRes.data.token || regBRes.data.data.token;
   const userB = regBRes.data.user || regBRes.data.data.user;
@@ -73,8 +75,16 @@ async function runTests() {
   console.log(`✓ Interest Created in DB: ID = ${interest._id}, Status = ${interest.status}`);
 
   // Test Duplicate Interest Prevention
-  const dupRes = await clientA.post('/interests', { receiverId: userBId });
-  console.log(`✓ Duplicate Interest Handled: "${dupRes.data.message}" (Status = ${dupRes.data.data.status})`);
+  try {
+    const dupRes = await clientA.post('/interests', { receiverId: userBId });
+    console.log(`✓ Duplicate Interest Handled: "${dupRes.data.message}" (Status = ${dupRes.data.data.status})`);
+  } catch (err) {
+    if (err.response && err.response.status === 409) {
+      console.log(`✓ Duplicate Interest Blocked: HTTP 409 - "${err.response.data.message}"`);
+    } else {
+      throw err;
+    }
+  }
 
   // 5. Test Chat Blocked While Interest is PENDING
   console.log('\n5. Testing Security: Chat Blocked While Interest is PENDING...');

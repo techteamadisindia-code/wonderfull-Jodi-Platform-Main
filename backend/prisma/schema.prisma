@@ -1,0 +1,1454 @@
+// Wonderful Jodi Doctor Matrimony - Complete Hostinger MySQL / MariaDB Prisma Schema
+// All 50 entity schemas mapped from MongoDB / Mongoose with exact ObjectId preservation.
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ─────────────────────────────────────────────────────────────
+// 1. AUTH & USER ENTITIES
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id                 String    @id @map("_id") @db.VarChar(36)
+  fullName           String    @map("full_name") @db.VarChar(150)
+  email              String    @unique @db.VarChar(191)
+  mobile             String    @unique @db.VarChar(30)
+  password           String    @db.VarChar(255)
+  role               String    @default("user") @db.VarChar(20) // 'user' | 'admin'
+  verified           Boolean   @default(false)
+  verificationStatus String    @default("UNVERIFIED") @map("verification_status") @db.VarChar(30) // 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED'
+  isActive           Boolean   @default(true) @map("is_active")
+  status             String    @default("Active") @db.VarChar(30) // 'Active' | 'Under Review' | 'Suspended' | 'Blocked' | 'Deleted'
+  isDeleted          Boolean   @default(false) @map("is_deleted")
+  deletedAt          DateTime? @map("deleted_at")
+  deletedById        String?   @map("deleted_by_id") @db.VarChar(36)
+  deletionReason     String?   @map("deletion_reason") @db.VarChar(500)
+  suspensionReason   String?   @map("suspension_reason") @db.VarChar(500)
+  suspendedAt        DateTime? @map("suspended_at")
+  suspendedById      String?   @map("suspended_by_id") @db.VarChar(36)
+  termsAccepted      Boolean   @default(false) @map("terms_accepted")
+  termsVersion       String    @default("2026-09-V1") @map("terms_version") @db.VarChar(50)
+  termsAcceptedAt    DateTime? @map("terms_accepted_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  profile               Profile?
+  adminRecord           Admin?
+  subscriptions         Subscription[]
+  payments              Payment[]
+  sentInterests         Interest[]            @relation("SentInterests")
+  receivedInterests     Interest[]            @relation("ReceivedInterests")
+  sentMessages          Message[]             @relation("SentMessages")
+  receivedMessages      Message[]             @relation("ReceivedMessages")
+  notifications         Notification[]
+  verifications         Verification[]        @relation("UserVerifications")
+  reviewedVerifications Verification[]        @relation("ReviewedVerifications")
+  passwordResetTokens   PasswordResetToken[]
+  refreshTokens         RefreshToken[]
+  securityLogs          SecurityLog[]
+  auditLogsAsAdmin      AuditLog[]            @relation("AdminAuditLogs")
+  blockedByMe           Block[]               @relation("UserBlocker")
+  blockedMe             Block[]               @relation("UserBlocked")
+  reportsFiled          Report[]              @relation("ReporterUser")
+  reportsAgainst        Report[]              @relation("ReportedUser")
+  contactRequestsSent   ContactRequest[]      @relation("SentContactRequests")
+  contactRequestsRecv   ContactRequest[]      @relation("ReceivedContactRequests")
+  contactAccessLogs     ContactAccessLog[]    @relation("AccessLogUser")
+  contactProfileOwner   ContactAccessLog[]    @relation("AccessLogProfileOwner")
+  couponRedemptions     CouponRedemption[]
+  referralsMade         Referral[]            @relation("ReferrerUser")
+  referralsReceived     Referral?             @relation("ReferredUser")
+  rewardRecords         ReferralRewardRecord[]
+  shortlists            Shortlist[]
+  dailyVisits           DailyUserVisit[]
+  biodatas              Biodata[]
+  kundaliReportsAs1     KundaliReport[]       @relation("KundaliUser1")
+  kundaliReportsAs2     KundaliReport[]       @relation("KundaliUser2")
+  registrations         Registration[]
+  conversations         ConversationParticipant[]
+
+  @@index([role])
+  @@index([status])
+  @@index([isActive])
+  @@index([isDeleted])
+  @@index([verificationStatus])
+  @@map("users")
+}
+
+model Admin {
+  id          String   @id @map("_id") @db.VarChar(36)
+  userId      String   @unique @map("user_id") @db.VarChar(36)
+  permissions Json? // string[]
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("admins")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 2. PROFILE & REGISTRATION
+// ─────────────────────────────────────────────────────────────
+
+model Profile {
+  id                        String    @id @map("_id") @db.VarChar(36)
+  userId                    String    @unique @map("user_id") @db.VarChar(36)
+  candidateId               String?   @unique @map("candidate_id") @db.VarChar(50)
+  displayName               String    @map("display_name") @db.VarChar(150)
+  gender                    String    @db.VarChar(20) // 'Male' | 'Female' | 'Other'
+  dob                       DateTime
+  height                    String    @db.VarChar(30)
+  maritalStatus             String    @map("marital_status") @db.VarChar(50)
+  motherTongue              String?   @default("") @map("mother_tongue") @db.VarChar(100)
+  religion                  String?   @default("") @db.VarChar(100)
+  caste                     String?   @default("") @db.VarChar(100)
+  subCaste                  String?   @map("sub_caste") @db.VarChar(100)
+  education                 String    @db.VarChar(150)
+  degree                    String    @db.VarChar(150)
+  profession                String    @db.VarChar(150)
+  company                   String?   @db.VarChar(150)
+  workLocation              String?   @map("work_location") @db.VarChar(150)
+  annualIncome              String?   @map("annual_income") @db.VarChar(100)
+  country                   String    @db.VarChar(100)
+  state                     String?   @default("") @db.VarChar(100)
+  city                      String    @db.VarChar(100)
+  fatherOccupation          String?   @map("father_occupation") @db.VarChar(150)
+  motherOccupation          String?   @map("mother_occupation") @db.VarChar(150)
+  siblings                  String?   @db.VarChar(150)
+  familyType                String?   @map("family_type") @db.VarChar(50)
+  foodPreference            String?   @map("food_preference") @db.VarChar(50)
+  smoking                   String?   @db.VarChar(50)
+  drinking                  String?   @db.VarChar(50)
+  hobbies                   Json? // string[]
+  about                     String?   @db.Text
+  photos                    Json? // string[]
+  primaryPhoto              String?   @map("primary_photo") @db.VarChar(500)
+  medicalRegistrationNumber String?   @map("medical_registration_number") @db.VarChar(100)
+  medicalCouncil            String?   @map("medical_council") @db.VarChar(150)
+  registrationState         String?   @map("registration_state") @db.VarChar(100)
+  registrationYear          String?   @map("registration_year") @db.VarChar(20)
+  medicalExperience         String?   @map("medical_experience") @db.VarChar(100)
+  currentHospital           String?   @map("current_hospital") @db.VarChar(200)
+  medicalCollege            String?   @map("medical_college") @db.VarChar(200)
+  medicalUniversity         String?   @map("medical_university") @db.VarChar(200)
+  graduationYear            String?   @map("graduation_year") @db.VarChar(20)
+  additionalQualification   String?   @map("additional_qualification") @db.VarChar(200)
+  currentRole               String?   @map("current_role") @db.VarChar(150)
+  workType                  String?   @map("work_type") @db.VarChar(100)
+  currentlyPracticing       Boolean?  @default(true) @map("currently_practicing")
+  familyStatus              String?   @map("family_status") @db.VarChar(100)
+  familyValues              String?   @map("family_values") @db.VarChar(100)
+  nativePlace               String?   @map("native_place") @db.VarChar(150)
+  familyLocation            String?   @map("family_location") @db.VarChar(150)
+  profileManagedBy          String?   @default("Self") @map("profile_managed_by") @db.VarChar(50)
+  currentLocation           Json? // { countryId, stateId, districtId, subDistrictId, cityId, villageId, pincode, formattedAddress }
+  nativePlaceDetails        Json? // { countryId, stateId, districtId, subDistrictId, cityId, villageId, pincode, description, formattedAddress }
+  communityDetails          Json? // { religionId, casteId, subCasteId, casteCategory, subCasteText }
+  languageDetails           Json? // { motherTongueId, otherLanguagesIds }
+  horoscope                 Json? // { timeOfBirth, placeOfBirth, rashi, nakshatra, lagna, manglik, gotra, horoscopeDocument, pada, birthPlaceDetails }
+  lifestyleInterests        Json? // { diet, alcohol, smoking, exercise, hobbies, travel, music, reading, sports, languages, pets, otherInterests }
+  partnerExpectations       Json? // { ageMin, ageMax, heightMin, heightMax, qualification, specialization, location, willingToRelocate, maritalStatus, lifestyle, familyExpectations, additionalExpectations }
+  partnerPreferences        Json? // { preferredAgeMin, preferredAgeMax, preferredLocation, preferredQualification, preferredSpecialization, preferredMaritalStatus, otherPreferences }
+  aboutMe                   String?   @map("about_me") @db.Text
+  personalityValues         String?   @map("personality_values") @db.Text
+  hobbiesInterests          String?   @map("hobbies_interests") @db.Text
+  careerGoals               String?   @map("career_goals") @db.Text
+  familyBackground          Json? // { familyType, familyStatus, fatherName, fatherProfession, motherName, motherProfession, familyLocation, familyValues, aboutFamily }
+  siblingsDetails           Json? // { brothersCount, sistersCount, brothers, sisters }
+  medicalQualifications     Json? // { undergraduate, postgraduate, doctorate }
+  privacySettings           Json? // { profileVisibility, photoVisibility, contactVisibility, whoCanSendInterest, whoCanMessage, horoscopeVisibility, birthDateVisibility, birthTimeVisibility, birthPlaceVisibility, kundaliVisibility, nameVisibility }
+  verificationStatus        String    @default("UNVERIFIED") @map("verification_status") @db.VarChar(30)
+  status                    String    @default("Active") @db.VarChar(30)
+  statusReason              String?   @map("status_reason") @db.VarChar(500)
+  statusChangedAt           DateTime? @map("status_changed_at")
+  statusChangedById         String?   @map("status_changed_by_id") @db.VarChar(36)
+  isDeleted                 Boolean   @default(false) @map("is_deleted")
+  deletedAt                 DateTime? @map("deleted_at")
+  deletedById               String?   @map("deleted_by_id") @db.VarChar(36)
+  deletionReason            String?   @map("deletion_reason") @db.VarChar(500)
+  lastActiveAt              DateTime  @default(now()) @map("last_active_at")
+  adminNotes                Json? // { note, adminId, adminEmail, adminName, createdAt }[]
+  createdAt                 DateTime  @default(now()) @map("created_at")
+  updatedAt                 DateTime  @updatedAt @map("updated_at")
+
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  senderInterests      Interest[]       @relation("SenderProfile")
+  receiverInterests    Interest[]       @relation("ReceiverProfile")
+  shortlistedIn        Shortlist[]
+  biodatas             Biodata[]
+  registrations        Registration[]
+  kundaliAsPartner1    KundaliReport[]  @relation("KundaliPartner1")
+  kundaliAsPartner2    KundaliReport[]  @relation("KundaliPartner2")
+  reportedInReports    Report[]
+
+  @@index([gender, city, religion, caste, education, profession])
+  @@index([status])
+  @@index([isDeleted])
+  @@index([verificationStatus])
+  @@map("profiles")
+}
+
+model Registration {
+  id                   String    @id @map("_id") @db.VarChar(36)
+  registrationId       String    @unique @map("registration_id") @db.VarChar(50)
+  status               String    @default("IN_PROGRESS") @db.VarChar(30) // 'STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED'
+  currentStep          Int       @default(1) @map("current_step")
+  totalSteps           Int       @default(4) @map("total_steps")
+  completionPercentage Int       @default(0) @map("completion_percentage")
+  candidateName        String    @map("candidate_name") @db.VarChar(150)
+  email                String?   @db.VarChar(191)
+  mobile               String?   @db.VarChar(30)
+  gender               String?   @db.VarChar(20)
+  stepData             Json      @map("step_data")
+  userId               String?   @map("user_id") @db.VarChar(36)
+  profileId            String?   @map("profile_id") @db.VarChar(36)
+  resumeToken          String?   @map("resume_token") @db.VarChar(100)
+  startedAt            DateTime  @default(now()) @map("started_at")
+  lastActiveAt         DateTime  @default(now()) @map("last_active_at")
+  completedAt          DateTime? @map("completed_at")
+  abandonedAt          DateTime? @map("abandoned_at")
+  ipAddress            String?   @map("ip_address") @db.VarChar(50)
+  userAgent            String?   @map("user_agent") @db.VarChar(500)
+  isDeleted            Boolean   @default(false) @map("is_deleted")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  profile Profile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([email])
+  @@index([mobile])
+  @@index([isDeleted])
+  @@map("registrations")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3. MEMBERSHIP & PAYMENTS
+// ─────────────────────────────────────────────────────────────
+
+model MembershipPlan {
+  id                  String   @id @map("_id") @db.VarChar(36)
+  name                String   @db.VarChar(100)
+  slug                String   @unique @db.VarChar(100)
+  key                 String?  @db.VarChar(100)
+  planId              String?  @map("plan_id") @db.VarChar(100)
+  description         String?  @default("") @db.VarChar(500)
+  originalPrice       Float    @default(0) @map("original_price")
+  discountedPrice     Float    @default(0) @map("discounted_price")
+  price               Float    @default(0)
+  currency            String   @default("INR") @db.VarChar(10)
+  billingPeriod       String   @default("Monthly") @map("billing_period") @db.VarChar(50)
+  durationDays        Int      @default(30) @map("duration_days")
+  durationMonths      Int?     @map("duration_months")
+  features            Json? // string[]
+  isActive            Boolean  @default(true) @map("is_active")
+  isPopular           Boolean  @default(false) @map("is_popular")
+  displayOrder        Int      @default(1) @map("display_order")
+  seasonalLabel       String?  @default("") @map("seasonal_label") @db.VarChar(100)
+  seasonalDiscount    Float?   @default(0) @map("seasonal_discount")
+  isSeasonalOffer     Boolean  @default(false) @map("is_seasonal_offer")
+  badge               String?  @default("") @db.VarChar(100)
+  bestFor             String?  @default("") @map("best_for") @db.VarChar(150)
+  profileViewLimit    String   @default("limited") @map("profile_view_limit") @db.VarChar(20) // 'limited' | 'unlimited'
+  contactRequestLimit Int      @default(0) @map("contact_request_limit")
+  isUnlimitedContact  Boolean  @default(false) @map("is_unlimited_contact")
+  fairUsageEnabled    Boolean  @default(false) @map("fair_usage_enabled")
+  ctaText             String   @default("Select Plan") @map("cta_text") @db.VarChar(100)
+  ctaAction           String   @default("order") @map("cta_action") @db.VarChar(20) // 'register' | 'order' | 'contact'
+  disclaimer          String?  @default("") @db.VarChar(500)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@index([displayOrder])
+  @@map("membership_plans")
+}
+
+model Subscription {
+  id                       String    @id @map("_id") @db.VarChar(36)
+  userId                   String    @map("user_id") @db.VarChar(36)
+  plan                     String    @db.VarChar(100)
+  planId                   String?   @map("plan_id") @db.VarChar(100)
+  status                   String    @default("ACTIVE") @db.VarChar(20) // 'ACTIVE' | 'PENDING' | 'EXPIRED' | 'CANCELLED'
+  startDate                DateTime  @map("start_date")
+  expiryDate               DateTime? @map("expiry_date")
+  contactRequestsUsed      Int       @default(0) @map("contact_requests_used")
+  contactRequestsRemaining Int       @default(0) @map("contact_requests_remaining")
+  paymentReference         String?   @map("payment_reference") @db.VarChar(150)
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@index([userId])
+  @@index([plan])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                String    @id @map("_id") @db.VarChar(36)
+  userId            String    @map("user_id") @db.VarChar(36)
+  subscriptionId    String?   @map("subscription_id") @db.VarChar(36)
+  orderId           String?   @map("order_id") @db.VarChar(150)
+  paymentId         String?   @map("payment_id") @db.VarChar(150)
+  provider          String    @default("razorpay") @db.VarChar(50)
+  providerPaymentId String    @map("provider_payment_id") @db.VarChar(150)
+  amount            Float
+  currency          String    @default("INR") @db.VarChar(10)
+  planId            String?   @map("plan_id") @db.VarChar(100)
+  planName          String?   @map("plan_name") @db.VarChar(150)
+  paymentMethod     String?   @default("UPI") @map("payment_method") @db.VarChar(50)
+  status            String    @default("PENDING") @db.VarChar(30) // 'PENDING' | 'SUCCESS' | 'FAILED' | 'CANCELLED' | 'REFUNDED' | 'PARTIALLY_REFUNDED'
+  receipt           String?   @db.VarChar(150)
+  razorpaySignature String?   @map("razorpay_signature") @db.VarChar(255)
+  failureReason     String?   @map("failure_reason") @db.Text
+  refundId          String?   @map("refund_id") @db.VarChar(150)
+  refundAmount      Float?    @default(0) @map("refund_amount")
+  refundStatus      String?   @default("NONE") @map("refund_status") @db.VarChar(30) // 'NONE' | 'PENDING' | 'PROCESSED' | 'FAILED'
+  refundReason      String?   @map("refund_reason") @db.Text
+  refundedAt        DateTime? @map("refunded_at")
+  isSimulated       Boolean   @default(false) @map("is_simulated")
+  metadata          Json?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([orderId])
+  @@index([paymentId])
+  @@index([providerPaymentId])
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 4. MATCHMAKING & CHAT
+// ─────────────────────────────────────────────────────────────
+
+model Interest {
+  id                String   @id @map("_id") @db.VarChar(36)
+  senderId          String   @map("sender_id") @db.VarChar(36)
+  receiverId        String   @map("receiver_id") @db.VarChar(36)
+  senderProfileId   String?  @map("sender_profile_id") @db.VarChar(36)
+  receiverProfileId String?  @map("receiver_profile_id") @db.VarChar(36)
+  status            String   @default("PENDING") @db.VarChar(20) // 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'REJECTED' | 'CANCELLED'
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  sender          User          @relation("SentInterests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver        User          @relation("ReceivedInterests", fields: [receiverId], references: [id], onDelete: Cascade)
+  senderProfile   Profile?      @relation("SenderProfile", fields: [senderProfileId], references: [id], onDelete: SetNull)
+  receiverProfile Profile?      @relation("ReceiverProfile", fields: [receiverProfileId], references: [id], onDelete: SetNull)
+  conversations   Conversation[]
+
+  @@unique([senderId, receiverId])
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@map("interests")
+}
+
+model Shortlist {
+  id        String   @id @map("_id") @db.VarChar(36)
+  userId    String   @map("user_id") @db.VarChar(36)
+  profileId String   @map("profile_id") @db.VarChar(36)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, profileId])
+  @@map("shortlists")
+}
+
+model Conversation {
+  id               String   @id @map("_id") @db.VarChar(36)
+  interestId       String?  @map("interest_id") @db.VarChar(36)
+  lastMessage      String?  @map("last_message") @db.Text
+  messageCount     Int      @default(0) @map("message_count")
+  status           String   @default("ACTIVE") @db.VarChar(20) // 'ACTIVE' | 'FLAGGED' | 'BLOCKED' | 'ARCHIVED'
+  complianceStatus String   @default("SAFE") @map("compliance_status") @db.VarChar(20) // 'SAFE' | 'FLAGGED' | 'UNDER_REVIEW' | 'BLOCKED'
+  lastActivityAt   DateTime @default(now()) @map("last_activity_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  interest     Interest?                 @relation(fields: [interestId], references: [id], onDelete: SetNull)
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@index([lastActivityAt])
+  @@index([updatedAt])
+  @@index([status, complianceStatus])
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  conversationId String @map("conversation_id") @db.VarChar(36)
+  userId         String @map("user_id") @db.VarChar(36)
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id                   String    @id @map("_id") @db.VarChar(36)
+  conversationId       String    @map("conversation_id") @db.VarChar(36)
+  senderId             String    @map("sender_id") @db.VarChar(36)
+  receiverId           String    @map("receiver_id") @db.VarChar(36)
+  content              String    @db.Text
+  read                 Boolean   @default(false)
+  moderationStatus     String    @default("SAFE") @map("moderation_status") @db.VarChar(20) // 'SAFE' | 'FLAGGED' | 'UNDER_REVIEW' | 'BLOCKED'
+  moderationCategory   String?   @default("NONE") @map("moderation_category") @db.VarChar(30)
+  moderationConfidence String?   @default("NONE") @map("moderation_confidence") @db.VarChar(20)
+  moderationScore      Float?    @default(0) @map("moderation_score")
+  flaggedReason        String?   @map("flagged_reason") @db.VarChar(255)
+  moderatedAt          DateTime? @default(now()) @map("moderated_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver     User         @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([senderId, receiverId])
+  @@index([moderationStatus, moderationCategory])
+  @@map("messages")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 5. NOTIFICATIONS & BROADCASTS
+// ─────────────────────────────────────────────────────────────
+
+model Notification {
+  id          String    @id @map("_id") @db.VarChar(36)
+  userId      String    @map("user_id") @db.VarChar(36)
+  broadcastId String?   @map("broadcast_id") @db.VarChar(36)
+  type        String    @default("SYSTEM") @db.VarChar(50)
+  title       String    @db.VarChar(150)
+  message     String    @db.Text
+  actionUrl   String?   @map("action_url") @db.VarChar(500)
+  link        String?   @db.VarChar(500)
+  read        Boolean   @default(false)
+  readAt      DateTime? @map("read_at")
+  metadata    Json?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  broadcast Broadcast? @relation(fields: [broadcastId], references: [id], onDelete: SetNull)
+
+  @@index([userId, read, createdAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model Broadcast {
+  id              String    @id @map("_id") @db.VarChar(36)
+  title           String    @db.VarChar(150)
+  message         String    @db.Text
+  type            String    @default("SYSTEM") @db.VarChar(30)
+  targetType      String    @default("ALL_USERS") @map("target_type") @db.VarChar(30)
+  targetUserIds   Json?     @map("target_user_ids") // string[]
+  actionUrl       String?   @map("action_url") @db.VarChar(500)
+  createdById     String    @map("created_by_id") @db.VarChar(36)
+  status          String    @default("SENT") @db.VarChar(20) // 'DRAFT' | 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED'
+  totalRecipients Int       @default(0) @map("total_recipients")
+  deliveredCount  Int       @default(0) @map("delivered_count")
+  readCount       Int       @default(0) @map("read_count")
+  sentAt          DateTime? @default(now()) @map("sent_at")
+  metadata        Json?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  notifications Notification[]
+
+  @@index([createdAt])
+  @@map("broadcasts")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 6. VERIFICATION, AUDIT & SECURITY
+// ─────────────────────────────────────────────────────────────
+
+model Verification {
+  id              String    @id @map("_id") @db.VarChar(36)
+  userId          String    @map("user_id") @db.VarChar(36)
+  documentType    String    @map("document_type") @db.VarChar(50)
+  documentName    String    @default("Verification Document") @map("document_name") @db.VarChar(150)
+  documentUrl     String    @map("document_url") @db.VarChar(500)
+  storageKey      String?   @map("storage_key") @db.VarChar(255)
+  fileType        String?   @default("application/pdf") @map("file_type") @db.VarChar(50)
+  fileSize        Int?      @default(0) @map("file_size")
+  status          String    @default("PENDING") @db.VarChar(20) // 'PENDING' | 'APPROVED' | 'REJECTED'
+  submittedAt     DateTime  @default(now()) @map("submitted_at")
+  reviewedAt      DateTime? @map("reviewed_at")
+  reviewedById    String?   @map("reviewed_by_id") @db.VarChar(36)
+  reviewedByEmail String?   @map("reviewed_by_email") @db.VarChar(191)
+  adminNotes      String?   @map("admin_notes") @db.Text
+  rejectionReason String?   @map("rejection_reason") @db.Text
+  attemptNumber   Int       @default(1) @map("attempt_number")
+  metadata        Json?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  user       User  @relation("UserVerifications", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("ReviewedVerifications", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, documentType, status])
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@map("verifications")
+}
+
+model PasswordResetToken {
+  id        String    @id @map("_id") @db.VarChar(36)
+  userId    String    @map("user_id") @db.VarChar(36)
+  tokenHash String    @unique @map("token_hash") @db.VarChar(191)
+  expiresAt DateTime  @map("expires_at")
+  isUsed    Boolean   @default(false) @map("is_used")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model RefreshToken {
+  id        String   @id @map("_id") @db.VarChar(36)
+  userId    String   @map("user_id") @db.VarChar(36)
+  tokenHash String   @unique @map("token_hash") @db.VarChar(191)
+  family    String   @db.VarChar(100)
+  isUsed    Boolean  @default(false) @map("is_used")
+  isRevoked Boolean  @default(false) @map("is_revoked")
+  expiresAt DateTime @map("expires_at")
+  ipAddress String?  @map("ip_address") @db.VarChar(50)
+  userAgent String?  @map("user_agent") @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id              String   @id @map("_id") @db.VarChar(36)
+  adminUserId     String?  @map("admin_user_id") @db.VarChar(36)
+  adminId         String?  @map("admin_id") @db.VarChar(36)
+  adminEmail      String   @map("admin_email") @db.VarChar(191)
+  adminName       String?  @map("admin_name") @db.VarChar(150)
+  action          String   @db.VarChar(100)
+  targetModel     String?  @map("target_model") @db.VarChar(100)
+  targetId        String?  @map("target_id") @db.VarChar(100)
+  targetProfileId String?  @map("target_profile_id") @db.VarChar(36)
+  targetUserId    String?  @map("target_user_id") @db.VarChar(36)
+  previousStatus  String?  @map("previous_status") @db.VarChar(50)
+  newStatus       String?  @map("new_status") @db.VarChar(50)
+  reason          String?  @db.Text
+  relatedReportId String?  @map("related_report_id") @db.VarChar(36)
+  details         String?  @db.Text
+  ipAddress       String?  @default("127.0.0.1") @map("ip_address") @db.VarChar(50)
+  status          String   @default("SUCCESS") @db.VarChar(20) // 'SUCCESS' | 'FAILED' | 'WARNING'
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  adminUser User? @relation("AdminAuditLogs", fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([targetModel])
+  @@index([targetId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SecurityLog {
+  id         String   @id @map("_id") @db.VarChar(36)
+  userId     String?  @map("user_id") @db.VarChar(36)
+  identifier String?  @db.VarChar(191)
+  eventType  String   @map("event_type") @db.VarChar(50)
+  status     String   @default("SUCCESS") @db.VarChar(20)
+  ipAddress  String?  @map("ip_address") @db.VarChar(50)
+  userAgent  String?  @map("user_agent") @db.VarChar(500)
+  details    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("security_logs")
+}
+
+model Block {
+  id            String   @id @map("_id") @db.VarChar(36)
+  blockerId     String   @map("blocker_id") @db.VarChar(36)
+  blockedUserId String   @map("blocked_user_id") @db.VarChar(36)
+  reason        String?  @db.VarChar(500)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  blocker     User @relation("UserBlocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedUser User @relation("UserBlocked", fields: [blockedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedUserId])
+  @@map("blocks")
+}
+
+model Report {
+  id               String    @id @map("_id") @db.VarChar(36)
+  reporterId       String    @map("reporter_id") @db.VarChar(36)
+  reportedUserId   String    @map("reported_user_id") @db.VarChar(36)
+  reportedProfileId String?  @map("reported_profile_id") @db.VarChar(36)
+  reason           String    @db.VarChar(200)
+  details          String?   @db.Text
+  description      String?   @db.Text
+  status           String    @default("PENDING") @db.VarChar(30)
+  moderatorId      String?   @map("moderator_id") @db.VarChar(36)
+  handledByAdminId String?   @map("handled_by_admin_id") @db.VarChar(36)
+  resolutionNotes  String?   @map("resolution_notes") @db.Text
+  adminNotes       String?   @map("admin_notes") @db.Text
+  actionTaken      String    @default("NONE") @map("action_taken") @db.VarChar(50)
+  targetType       String    @default("PROFILE") @map("target_type") @db.VarChar(30)
+  messageSnippet   String?   @map("message_snippet") @db.Text
+  resolvedAt       DateTime? @map("resolved_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  reporter        User     @relation("ReporterUser", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedUser    User     @relation("ReportedUser", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  reportedProfile Profile? @relation(fields: [reportedProfileId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([reason])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 7. CONTACT & INQUIRIES
+// ─────────────────────────────────────────────────────────────
+
+model ContactInquiry {
+  id                  String   @id @map("_id") @db.VarChar(36)
+  inquiryId           String   @unique @map("inquiry_id") @db.VarChar(50)
+  name                String   @db.VarChar(100)
+  mobileNumber        String   @map("mobile_number") @db.VarChar(30)
+  email               String   @db.VarChar(191)
+  message             String   @db.Text
+  userId              String?  @map("user_id") @db.VarChar(36)
+  userType            String   @default("GUEST") @map("user_type") @db.VarChar(30)
+  status              String   @default("NEW") @db.VarChar(30)
+  priority            String   @default("NORMAL") @db.VarChar(20)
+  category            String   @default("GENERAL") @db.VarChar(50)
+  notificationCreated Boolean  @default(false) @map("notification_created")
+  assignedTo          String?  @map("assigned_to") @db.VarChar(36)
+  internalNotes       Json?    @map("internal_notes")
+  ipAddress           String?  @map("ip_address") @db.VarChar(50)
+  userAgent           String?  @map("user_agent") @db.VarChar(500)
+  replies             Json?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([priority, status, createdAt])
+  @@index([category, createdAt])
+  @@index([email, createdAt])
+  @@index([createdAt])
+  @@map("contact_inquiries")
+}
+
+model ContactRequest {
+  id                    String    @id @map("_id") @db.VarChar(36)
+  requesterId           String    @map("requester_id") @db.VarChar(36)
+  recipientId           String    @map("recipient_id") @db.VarChar(36)
+  status                String    @default("PENDING") @db.VarChar(20) // 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED'
+  contactCreditDeducted Boolean   @default(false) @map("contact_credit_deducted")
+  contactUnlockedAt     DateTime? @map("contact_unlocked_at")
+  message               String?   @default("") @db.VarChar(500)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  requester User @relation("SentContactRequests", fields: [requesterId], references: [id], onDelete: Cascade)
+  recipient User @relation("ReceivedContactRequests", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([requesterId, recipientId])
+  @@index([recipientId, status])
+  @@map("contact_requests")
+}
+
+model ContactAccessLog {
+  id               String   @id @map("_id") @db.VarChar(36)
+  userId           String   @map("user_id") @db.VarChar(36)
+  profileOwnerId   String   @map("profile_owner_id") @db.VarChar(36)
+  contactRequestId String?  @map("contact_request_id") @db.VarChar(36)
+  action           String   @db.VarChar(50)
+  creditsUsed      Int      @default(0) @map("credits_used")
+  ipAddress        String?  @map("ip_address") @db.VarChar(50)
+  metadata         Json?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user         User @relation("AccessLogUser", fields: [userId], references: [id], onDelete: Cascade)
+  profileOwner User @relation("AccessLogProfileOwner", fields: [profileOwnerId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([profileOwnerId])
+  @@index([action])
+  @@map("contact_access_logs")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 8. CAMPAIGNS, COUPONS & REFERRALS
+// ─────────────────────────────────────────────────────────────
+
+model Campaign {
+  id                 String   @id @map("_id") @db.VarChar(36)
+  campaignName       String   @map("campaign_name") @db.VarChar(150)
+  description        String?  @db.Text
+  startDate          DateTime @map("start_date")
+  endDate            DateTime @map("end_date")
+  timezone           String   @default("Asia/Kolkata") @db.VarChar(50)
+  priority           Int      @default(0)
+  targetGender       String   @default("Any") @map("target_gender") @db.VarChar(20)
+  minAge             Int?     @map("min_age")
+  maxAge             Int?     @map("max_age")
+  maritalStatus      Json?    @map("marital_status") // string[]
+  membershipType     Json?    @map("membership_type") // string[]
+  registrationStatus String?  @default("Any") @map("registration_status") @db.VarChar(50)
+  verificationStatus String?  @default("Any") @map("verification_status") @db.VarChar(50)
+  profileStatus      String?  @default("Any") @map("profile_status") @db.VarChar(50)
+  location           Json? // { countries, states, districts, cities }
+  qualification      Json? // string[]
+  specialization     Json? // string[]
+  applicablePlans    Json?    @map("applicable_plans") // string[]
+  discountType       String   @default("PERCENTAGE") @map("discount_type") @db.VarChar(30)
+  discountValue      Float    @default(0) @map("discount_value")
+  couponRequired     Boolean  @default(false) @map("coupon_required")
+  couponCode         String?  @map("coupon_code") @db.VarChar(50)
+  usageLimit         Int      @default(0) @map("usage_limit")
+  usedCount          Int      @default(0) @map("used_count")
+  genderUsageLimit   Json?    @map("gender_usage_limit")
+  perMemberLimit     Int      @default(1) @map("per_member_limit")
+  allowStacking      Boolean  @default(false) @map("allow_stacking")
+  status             String   @default("DRAFT") @db.VarChar(30)
+  createdById        String?  @map("created_by_id") @db.VarChar(36)
+  approvedById       String?  @map("approved_by_id") @db.VarChar(36)
+  rejectionReason    String?  @map("rejection_reason") @db.Text
+  analytics          Json? // { totalDiscountGiven, totalRevenueGenerated, timesClaimed }
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  coupons           Coupon[]
+  couponRedemptions CouponRedemption[]
+  referrals         Referral[]
+
+  @@index([status, startDate, endDate, priority])
+  @@map("campaigns")
+}
+
+model Coupon {
+  id                      String   @id @map("_id") @db.VarChar(36)
+  couponCode              String   @unique @map("coupon_code") @db.VarChar(50)
+  name                    String   @db.VarChar(150)
+  description             String?  @db.Text
+  discountType            String   @default("PERCENTAGE") @map("discount_type") @db.VarChar(30)
+  discountValue           Float    @map("discount_value")
+  applicablePlans         Json?    @map("applicable_plans") // string[]
+  startDate               DateTime @default(now()) @map("start_date")
+  expiryDate              DateTime @map("expiry_date")
+  usageLimit              Int      @default(0) @map("usage_limit")
+  usedCount               Int      @default(0) @map("used_count")
+  perMemberLimit          Int      @default(1) @map("per_member_limit")
+  minimumMembershipAmount Float    @default(0) @map("minimum_membership_amount")
+  newMemberOnly           Boolean  @default(false) @map("new_member_only")
+  existingMemberOnly      Boolean  @default(false) @map("existing_member_only")
+  gender                  String   @default("Any") @db.VarChar(20)
+  minAge                  Int?     @map("min_age")
+  maxAge                  Int?     @map("max_age")
+  maritalStatus           Json?    @map("marital_status")
+  verificationStatus      Json?    @map("verification_status")
+  location                Json?
+  qualification           Json?
+  campaignId              String?  @map("campaign_id") @db.VarChar(36)
+  isReferralReward        Boolean  @default(false) @map("is_referral_reward")
+  issuedToUserId          String?  @map("issued_to_user_id") @db.VarChar(36)
+  issuedToCandidateId     String?  @map("issued_to_candidate_id") @db.VarChar(50)
+  allowStacking           Boolean  @default(false) @map("allow_stacking")
+  status                  String   @default("ACTIVE") @db.VarChar(30)
+  createdById             String?  @map("created_by_id") @db.VarChar(36)
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  campaign      Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  redemptions   CouponRedemption[]
+  referrals     Referral[]
+  rewardRecords ReferralRewardRecord[]
+
+  @@index([status, expiryDate])
+  @@index([isReferralReward])
+  @@index([issuedToUserId])
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id             String   @id @map("_id") @db.VarChar(36)
+  couponId       String   @map("coupon_id") @db.VarChar(36)
+  couponCode     String   @map("coupon_code") @db.VarChar(50)
+  userId         String   @map("user_id") @db.VarChar(36)
+  candidateId    String?  @map("candidate_id") @db.VarChar(50)
+  campaignId     String?  @map("campaign_id") @db.VarChar(36)
+  planKey        String   @map("plan_key") @db.VarChar(100)
+  originalAmount Float    @map("original_amount")
+  discountAmount Float    @map("discount_amount")
+  finalAmount    Float    @map("final_amount")
+  paymentId      String?  @map("payment_id") @db.VarChar(150)
+  orderId        String?  @map("order_id") @db.VarChar(150)
+  redeemedAt     DateTime @default(now()) @map("redeemed_at")
+  status         String   @default("SUCCESS") @db.VarChar(30)
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  coupon   Coupon    @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([couponId, userId])
+  @@index([redeemedAt])
+  @@map("coupon_redemptions")
+}
+
+model Referral {
+  id                  String    @id @map("_id") @db.VarChar(36)
+  referrerUserId      String    @map("referrer_user_id") @db.VarChar(36)
+  referrerCandidateId String    @map("referrer_candidate_id") @db.VarChar(50)
+  referralCode        String    @map("referral_code") @db.VarChar(50)
+  referredUserId      String?   @unique @map("referred_user_id") @db.VarChar(36)
+  referredCandidateId String?   @map("referred_candidate_id") @db.VarChar(50)
+  source              String?   @default("direct_link") @db.VarChar(100)
+  ipAddress           String?   @map("ip_address") @db.VarChar(50)
+  userAgent           String?   @map("user_agent") @db.VarChar(500)
+  clickedAt           DateTime? @default(now()) @map("clicked_at")
+  registeredAt        DateTime? @map("registered_at")
+  qualifiedAt         DateTime? @map("qualified_at")
+  status              String    @default("CLICKED") @db.VarChar(30) // 'CLICKED' | 'REGISTERED' | 'QUALIFIED' | 'REWARDED' | 'REJECTED' | 'EXPIRED'
+  qualificationReason String?   @map("qualification_reason") @db.VarChar(255)
+  rewardStatus        String    @default("PENDING") @map("reward_status") @db.VarChar(30)
+  rewardRecordId      String?   @map("reward_record_id") @db.VarChar(36)
+  couponId            String?   @map("coupon_id") @db.VarChar(36)
+  campaignId          String?   @map("campaign_id") @db.VarChar(36)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  referrerUser User      @relation("ReferrerUser", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  referredUser User?     @relation("ReferredUser", fields: [referredUserId], references: [id], onDelete: SetNull)
+  coupon       Coupon?   @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([referrerUserId, status])
+  @@index([referrerCandidateId, status])
+  @@map("referrals")
+}
+
+model ReferralRewardConfig {
+  id                   String   @id @map("_id") @db.VarChar(36)
+  requiredReferrals    Int      @default(5) @map("required_referrals")
+  qualificationEvent   String   @default("REGISTERED") @map("qualification_event") @db.VarChar(50)
+  rewardType           String   @default("PERCENTAGE_DISCOUNT") @map("reward_type") @db.VarChar(50)
+  rewardValue          Float    @default(50) @map("reward_value")
+  rewardPlan           String?  @default("ALL") @map("reward_plan") @db.VarChar(100)
+  couponValidityDays   Int      @default(30) @map("coupon_validity_days")
+  isRecurringMilestone Boolean  @default(true) @map("is_recurring_milestone")
+  isActive             Boolean  @default(true) @map("is_active")
+  updatedById          String?  @map("updated_by_id") @db.VarChar(36)
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("referral_reward_configs")
+}
+
+model ReferralRewardRecord {
+  id          String   @id @map("_id") @db.VarChar(36)
+  userId      String   @map("user_id") @db.VarChar(36)
+  candidateId String   @map("candidate_id") @db.VarChar(50)
+  milestone   Int
+  rewardType  String   @map("reward_type") @db.VarChar(50)
+  rewardValue Float    @map("reward_value")
+  couponId    String?  @map("coupon_id") @db.VarChar(36)
+  couponCode  String?  @map("coupon_code") @db.VarChar(50)
+  status      String   @default("ISSUED") @db.VarChar(20) // 'ISSUED' | 'USED' | 'EXPIRED'
+  issuedAt    DateTime @default(now()) @map("issued_at")
+  expiryDate  DateTime @map("expiry_date")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coupon Coupon? @relation(fields: [couponId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, milestone])
+  @@index([candidateId])
+  @@map("referral_reward_records")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 9. PLATFORM CONFIGURATION & VISITS
+// ─────────────────────────────────────────────────────────────
+
+model Setting {
+  id                           String    @id @map("_id") @db.VarChar(36)
+  siteName                     String    @default("Wonderful Jodi") @map("site_name") @db.VarChar(100)
+  supportEmail                 String    @default("support@wonderfuljodi.com") @map("support_email") @db.VarChar(191)
+  supportPhone                 String    @default("+91 096075 59547") @map("support_phone") @db.VarChar(50)
+  tollFreeNumber               String    @default("+91 096075 59547") @map("toll_free_number") @db.VarChar(50)
+  officeAddress                String    @default("A303, Gera Imperium Gateway, Nashik Phata, PCMC, Pune, Maharashtra 411034") @map("office_address") @db.VarChar(500)
+  maintenanceMode              Boolean   @default(false) @map("maintenance_mode")
+  maintenanceBanner            Boolean   @default(false) @map("maintenance_banner")
+  maintenanceTitle             String    @default("We'll Be Back Soon") @map("maintenance_title") @db.VarChar(200)
+  maintenanceMessage           String    @default("Wonderful Jodi is currently undergoing scheduled maintenance. Please check back shortly.") @map("maintenance_message") @db.Text
+  maintenanceEstimatedEndTime  DateTime? @map("maintenance_estimated_end_time")
+  allowAdminAccess             Boolean   @default(true) @map("allow_admin_access")
+  maintenanceUpdatedBy         String?   @default("") @map("maintenance_updated_by") @db.VarChar(150)
+  allowNewRegistrations        Boolean   @default(true) @map("allow_new_registrations")
+  requireEmailVerification     Boolean   @default(false) @map("require_email_verification")
+  requireManualProfileApproval Boolean   @default(true) @map("require_manual_profile_approval")
+  currency                     String    @default("INR") @db.VarChar(10)
+  razorpayLiveMode             Boolean   @default(false) @map("razorpay_live_mode")
+  minAgeMale                   Int       @default(21) @map("min_age_male")
+  minAgeFemale                 Int       @default(18) @map("min_age_female")
+  maxPhotoUploadLimit          Int       @default(6) @map("max_photo_upload_limit")
+  createdAt                    DateTime  @default(now()) @map("created_at")
+  updatedAt                    DateTime  @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
+model DailyUserVisit {
+  id             String   @id @map("_id") @db.VarChar(36)
+  userId         String   @map("user_id") @db.VarChar(36)
+  visitDate      String   @map("visit_date") @db.VarChar(10) // YYYY-MM-DD
+  firstVisitedAt DateTime @default(now()) @map("first_visited_at")
+  lastVisitedAt  DateTime @default(now()) @map("last_visited_at")
+  visitCount     Int      @default(1) @map("visit_count")
+  ipAddress      String?  @map("ip_address") @db.VarChar(50)
+  userAgent      String?  @map("user_agent") @db.VarChar(500)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, visitDate])
+  @@index([visitDate, userId])
+  @@map("daily_user_visits")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 10. CONTENT: AWARDS, BLOGS, CAREERS, BIODATA, INSTITUTIONS
+// ─────────────────────────────────────────────────────────────
+
+model Award {
+  id               String    @id @map("_id") @db.VarChar(36)
+  name             String    @db.VarChar(200)
+  slug             String    @unique @db.VarChar(200)
+  logo             String    @db.VarChar(500)
+  shortDescription String    @map("short_description") @db.VarChar(500)
+  fullDescription  String?   @default("") @map("full_description") @db.Text
+  awardYear        Int       @map("award_year")
+  category         String?   @default("Excellence in Matrimony") @db.VarChar(150)
+  organization     String    @db.VarChar(200)
+  galleryImages    Json?     @map("gallery_images") // string[]
+  websiteUrl       String?   @map("website_url") @db.VarChar(500)
+  displayOrder     Int       @default(0) @map("display_order")
+  isActive         Boolean   @default(true) @map("is_active")
+  isFeatured       Boolean   @default(true) @map("is_featured")
+  isDeleted        Boolean   @default(false) @map("is_deleted")
+  deletedAt        DateTime? @map("deleted_at")
+  deletedById      String?   @map("deleted_by_id") @db.VarChar(36)
+  createdById      String?   @map("created_by_id") @db.VarChar(36)
+  updatedById      String?   @map("updated_by_id") @db.VarChar(36)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([isActive, isDeleted, displayOrder, awardYear])
+  @@index([isFeatured, isActive, isDeleted, displayOrder])
+  @@map("awards")
+}
+
+model BlogPost {
+  id               String    @id @map("_id") @db.VarChar(36)
+  title            String    @db.VarChar(250)
+  slug             String    @unique @db.VarChar(250)
+  category         String    @db.VarChar(100)
+  excerpt          String    @db.Text
+  content          String    @db.LongText
+  featuredImageUrl String?   @map("featured_image_url") @db.VarChar(500)
+  authorName       String    @default("Wonderful Jodi Editorial Team") @map("author_name") @db.VarChar(150)
+  authorRole       String    @default("Medical Matrimony Consultant") @map("author_role") @db.VarChar(150)
+  authorAvatarUrl  String?   @map("author_avatar_url") @db.VarChar(500)
+  readingTime      String    @default("5 min read") @map("reading_time") @db.VarChar(50)
+  status           String    @default("DRAFT") @db.VarChar(30) // 'DRAFT' | 'PUBLISHED' | 'ARCHIVED'
+  isFeatured       Boolean   @default(false) @map("is_featured")
+  tags             Json? // string[]
+  viewCount        Int       @default(0) @map("view_count")
+  publishedAt      DateTime? @map("published_at")
+  createdById      String?   @map("created_by_id") @db.VarChar(36)
+  updatedById      String?   @map("updated_by_id") @db.VarChar(36)
+  isDeleted        Boolean   @default(false) @map("is_deleted")
+  deletedAt        DateTime? @map("deleted_at")
+  deletedById      String?   @map("deleted_by_id") @db.VarChar(36)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, isDeleted, publishedAt])
+  @@index([category, status, isDeleted])
+  @@index([isFeatured, status, isDeleted])
+  @@map("blog_posts")
+}
+
+model JobOpening {
+  id                  String    @id @map("_id") @db.VarChar(36)
+  title               String    @db.VarChar(150)
+  slug                String    @unique @db.VarChar(150)
+  department          String    @db.VarChar(100)
+  location            String    @db.VarChar(150)
+  workMode            String    @default("On-site") @map("work_mode") @db.VarChar(50)
+  employmentType      String    @default("Full-time") @map("employment_type") @db.VarChar(50)
+  experience          String?   @default("") @db.VarChar(100)
+  salaryRange         String?   @default("") @map("salary_range") @db.VarChar(100)
+  shortDescription    String    @map("short_description") @db.VarChar(300)
+  fullDescription     String    @map("full_description") @db.Text
+  responsibilities    Json? // string[]
+  requirements        Json? // string[]
+  qualifications      Json? // string[]
+  skills              Json? // string[]
+  benefits            Json? // string[]
+  applicationEmail    String?   @default("careers@wonderfuljodi.com") @map("application_email") @db.VarChar(191)
+  applicationUrl      String?   @default("") @map("application_url") @db.VarChar(500)
+  applicationDeadline DateTime? @map("application_deadline")
+  status              String    @default("OPEN") @db.VarChar(30) // 'OPEN' | 'CLOSED' | 'DRAFT' | 'ARCHIVED'
+  isPublished         Boolean   @default(true) @map("is_published")
+  displayOrder        Int       @default(0) @map("display_order")
+  createdBy           String?   @default("admin") @map("created_by") @db.VarChar(100)
+  updatedBy           String?   @default("admin") @map("updated_by") @db.VarChar(100)
+  isDeleted           Boolean   @default(false) @map("is_deleted")
+  deletedAt           DateTime? @map("deleted_at")
+  deletedBy           String?   @map("deleted_by") @db.VarChar(100)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  applications JobApplication[]
+
+  @@index([isDeleted, isPublished, status, displayOrder, createdAt])
+  @@index([slug, isDeleted])
+  @@index([department, isDeleted])
+  @@map("job_openings")
+}
+
+model JobApplication {
+  id              String   @id @map("_id") @db.VarChar(36)
+  jobId           String   @map("job_id") @db.VarChar(36)
+  jobTitle        String   @map("job_title") @db.VarChar(150)
+  candidateName   String   @map("candidate_name") @db.VarChar(100)
+  email           String   @db.VarChar(191)
+  mobile          String   @db.VarChar(30)
+  experienceYears String?  @default("") @map("experience_years") @db.VarChar(50)
+  resumeUrl       String?  @default("") @map("resume_url") @db.VarChar(500)
+  coverLetter     String?  @default("") @map("cover_letter") @db.Text
+  status          String   @default("RECEIVED") @db.VarChar(30)
+  adminNotes      String?  @default("") @map("admin_notes") @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  job JobOpening @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt])
+  @@index([email, jobId])
+  @@map("job_applications")
+}
+
+model Biodata {
+  id                 String    @id @map("_id") @db.VarChar(36)
+  userId             String    @map("user_id") @db.VarChar(36)
+  profileId          String    @map("profile_id") @db.VarChar(36)
+  publicId           String    @unique @map("public_id") @db.VarChar(50)
+  title              String    @default("My Doctor Matrimony Biodata") @db.VarChar(200)
+  templateId         String    @default("doctor_professional") @map("template_id") @db.VarChar(50)
+  status             String    @default("DRAFT") @db.VarChar(30)
+  personalDetails    Json      @map("personal_details")
+  location           Json
+  education          Json
+  medicalCareer      Json      @map("medical_career")
+  family             Json
+  lifestyle          Json
+  horoscope          Json
+  partnerPreferences Json      @map("partner_preferences")
+  contactDetails     Json      @map("contact_details")
+  photoUrl           String?   @map("photo_url") @db.VarChar(500)
+  additionalPhotos   Json?     @map("additional_photos")
+  sectionVisibility  Json      @map("section_visibility")
+  generatedPdfUrl    String?   @map("generated_pdf_url") @db.VarChar(500)
+  pdfGeneratedAt     DateTime? @map("pdf_generated_at")
+  pdfHash            String?   @map("pdf_hash") @db.VarChar(100)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([profileId])
+  @@index([templateId])
+  @@index([status])
+  @@map("biodatas")
+}
+
+model Institution {
+  id             String   @id @map("_id") @db.VarChar(36)
+  name           String   @db.VarChar(250)
+  normalizedName String   @unique @map("normalized_name") @db.VarChar(250)
+  type           String   @default("COLLEGE") @db.VarChar(50)
+  city           String?  @default("") @db.VarChar(100)
+  state          String?  @default("") @db.VarChar(100)
+  country        String?  @default("India") @db.VarChar(100)
+  usageCount     Int      @default(1) @map("usage_count")
+  createdById    String?  @map("created_by_id") @db.VarChar(36)
+  isVerified     Boolean  @default(false) @map("is_verified")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([name])
+  @@index([usageCount, name])
+  @@index([isVerified])
+  @@map("institutions")
+}
+
+model KundaliReport {
+  id                     String   @id @map("_id") @db.VarChar(36)
+  user1Id                String?  @map("user1_id") @db.VarChar(36)
+  user2Id                String?  @map("user2_id") @db.VarChar(36)
+  partner1ProfileId      String?  @map("partner1_profile_id") @db.VarChar(36)
+  partner2ProfileId      String?  @map("partner2_profile_id") @db.VarChar(36)
+  user1BirthDetails      Json     @map("user1_birth_details")
+  user2BirthDetails      Json     @map("user2_birth_details")
+  birthDataVersion       String   @map("birth_data_version") @db.VarChar(100)
+  gunaScore              Float    @map("guna_score")
+  varnaScore             Float    @map("varna_score")
+  vashyaScore            Float    @map("vashya_score")
+  taraScore              Float    @map("tara_score")
+  yoniScore              Float    @map("yoni_score")
+  grahaMaitriScore       Float    @map("graha_maitri_score")
+  ganaScore              Float    @map("gana_score")
+  bhakootScore           Float    @map("bhakoot_score")
+  nadiScore              Float    @map("nadi_score")
+  manglikStatusUser1     String?  @default("Unable to determine") @map("manglik_status_user1") @db.VarChar(100)
+  manglikStatusUser2     String?  @default("Unable to determine") @map("manglik_status_user2") @db.VarChar(100)
+  manglikAnalysis        String?  @default("") @map("manglik_analysis") @db.Text
+  compatibilityIndicator String   @map("compatibility_indicator") @db.VarChar(50)
+  summary                String   @db.Text
+  doshas                 Json? // string[]
+  ashtakootaDetails      Json?    @map("ashtakoota_details")
+  dimensions             Json?
+  isCached               Boolean  @default(false) @map("is_cached")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  user1    User?    @relation("KundaliUser1", fields: [user1Id], references: [id], onDelete: SetNull)
+  user2    User?    @relation("KundaliUser2", fields: [user2Id], references: [id], onDelete: SetNull)
+  partner1 Profile? @relation("KundaliPartner1", fields: [partner1ProfileId], references: [id], onDelete: SetNull)
+  partner2 Profile? @relation("KundaliPartner2", fields: [partner2ProfileId], references: [id], onDelete: SetNull)
+
+  @@index([user1Id, birthDataVersion])
+  @@index([user1Id, user2Id])
+  @@map("kundali_reports")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 11. LOCATIONS & MASTER DATA
+// ─────────────────────────────────────────────────────────────
+
+model Country {
+  id         String   @id @map("_id") @db.VarChar(36)
+  name       String   @unique @db.VarChar(150)
+  code       String   @unique @db.VarChar(10)
+  isoCode    String   @map("iso_code") @db.VarChar(10)
+  phoneCode  String?  @map("phone_code") @db.VarChar(20)
+  isActive   Boolean  @default(true) @map("is_active")
+  sortOrder  Int      @default(999) @map("sort_order")
+  sourceType String   @default("GOVERNMENT") @map("source_type") @db.VarChar(50)
+  source     String   @default("ISO-3166 / Census India") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  states    State[]
+  districts District[]
+
+  @@map("countries")
+}
+
+model State {
+  id         String   @id @map("_id") @db.VarChar(36)
+  countryId  String   @map("country_id") @db.VarChar(36)
+  name       String   @db.VarChar(150)
+  code       String   @db.VarChar(20)
+  type       String   @default("State") @db.VarChar(50)
+  lgdCode    String?  @map("lgd_code") @db.VarChar(50)
+  censusCode String?  @map("census_code") @db.VarChar(50)
+  isActive   Boolean  @default(true) @map("is_active")
+  sortOrder  Int      @default(999) @map("sort_order")
+  sourceType String   @default("GOVERNMENT") @map("source_type") @db.VarChar(50)
+  source     String   @default("LGD / Census India") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  country      Country       @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  districts    District[]
+  subDistricts SubDistrict[]
+  cities       City[]
+  villages     Village[]
+
+  @@unique([countryId, name])
+  @@index([code])
+  @@index([lgdCode])
+  @@map("states")
+}
+
+model District {
+  id           String   @id @map("_id") @db.VarChar(36)
+  stateId      String   @map("state_id") @db.VarChar(36)
+  countryId    String   @map("country_id") @db.VarChar(36)
+  name         String   @db.VarChar(150)
+  code         String?  @db.VarChar(20)
+  lgdCode      String?  @map("lgd_code") @db.VarChar(50)
+  censusCode   String?  @map("census_code") @db.VarChar(50)
+  headquarters String?  @db.VarChar(150)
+  isActive     Boolean  @default(true) @map("is_active")
+  sourceType   String   @default("GOVERNMENT") @map("source_type") @db.VarChar(50)
+  source       String   @default("Local Government Directory (LGD)") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  state        State         @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  country      Country       @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  subDistricts SubDistrict[]
+  cities       City[]
+  villages     Village[]
+
+  @@unique([stateId, name])
+  @@index([lgdCode])
+  @@map("districts")
+}
+
+model SubDistrict {
+  id         String   @id @map("_id") @db.VarChar(36)
+  districtId String   @map("district_id") @db.VarChar(36)
+  stateId    String   @map("state_id") @db.VarChar(36)
+  name       String   @db.VarChar(150)
+  code       String?  @db.VarChar(20)
+  type       String   @default("Taluka") @db.VarChar(50)
+  lgdCode    String?  @map("lgd_code") @db.VarChar(50)
+  censusCode String?  @map("census_code") @db.VarChar(50)
+  isActive   Boolean  @default(true) @map("is_active")
+  sourceType String   @default("GOVERNMENT") @map("source_type") @db.VarChar(50)
+  source     String   @default("Local Government Directory (LGD)") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  district District  @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  state    State     @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  cities   City[]
+  villages Village[]
+
+  @@unique([districtId, name])
+  @@index([lgdCode])
+  @@map("sub_districts")
+}
+
+model City {
+  id            String   @id @map("_id") @db.VarChar(36)
+  districtId    String   @map("district_id") @db.VarChar(36)
+  stateId       String   @map("state_id") @db.VarChar(36)
+  subDistrictId String?  @map("sub_district_id") @db.VarChar(36)
+  name          String   @db.VarChar(150)
+  code          String?  @db.VarChar(20)
+  type          String   @default("City") @db.VarChar(50)
+  pincode       String?  @db.VarChar(20)
+  lgdCode       String?  @map("lgd_code") @db.VarChar(50)
+  isActive      Boolean  @default(true) @map("is_active")
+  sortOrder     Int      @default(999) @map("sort_order")
+  sourceType    String   @default("GOVERNMENT") @map("source_type") @db.VarChar(50)
+  source        String   @default("Local Government Directory (LGD) / ULB Master") @db.VarChar(255)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  district    District     @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  state       State        @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  subDistrict SubDistrict? @relation(fields: [subDistrictId], references: [id], onDelete: SetNull)
+
+  @@index([districtId, name])
+  @@index([name])
+  @@index([pincode])
+  @@map("cities")
+}
+
+model Village {
+  id            String   @id @map("_id") @db.VarChar(36)
+  subDistrictId String   @map("sub_district_id") @db.VarChar(36)
+  districtId    String   @map("district_id") @db.VarChar(36)
+  stateId       String   @map("state_id") @db.VarChar(36)
+  name          String   @db.VarChar(150)
+  code          String?  @db.VarChar(20)
+  villageCode   String?  @map("village_code") @db.VarChar(50)
+  lgdCode       String?  @map("lgd_code") @db.VarChar(50)
+  pincode       String?  @db.VarChar(20)
+  isActive      Boolean  @default(true) @map("is_active")
+  sourceType    String   @default("GOVERNMENT") @map("source_type") @db.VarChar(50)
+  source        String   @default("Local Government Directory (LGD)") @db.VarChar(255)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  subDistrict SubDistrict @relation(fields: [subDistrictId], references: [id], onDelete: Cascade)
+  district    District    @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  state       State       @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+  @@index([subDistrictId, name])
+  @@index([name])
+  @@map("villages")
+}
+
+model LocationImport {
+  id                   String    @id @map("_id") @db.VarChar(36)
+  importId             String    @unique @map("import_id") @db.VarChar(50)
+  fileName             String    @map("file_name") @db.VarChar(255)
+  fileSize             Int       @map("file_size")
+  fileMimeType         String    @default("application/pdf") @map("file_mime_type") @db.VarChar(50)
+  uploadedById         String?   @map("uploaded_by_id") @db.VarChar(36)
+  adminEmail           String    @map("admin_email") @db.VarChar(191)
+  status               String    @default("UPLOADED") @db.VarChar(30)
+  source               String    @default("Local Government Directory (LGD) PDF") @db.VarChar(255)
+  sourceVersion        String?   @map("source_version") @db.VarChar(50)
+  totalExtracted       Int       @default(0) @map("total_extracted")
+  validRecords         Int       @default(0) @map("valid_records")
+  duplicateRecords     Int       @default(0) @map("duplicate_records")
+  invalidRecords       Int       @default(0) @map("invalid_records")
+  missingStateRecords  Int       @default(0) @map("missing_state_records")
+  missingDistrictRecords Int     @default(0) @map("missing_district_records")
+  missingCityRecords   Int       @default(0) @map("missing_city_records")
+  insertedCount        Int       @default(0) @map("inserted_count")
+  updatedCount         Int       @default(0) @map("updated_count")
+  skippedCount         Int       @default(0) @map("skipped_count")
+  failedCount          Int       @default(0) @map("failed_count")
+  extractedPreview     Json?     @map("extracted_preview")
+  fullExtractedRecords Json?     @map("full_extracted_records")
+  importErrors         Json?     @map("import_errors")
+  startedAt            DateTime  @default(now()) @map("started_at")
+  completedAt          DateTime? @map("completed_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("location_imports")
+}
+
+model Language {
+  id          String   @id @map("_id") @db.VarChar(36)
+  name        String   @unique @db.VarChar(100)
+  code        String   @unique @db.VarChar(20)
+  nativeNames Json?    @map("native_names") // string[]
+  isScheduled Boolean  @default(false) @map("is_scheduled")
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(999) @map("sort_order")
+  sourceType  String   @default("GOVERNMENT") @map("source_type") @db.VarChar(50)
+  source      String   @default("Eighth Schedule to the Constitution of India") @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("languages")
+}
+
+model Religion {
+  id        String   @id @map("_id") @db.VarChar(36)
+  name      String   @unique @db.VarChar(100)
+  code      String   @unique @db.VarChar(50)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(999) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  castes Caste[]
+
+  @@map("religions")
+}
+
+model Caste {
+  id              String    @id @map("_id") @db.VarChar(36)
+  religionId      String    @map("religion_id") @db.VarChar(36)
+  name            String    @db.VarChar(150)
+  category        String    @default("Not Specified") @db.VarChar(50)
+  aliases         Json? // string[]
+  source          String    @default("Community Master") @db.VarChar(255)
+  sourceType      String    @default("COMMUNITY_MASTER") @map("source_type") @db.VarChar(50)
+  sourceReference String?   @map("source_reference") @db.VarChar(255)
+  lastVerifiedAt  DateTime? @default(now()) @map("last_verified_at")
+  version         Int       @default(1)
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  religion  Religion   @relation(fields: [religionId], references: [id], onDelete: Cascade)
+  subCastes SubCaste[]
+
+  @@unique([religionId, name])
+  @@map("castes")
+}
+
+model SubCaste {
+  id              String    @id @map("_id") @db.VarChar(36)
+  casteId         String    @map("caste_id") @db.VarChar(36)
+  name            String    @db.VarChar(150)
+  aliases         Json? // string[]
+  source          String    @default("Community Master") @db.VarChar(255)
+  sourceType      String    @default("COMMUNITY_MASTER") @map("source_type") @db.VarChar(50)
+  sourceReference String?   @map("source_reference") @db.VarChar(255)
+  lastVerifiedAt  DateTime? @default(now()) @map("last_verified_at")
+  version         Int       @default(1)
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  caste Caste @relation(fields: [casteId], references: [id], onDelete: Cascade)
+
+  @@unique([casteId, name])
+  @@map("sub_castes")
+}
+
+model Counter {
+  id        String   @id @map("_id") @db.VarChar(64)
+  seq       Int      @default(100000)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("counters")
+}

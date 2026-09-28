@@ -349,11 +349,11 @@ function AdminResetPasswordForm() {
           {submitting ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Updating Password...</span>
+              <span>Resetting Password...</span>
             </>
           ) : (
             <>
-              <span>Save & Sign In</span>
+              <span>Reset Password</span>
               <ArrowRight className="w-4 h-4" />
             </>
           )}
@@ -365,7 +365,7 @@ function AdminResetPasswordForm() {
             className="text-xs text-slate-400 hover:text-white transition inline-flex items-center gap-1.5"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Cancel and Return to Sign In</span>
+            <span>Back to Admin Login</span>
           </Link>
         </div>
       </form>

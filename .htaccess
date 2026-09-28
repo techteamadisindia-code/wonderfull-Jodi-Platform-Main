@@ -1,0 +1,11 @@
+# ═════════════════════════════════════════════════════════════════════
+# Wonderful Jodi — Hostinger LiteSpeed / Apache Configuration
+# ═════════════════════════════════════════════════════════════════════
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+</IfModule>
+
+# Allow index.html as directory default to prevent 403 Forbidden
+DirectoryIndex index.html index.php

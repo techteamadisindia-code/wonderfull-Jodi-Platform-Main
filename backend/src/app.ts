@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import path from 'path';
+import http from 'http';
 import { connectDatabase } from './config/database';
 import authRoutes from './routes/authRoutes';
 import profileRoutes from './routes/profileRoutes';
@@ -195,6 +196,68 @@ app.use('/api/awards', publicAwardRouter);
 app.use('/api/admin/contact-inquiries', adminContactInquiryRoutes);
 app.use('/api/admin/awards', adminAwardRouter);
 
+// ─── FRONTEND PROXY (Next.js Standalone) ───
+// For any non-API, non-socket, non-upload request, proxy to Next.js server
+const FRONTEND_PORT = Number(process.env.FRONTEND_PORT) || 3000;
+app.use((req, res, next) => {
+  if (
+    req.path.startsWith('/api') ||
+    req.path.startsWith('/uploads') ||
+    req.path.startsWith('/socket.io') ||
+    req.path === '/health'
+  ) {
+    return next();
+  }
+
+  const options: http.RequestOptions = {
+    hostname: '127.0.0.1',
+    port: FRONTEND_PORT,
+    path: req.url,
+    method: req.method,
+    headers: {
+      ...req.headers,
+      host: req.headers.host || 'localhost',
+      'x-forwarded-for': (req.headers['x-forwarded-for'] as string) || req.ip || req.socket.remoteAddress,
+      'x-forwarded-proto': req.secure ? 'https' : 'http',
+    },
+  };
+
+  const proxyReq = http.request(options, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+    proxyRes.pipe(res, { end: true });
+  });
+
+  proxyReq.on('error', () => {
+    if (!res.headersSent) {
+      res.status(503).send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="3">
+  <title>Wonderful Jodi — Initializing</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #fff5f7; color: #333; }
+    .card { background: white; padding: 40px 50px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); text-align: center; max-width: 480px; }
+    h1 { color: #e11d48; margin-bottom: 12px; font-size: 24px; font-weight: 700; }
+    p { color: #666; line-height: 1.6; margin-bottom: 20px; font-size: 15px; }
+    .spinner { width: 36px; height: 36px; border: 4px solid #fecdd3; border-top-color: #e11d48; border-radius: 50%; animation: spin 1s infinite linear; margin: 0 auto 20px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner"></div>
+    <h1>Wonderful Jodi</h1>
+    <p>The platform services are initializing. This page will refresh automatically in a few seconds...</p>
+  </div>
+</body>
+</html>`);
+    }
+  });
+
+  req.pipe(proxyReq, { end: true });
+});
+
 // Centralized Error Handler
 app.use(errorHandler);
 
@@ -207,8 +270,7 @@ connectDatabase()
     await seedDefaultInstitutionsIfEmpty();
   })
   .catch((error) => {
-    console.error('Database connection failed:', error);
-    process.exit(1);
+    console.error('Database connection failed (server running in degraded mode):', error);
   });
 
 export default app;

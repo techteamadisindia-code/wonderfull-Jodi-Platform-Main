@@ -6,3 +6,6 @@ export * from './InteractionRepository';
 export * from './ChatRepository';
 export * from './NotificationRepository';
 export * from './MasterDataRepository';
+export * from './AdminRepository';
+export * from './VerificationRepository';
+export * from './ContentRepository';

@@ -18,7 +18,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-const PUBLIC_PORT = parseInt(process.env.PORT, 10) || 5000;
+const PUBLIC_PORT = parseInt(process.env.PORT, 10) || 3000;
 
 // If Hostinger gives us port 3000, use 3001 for Next.js.
 // Otherwise use 3000 internally.

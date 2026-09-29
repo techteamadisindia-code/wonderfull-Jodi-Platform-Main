@@ -8,7 +8,7 @@
     "frontend"
   ],
   "scripts": {
-    "preinstall": "npm --prefix backend install --legacy-peer-deps && npm --prefix frontend install --legacy-peer-deps",
+    "preinstall": "npm --prefix backend install --include=dev --legacy-peer-deps && npm --prefix frontend install --include=dev --legacy-peer-deps",
     "build:backend": "npm --prefix backend run build",
     "build:frontend": "npm --prefix frontend run build",
     "postbuild:frontend": "node -e \"const fs=require('fs'),p=require('path');const src=p.join('frontend','.next','static');const dst=p.join('frontend','.next','standalone','frontend','.next','static');if(fs.existsSync(src)){fs.cpSync(src,dst,{recursive:true});console.log('Copied .next/static to standalone')}\" && node -e \"const fs=require('fs'),p=require('path');const src=p.join('frontend','public');const dst=p.join('frontend','.next','standalone','frontend','public');if(fs.existsSync(src)){fs.cpSync(src,dst,{recursive:true});console.log('Copied public/ to standalone')}\"",
@@ -20,7 +20,7 @@
     "start:backend": "npm --prefix backend run start",
     "start:frontend": "npm --prefix frontend run start",
     "start:all": "npx -y concurrently \"npm --prefix backend run start\" \"npm --prefix frontend run start\"",
-    "install:all": "npm --prefix backend install && npm --prefix frontend install"
+    "install:all": "npm --prefix backend install --include=dev --legacy-peer-deps && npm --prefix frontend install --include=dev --legacy-peer-deps"
   },
   "dependencies": {
     "typescript": "^5.5.4"

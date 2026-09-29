@@ -7,10 +7,15 @@
     "backend",
     "frontend"
   ],
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
+    "preinstall": "npm --prefix backend install --include=dev --legacy-peer-deps && npm --prefix frontend install --include=dev --legacy-peer-deps",
     "build:backend": "npm --prefix backend run build",
     "build:frontend": "npm --prefix frontend run build",
-    "postbuild:frontend": "node -e \"const fs=require('fs'),p=require('path');const src=p.join('frontend','.next','static');const dst=p.join('frontend','.next','standalone','frontend','.next','static');if(fs.existsSync(src)){fs.cpSync(src,dst,{recursive:true});console.log('Copied .next/static to standalone')}\" && node -e \"const fs=require('fs'),p=require('path');const src=p.join('frontend','public');const dst=p.join('frontend','.next','standalone','frontend','public');if(fs.existsSync(src)){fs.cpSync(src,dst,{recursive:true});console.log('Copied public/ to standalone')}\"",
+    "postbuild:frontend": "node -e \"const fs=require('fs'),p=require('path');const src=p.join('frontend','.next','static');const dst=p.join('frontend','.next','standalone','frontend','.next','static');if(fs.existsSync(src)){fs.mkdirSync(dst,{recursive:true});fs.cpSync(src,dst,{recursive:true});}\"",
     "build": "npm run build:backend && npm run build:frontend",
     "dev": "npx -y concurrently --kill-others-on-fail -n \"backend,frontend\" -c \"bgBlue.bold,bgMagenta.bold\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "dev:backend": "npm --prefix backend run dev",

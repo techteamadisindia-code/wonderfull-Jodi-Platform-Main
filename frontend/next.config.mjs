@@ -13,7 +13,12 @@ const nextConfig = {
     ],
   },
   async rewrites() {
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+    const rawBackendUrl =
+      process.env.NEXT_PUBLIC_BACKEND_URL ||
+      (process.env.NODE_ENV === 'production'
+        ? 'https://wonderfuljodi.com'
+        : 'http://localhost:5000');
+    const backendUrl = rawBackendUrl.trim().replace(/\/+$/, '');
     return [
       {
         source: '/api/:path*',

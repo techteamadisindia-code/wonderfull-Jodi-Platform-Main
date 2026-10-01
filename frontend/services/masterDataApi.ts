@@ -1,4 +1,4 @@
-import { apiClient } from './api';
+import { apiClient, getApiBaseUrl } from './api';
 
 export interface CountryItem {
   _id: string;
@@ -389,7 +389,7 @@ export async function fetchImportHistory(
 }
 
 export function getImportErrorReportUrl(importId: string): string {
-  const baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+  const baseURL = getApiBaseUrl();
   return `${baseURL}/admin/master-data/import-history/${importId}/error-report`;
 }
 

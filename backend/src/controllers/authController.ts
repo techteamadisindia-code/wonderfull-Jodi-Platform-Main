@@ -543,7 +543,12 @@ export async function forgotPassword(req: Request, res: Response, next: NextFunc
         isUsed: false,
       });
 
-      const clientOrigin = req.get('origin') || process.env.FRONTEND_URL || 'http://localhost:3000';
+      const clientOrigin =
+        req.get('origin') ||
+        process.env.FRONTEND_URL ||
+        (process.env.NODE_ENV === 'production'
+          ? 'https://wonderfuljodi.com'
+          : 'http://localhost:3000');
       const frontendBaseUrl = clientOrigin.replace(/\/$/, '');
       const resetUrl = `${frontendBaseUrl}/reset-password?token=${rawToken}`;
 

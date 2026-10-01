@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { HeroSearchBar } from '../components/HeroSearchBar';
 import { FeaturedProfilesSection } from '../components/FeaturedProfilesSection';
 import { WeddingSearch } from '../components/WeddingSearch';
@@ -201,12 +202,13 @@ export default function HomePage() {
             {/* Right Column - Traditional Indian Wedding Couple Image (Clean Transparent Cutout - No Shadows) */}
             <div className="lg:col-span-6 flex justify-center lg:justify-end items-center relative mt-3 lg:mt-0 bg-transparent shadow-none drop-shadow-none">
               <div className="relative z-10 w-full flex items-center justify-center lg:justify-end bg-transparent shadow-none drop-shadow-none [filter:none]">
-                <img
+                <Image
                   src="/images/hero-couple-wedding.png"
                   alt="Wonderful Jodi Traditional Indian Wedding Couple"
+                  width={1024}
+                  height={935}
+                  priority
                   className="w-full h-auto max-w-[380px] sm:max-w-[460px] md:max-w-[500px] lg:max-w-[580px] xl:max-w-[620px] object-contain select-none bg-transparent shadow-none drop-shadow-none [filter:none]"
-                  loading="eager"
-                  fetchPriority="high"
                 />
               </div>
             </div>
@@ -299,11 +301,13 @@ export default function HomePage() {
               />
 
               <div className="relative z-10 w-full max-w-[280px] sm:max-w-[360px] lg:max-w-[400px] flex items-center justify-center">
-                <img
+                <Image
                   src="/images/a_high_resolution_studio_like_portrait_couple_photo.png"
                   alt="Wonderful Jodi Verified Couple"
-                  className="w-full h-auto max-h-[260px] sm:max-h-[360px] lg:max-h-[440px] object-contain drop-shadow-[0_8px_20px_rgba(180,83,9,0.1)] transition-transform duration-500 hover:scale-[1.01]"
+                  width={1024}
+                  height={853}
                   loading="lazy"
+                  className="w-full h-auto max-h-[260px] sm:max-h-[360px] lg:max-h-[440px] object-contain drop-shadow-[0_8px_20px_rgba(180,83,9,0.1)] transition-transform duration-500 hover:scale-[1.01]"
                 />
               </div>
             </div>

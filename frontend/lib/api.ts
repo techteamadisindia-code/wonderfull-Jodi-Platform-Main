@@ -3,32 +3,9 @@ import { SearchResult } from '../types/profile';
 
 const AUTH_TOKEN_KEY = 'wonderfuljodi_token';
 
-/**
- * Dynamically resolves the API base URL for LAN & client access
- */
-export function getApiBaseUrl(): string {
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    return `${process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '')}/api`;
-  }
+import { getApiBaseUrl, normalizeApiUrl } from '../services/api';
 
-  if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    const protocol = window.location.protocol;
-    if (
-      process.env.NODE_ENV === 'production' &&
-      !/^(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)$/.test(
-        hostname
-      )
-    ) {
-      return '/api';
-    }
-    return `${protocol}//${hostname}:5000/api`;
-  }
-
-  return process.env.NEXT_PUBLIC_BACKEND_URL
-    ? `${process.env.NEXT_PUBLIC_BACKEND_URL.replace(/\/$/, '')}/api`
-    : 'http://localhost:5000/api';
-}
+export { getApiBaseUrl, normalizeApiUrl };
 
 const api = axios.create({
   baseURL: getApiBaseUrl(),

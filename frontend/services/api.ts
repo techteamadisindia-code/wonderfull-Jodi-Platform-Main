@@ -4,14 +4,26 @@ const ADMIN_TOKEN_KEY = 'wonderfuljodi_admin_token';
 const USER_TOKEN_KEY = 'wonderfuljodi_token';
 
 /**
+ * Normalizes an API URL to ensure no trailing slashes and avoids duplicate /api suffixes.
+ */
+export function normalizeApiUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim().replace(/\/+$/, '');
+  return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
+}
+
+/**
  * Dynamically resolves the API base URL:
- * 1. Explicit NEXT_PUBLIC_API_URL (if provided)
+ * 1. Explicit NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL (if provided)
  * 2. In browser (LAN/dev mode): connects directly to host PC on port 5000 (e.g. http://192.168.1.102:5000/api)
  * 3. Fallback to /api for production relative paths or SSR
  */
 export function getApiBaseUrl(): string {
   if (process.env.NEXT_PUBLIC_API_URL) {
-    return `${process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '')}/api`;
+    return normalizeApiUrl(process.env.NEXT_PUBLIC_API_URL);
+  }
+
+  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
+    return normalizeApiUrl(process.env.NEXT_PUBLIC_BACKEND_URL);
   }
 
   if (typeof window !== 'undefined') {
@@ -30,8 +42,8 @@ export function getApiBaseUrl(): string {
     return `${protocol}//${hostname}:5000/api`;
   }
 
-  return process.env.NEXT_PUBLIC_BACKEND_URL
-    ? `${process.env.NEXT_PUBLIC_BACKEND_URL.replace(/\/$/, '')}/api`
+  return process.env.NODE_ENV === 'production'
+    ? 'https://wonderfuljodi.com/api'
     : 'http://localhost:5000/api';
 }
 

@@ -90,8 +90,16 @@ function launchNextServer() {
          * Express through localhost, but browser-side code
          * must use the public domain.
          */
+        NEXT_PUBLIC_APP_URL:
+          process.env.NEXT_PUBLIC_APP_URL ||
+          'https://wonderfuljodi.com',
+
         NEXT_PUBLIC_BACKEND_URL:
           process.env.NEXT_PUBLIC_BACKEND_URL ||
+          'https://wonderfuljodi.com',
+
+        NEXT_PUBLIC_API_URL:
+          process.env.NEXT_PUBLIC_API_URL ||
           'https://wonderfuljodi.com',
       },
 

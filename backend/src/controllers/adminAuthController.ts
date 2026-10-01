@@ -162,7 +162,7 @@ export async function adminLogin(req: Request, res: Response, next: NextFunction
     const user = await User.findOne({ email: normalizedEmail });
 
     const isUserAdmin = user && user.role === 'admin';
-    const passwordToCompare = isUserAdmin ? user.password : DUMMY_HASH;
+    const passwordToCompare = (isUserAdmin && user.password) ? user.password : DUMMY_HASH;
 
     // Constant-time password comparison to prevent timing enumeration
     const isPasswordValid = await bcrypt.compare(password, passwordToCompare);
@@ -232,7 +232,7 @@ export async function adminLogin(req: Request, res: Response, next: NextFunction
       userAgent,
     });
 
-    const accessToken = signAdminAccessToken(user._id.toString(), user.role, user.email, sessionId);
+    const accessToken = signAdminAccessToken(user._id.toString(), user.role || 'admin', user.email, sessionId);
 
     // Set secure HTTP-only cookies
     setAdminCookies(res, accessToken, rawRefreshToken);
@@ -394,7 +394,12 @@ export async function adminForgotPassword(req: Request, res: Response, next: Nex
         isUsed: false,
       });
 
-      const clientOrigin = req.get('origin') || process.env.FRONTEND_URL || 'http://localhost:3000';
+      const clientOrigin =
+        req.get('origin') ||
+        process.env.FRONTEND_URL ||
+        (process.env.NODE_ENV === 'production'
+          ? 'https://wonderfuljodi.com'
+          : 'http://localhost:3000');
       const frontendBaseUrl = clientOrigin.replace(/\/$/, '');
       const resetUrl = `${frontendBaseUrl}/admin/reset-password?token=${rawToken}`;
 
@@ -557,7 +562,7 @@ export async function adminChangePassword(req: AuthRequest, res: Response, next:
       return res.status(404).json({ success: false, message: 'Admin account not found' });
     }
 
-    const isCurrentValid = await bcrypt.compare(currentPassword, user.password);
+    const isCurrentValid = await bcrypt.compare(currentPassword, user.password || '');
     if (!isCurrentValid) {
       await recordAdminAudit(
         user.email,

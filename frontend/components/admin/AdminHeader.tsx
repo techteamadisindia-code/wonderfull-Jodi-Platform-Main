@@ -149,9 +149,9 @@ export function AdminHeader({ onOpenMobileMenu }: AdminHeaderProps) {
           }`}
           title={
             backendHealthy === true
-              ? 'Backend API is connected and responding on port :5000'
+              ? 'Backend API Connected'
               : backendHealthy === false
-              ? 'Backend API offline on http://localhost:5000'
+              ? 'Backend API Offline'
               : 'Checking API status...'
           }
         >
@@ -166,13 +166,13 @@ export function AdminHeader({ onOpenMobileMenu }: AdminHeaderProps) {
           />
           <span className="hidden sm:inline">
             {backendHealthy === true
-              ? 'API Online (:5000)'
+              ? 'API Online'
               : backendHealthy === false
               ? 'API Offline'
               : 'Connecting...'}
           </span>
           <span className="sm:hidden">
-            {backendHealthy === true ? ':5000' : 'Offline'}
+            {backendHealthy === true ? 'Online' : 'Offline'}
           </span>
         </div>
 

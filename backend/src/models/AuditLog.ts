@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IAuditLog extends Document {
   adminUser?: mongoose.Types.ObjectId;
@@ -45,6 +45,5 @@ const auditLogSchema = new Schema<IAuditLog>(
   { timestamps: true }
 );
 
-export const AuditLog =
-  mongoose.models.AuditLog || mongoose.model<IAuditLog>('AuditLog', auditLogSchema);
+export const AuditLog = createPrismaModelAdapter<IAuditLog>('auditLog', {"adminUser":"adminUserId","targetProfile":"targetProfileId","targetUser":"targetUserId","relatedReport":"relatedReportId"});
 

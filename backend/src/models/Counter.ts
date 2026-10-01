@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface ICounter extends Document {
   _id: string;
@@ -13,7 +13,7 @@ const counterSchema = new Schema<ICounter>(
   { timestamps: true }
 );
 
-export const Counter = mongoose.models.Counter || mongoose.model<ICounter>('Counter', counterSchema);
+export const Counter = createPrismaModelAdapter<ICounter>('counter');
 
 /**
  * Get next atomic sequence number formatted as WJ-XXXXXX
@@ -24,5 +24,5 @@ export async function getNextCandidateId(): Promise<string> {
     { $inc: { seq: 1 } },
     { new: true, upsert: true, setDefaultsOnInsert: true }
   );
-  return `WJ-${result.seq}`;
+  return `WJ-${result?.seq || 100000}`;
 }

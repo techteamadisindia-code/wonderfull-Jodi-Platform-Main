@@ -1,5 +1,5 @@
 import { Response, NextFunction } from 'express';
-import mongoose from 'mongoose';
+import mongoose from '../db/prismaBridge';
 import { Interest } from '../models/Interest';
 import { User } from '../models/User';
 import { Profile } from '../models/Profile';

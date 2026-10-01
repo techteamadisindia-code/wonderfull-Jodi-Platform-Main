@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IContactAccessLog extends Document {
   user: mongoose.Types.ObjectId;
@@ -32,16 +32,6 @@ const contactAccessLogSchema = new Schema<IContactAccessLog>(
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
-contactAccessLogSchema.virtual('userId').get(function () {
-  return this.user;
-});
-contactAccessLogSchema.virtual('profileOwnerId').get(function () {
-  return this.profileOwner;
-});
-contactAccessLogSchema.virtual('contactRequestId').get(function () {
-  return this.contactRequest;
-});
 
-export const ContactAccessLog =
-  mongoose.models.ContactAccessLog ||
-  mongoose.model<IContactAccessLog>('ContactAccessLog', contactAccessLogSchema);
+
+export const ContactAccessLog = createPrismaModelAdapter<IContactAccessLog>('contactAccessLog', {"user":"userId","profileOwner":"profileOwnerId","contactRequest":"contactRequestId"});

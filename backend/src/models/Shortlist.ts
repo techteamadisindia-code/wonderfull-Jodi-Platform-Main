@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IShortlist extends Document {
   user: mongoose.Types.ObjectId;
@@ -17,4 +17,4 @@ const shortlistSchema = new Schema<IShortlist>(
 
 shortlistSchema.index({ user: 1, profile: 1 }, { unique: true });
 
-export const Shortlist = mongoose.models.Shortlist || mongoose.model<IShortlist>('Shortlist', shortlistSchema);
+export const Shortlist = createPrismaModelAdapter<IShortlist>('shortlist', {"user":"userId","profile":"profileId"});

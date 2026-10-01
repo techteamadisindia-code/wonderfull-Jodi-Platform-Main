@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface ISubscription extends Document {
   user: mongoose.Types.ObjectId;
@@ -30,14 +30,9 @@ const subscriptionSchema = new Schema<ISubscription>(
   { timestamps: true }
 );
 
-// Virtual for userId referencing user
-subscriptionSchema.virtual('userId').get(function () {
-  return this.user;
-});
 
-export const Subscription =
-  mongoose.models.Subscription ||
-  mongoose.model<ISubscription>('Subscription', subscriptionSchema);
+
+export const Subscription = createPrismaModelAdapter<ISubscription>('subscription', {"user":"userId","planId":"membershipPlanId"});
 
 export type IUserSubscription = ISubscription;
 export const UserSubscription = Subscription;

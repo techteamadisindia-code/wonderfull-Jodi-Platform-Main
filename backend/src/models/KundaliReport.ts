@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IBirthSnapshot {
   name: string;
@@ -110,5 +110,4 @@ const kundaliReportSchema = new Schema<IKundaliReport>(
 kundaliReportSchema.index({ user1: 1, birthDataVersion: 1 });
 kundaliReportSchema.index({ user1: 1, user2: 1 });
 
-export const KundaliReport =
-  mongoose.models.KundaliReport || mongoose.model<IKundaliReport>('KundaliReport', kundaliReportSchema);
+export const KundaliReport = createPrismaModelAdapter<IKundaliReport>('kundaliReport', {"user1":"user1Id","user2":"user2Id","partner1Profile":"partner1ProfileId","partner2Profile":"partner2ProfileId"});

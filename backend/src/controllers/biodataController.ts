@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import mongoose from 'mongoose';
+import mongoose from '../db/prismaBridge';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';

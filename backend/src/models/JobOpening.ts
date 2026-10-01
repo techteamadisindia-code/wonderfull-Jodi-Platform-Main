@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type WorkMode = 'On-site' | 'Hybrid' | 'Remote';
 export type EmploymentType = 'Full-time' | 'Part-time' | 'Internship' | 'Contract';
@@ -174,5 +174,4 @@ jobOpeningSchema.index({ isDeleted: 1, isPublished: 1, status: 1, displayOrder: 
 jobOpeningSchema.index({ slug: 1, isDeleted: 1 });
 jobOpeningSchema.index({ department: 1, isDeleted: 1 });
 
-export const JobOpening =
-  mongoose.models.JobOpening || mongoose.model<IJobOpening>('JobOpening', jobOpeningSchema);
+export const JobOpening = createPrismaModelAdapter<IJobOpening>('jobOpening');

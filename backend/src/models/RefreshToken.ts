@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IRefreshToken extends Document {
   user: mongoose.Types.ObjectId;
@@ -30,5 +30,4 @@ const refreshTokenSchema = new Schema<IRefreshToken>(
 // TTL index to automatically purge expired tokens from MongoDB after 30 days
 refreshTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
 
-export const RefreshToken =
-  mongoose.models.RefreshToken || mongoose.model<IRefreshToken>('RefreshToken', refreshTokenSchema);
+export const RefreshToken = createPrismaModelAdapter<IRefreshToken>('refreshToken', {"user":"userId"});

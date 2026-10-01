@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type QualificationEvent =
   | 'REGISTERED'
@@ -59,9 +59,7 @@ const referralRewardConfigSchema = new Schema<IReferralRewardConfig>(
   { timestamps: true }
 );
 
-export const ReferralRewardConfig =
-  mongoose.models.ReferralRewardConfig ||
-  mongoose.model<IReferralRewardConfig>('ReferralRewardConfig', referralRewardConfigSchema);
+export const ReferralRewardConfig = createPrismaModelAdapter<IReferralRewardConfig>('referralRewardConfig', {"updatedBy":"updatedById"});
 
 export async function getActiveReferralConfig(): Promise<IReferralRewardConfig> {
   let config = await ReferralRewardConfig.findOne({ isActive: true }).sort({ updatedAt: -1 });

@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface ICouponRedemption extends Document {
   couponId: mongoose.Types.ObjectId;
@@ -47,6 +47,4 @@ const couponRedemptionSchema = new Schema<ICouponRedemption>(
 couponRedemptionSchema.index({ couponId: 1, userId: 1 });
 couponRedemptionSchema.index({ redeemedAt: -1 });
 
-export const CouponRedemption =
-  mongoose.models.CouponRedemption ||
-  mongoose.model<ICouponRedemption>('CouponRedemption', couponRedemptionSchema);
+export const CouponRedemption = createPrismaModelAdapter<ICouponRedemption>('couponRedemption', {"coupon":"couponId","user":"userId","campaign":"campaignId"});

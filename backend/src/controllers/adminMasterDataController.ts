@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import mongoose from 'mongoose';
+import mongoose from '../db/prismaBridge';
 import crypto from 'crypto';
 import { Country, State, District, SubDistrict, City, Village } from '../models/Location';
 import { Language, Religion, Caste, SubCaste } from '../models/CommunityMaster';

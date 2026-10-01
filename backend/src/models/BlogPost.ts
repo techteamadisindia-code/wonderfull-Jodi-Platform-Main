@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type BlogStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 
@@ -81,5 +81,4 @@ blogPostSchema.index({ status: 1, isDeleted: 1, publishedAt: -1 });
 blogPostSchema.index({ category: 1, status: 1, isDeleted: 1 });
 blogPostSchema.index({ isFeatured: 1, status: 1, isDeleted: 1 });
 
-export const BlogPost =
-  mongoose.models.BlogPost || mongoose.model<IBlogPost>('BlogPost', blogPostSchema);
+export const BlogPost = createPrismaModelAdapter<IBlogPost>('blogPost', {"createdBy":"createdById","updatedBy":"updatedById","deletedBy":"deletedById"});

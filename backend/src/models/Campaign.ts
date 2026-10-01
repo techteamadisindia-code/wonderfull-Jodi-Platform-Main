@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type CampaignStatus =
   | 'DRAFT'
@@ -144,5 +144,4 @@ const campaignSchema = new Schema<ICampaign>(
 
 campaignSchema.index({ status: 1, startDate: 1, endDate: 1, priority: -1 });
 
-export const Campaign =
-  mongoose.models.Campaign || mongoose.model<ICampaign>('Campaign', campaignSchema);
+export const Campaign = createPrismaModelAdapter<ICampaign>('campaign', {"createdBy":"createdById","approvedBy":"approvedById"});

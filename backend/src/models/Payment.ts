@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type PaymentStatus =
   | 'PENDING'
@@ -78,5 +78,5 @@ const paymentSchema = new Schema<IPayment>(
 paymentSchema.index({ createdAt: -1 });
 paymentSchema.index({ status: 1, createdAt: -1 });
 
-export const Payment = mongoose.models.Payment || mongoose.model<IPayment>('Payment', paymentSchema);
+export const Payment = createPrismaModelAdapter<IPayment>('payment', {"user":"userId","subscription":"subscriptionId"});
 

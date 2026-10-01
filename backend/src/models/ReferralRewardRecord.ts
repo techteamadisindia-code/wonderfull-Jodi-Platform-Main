@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IReferralRewardRecord extends Document {
   userId: mongoose.Types.ObjectId;
@@ -39,6 +39,4 @@ const referralRewardRecordSchema = new Schema<IReferralRewardRecord>(
 // Prevent issuing multiple rewards for the exact same referral milestone
 referralRewardRecordSchema.index({ userId: 1, milestone: 1 }, { unique: true });
 
-export const ReferralRewardRecord =
-  mongoose.models.ReferralRewardRecord ||
-  mongoose.model<IReferralRewardRecord>('ReferralRewardRecord', referralRewardRecordSchema);
+export const ReferralRewardRecord = createPrismaModelAdapter<IReferralRewardRecord>('referralRewardRecord', {"user":"userId","coupon":"couponId"});

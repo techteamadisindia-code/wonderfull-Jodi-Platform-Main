@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type BroadcastType =
   | 'SYSTEM'
@@ -73,5 +73,4 @@ const broadcastSchema = new Schema<IBroadcast>(
 
 broadcastSchema.index({ createdAt: -1 });
 
-export const Broadcast =
-  mongoose.models.Broadcast || mongoose.model<IBroadcast>('Broadcast', broadcastSchema);
+export const Broadcast = createPrismaModelAdapter<IBroadcast>('broadcast', {"createdBy":"createdById"});

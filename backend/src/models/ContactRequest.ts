@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type ContactRequestStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED';
 
@@ -32,18 +32,10 @@ const contactRequestSchema = new Schema<IContactRequest>(
   { timestamps: true }
 );
 
-// Virtual aliases for requesterId and recipientId
-contactRequestSchema.virtual('requesterId').get(function () {
-  return this.requester;
-});
-contactRequestSchema.virtual('recipientId').get(function () {
-  return this.recipient;
-});
+
 
 // Index to efficiently look up mutual relationship and prevent duplicate pending requests
 contactRequestSchema.index({ requester: 1, recipient: 1 });
 contactRequestSchema.index({ recipient: 1, status: 1 });
 
-export const ContactRequest =
-  mongoose.models.ContactRequest ||
-  mongoose.model<IContactRequest>('ContactRequest', contactRequestSchema);
+export const ContactRequest = createPrismaModelAdapter<IContactRequest>('contactRequest', {"requester":"requesterId","recipient":"recipientId"});

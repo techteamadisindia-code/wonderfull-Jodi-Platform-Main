@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type ReferralStatus =
   | 'CLICKED'
@@ -74,5 +74,4 @@ referralSchema.index({ referrerUserId: 1, status: 1 });
 referralSchema.index({ referrerCandidateId: 1, status: 1 });
 referralSchema.index({ referredUserId: 1 }, { unique: true, sparse: true });
 
-export const Referral =
-  mongoose.models.Referral || mongoose.model<IReferral>('Referral', referralSchema);
+export const Referral = createPrismaModelAdapter<IReferral>('referral', {"referrer":"referrerUserId","referred":"referredUserId","rewardRecord":"rewardRecordId","coupon":"couponId","campaign":"campaignId"});

@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface INotification extends Document {
   user: mongoose.Types.ObjectId;
@@ -35,5 +35,4 @@ const notificationSchema = new Schema<INotification>(
 notificationSchema.index({ user: 1, read: 1, createdAt: -1 });
 notificationSchema.index({ user: 1, createdAt: -1 });
 
-export const Notification =
-  mongoose.models.Notification || mongoose.model<INotification>('Notification', notificationSchema);
+export const Notification = createPrismaModelAdapter<INotification>('notification', {"user":"userId","broadcast":"broadcastId"});

@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import mongoose from 'mongoose';
+import mongoose from '../db/prismaBridge';
 import jwt from 'jsonwebtoken';
 import { Profile } from '../models/Profile';
 import { User } from '../models/User';

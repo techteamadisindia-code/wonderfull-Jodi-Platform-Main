@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IConversation extends Document {
   participants: mongoose.Types.ObjectId[];
@@ -40,4 +40,4 @@ conversationSchema.index({ updatedAt: -1 });
 conversationSchema.index({ lastActivityAt: -1 });
 conversationSchema.index({ status: 1, complianceStatus: 1 });
 
-export const Conversation = mongoose.models.Conversation || mongoose.model<IConversation>('Conversation', conversationSchema);
+export const Conversation = createPrismaModelAdapter<IConversation>('conversation', {"interest":"interestId"});

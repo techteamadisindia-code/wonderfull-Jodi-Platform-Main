@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+import { isValidObjectId } from '../utils/securityUtils';
 import { Campaign, ICampaign } from '../models/Campaign';
 import { Coupon, ICoupon } from '../models/Coupon';
 import { CouponRedemption } from '../models/CouponRedemption';
@@ -70,7 +70,7 @@ export interface MemberAttributes {
  * Resolve member profile attributes from database safely
  */
 export async function getMemberAttributes(userId?: string): Promise<MemberAttributes | null> {
-  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+  if (!userId || !isValidObjectId(userId)) {
     return null;
   }
 
@@ -95,7 +95,7 @@ export async function getMemberAttributes(userId?: string): Promise<MemberAttrib
   }
 
   // Registration status: new if registered < 14 days ago and no prior subscriptions
-  const regDays = (Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+  const regDays = (Date.now() - new Date(user.createdAt || Date.now()).getTime()) / (1000 * 60 * 60 * 24);
   const registrationStatus: 'New Member' | 'Existing Member' =
     regDays <= 14 && subCount === 0 ? 'New Member' : 'Existing Member';
 
@@ -434,16 +434,17 @@ export async function calculateOffer(params: {
     if (eligible) {
       // Calculate campaign discount
       let disc = 0;
+      const dType = campaign.discountType as string;
       if (
-        campaign.discountType === 'FREE' ||
-        campaign.discountType === 'FREE_100_PERCENT' ||
+        dType === 'FREE' ||
+        dType === 'FREE_100_PERCENT' ||
         campaign.discountValue === 100
       ) {
         disc = originalPrice;
-      } else if (campaign.discountType === 'PERCENTAGE') {
+      } else if (dType === 'PERCENTAGE') {
         const pct = Math.min(100, Math.max(0, campaign.discountValue));
         disc = (originalPrice * pct) / 100;
-      } else if (campaign.discountType === 'FIXED' || campaign.discountType === 'FIXED_AMOUNT') {
+      } else if (dType === 'FIXED' || dType === 'FIXED_AMOUNT') {
         disc = Math.min(originalPrice, Math.max(0, campaign.discountValue));
       }
 
@@ -553,15 +554,16 @@ export async function calculateOffer(params: {
       } else {
         // Valid coupon!
         let disc = 0;
+        const cdType = coupon.discountType as string;
         if (
-          coupon.discountType === 'FREE' ||
-          coupon.discountType === 'FREE_100_PERCENT' ||
+          cdType === 'FREE' ||
+          cdType === 'FREE_100_PERCENT' ||
           coupon.discountValue === 100
         ) {
           disc = originalPrice;
-        } else if (coupon.discountType === 'PERCENTAGE') {
+        } else if (cdType === 'PERCENTAGE') {
           disc = (originalPrice * Math.min(100, Math.max(0, coupon.discountValue))) / 100;
-        } else if (coupon.discountType === 'FIXED' || coupon.discountType === 'FIXED_AMOUNT') {
+        } else if (cdType === 'FIXED' || cdType === 'FIXED_AMOUNT') {
           disc = Math.min(originalPrice, Math.max(0, coupon.discountValue));
         }
 

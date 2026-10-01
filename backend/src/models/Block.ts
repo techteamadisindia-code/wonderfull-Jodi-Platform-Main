@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IBlock extends Document {
   blocker: mongoose.Types.ObjectId;
@@ -19,4 +19,4 @@ const blockSchema = new Schema<IBlock>(
 
 blockSchema.index({ blocker: 1, blockedUser: 1 }, { unique: true });
 
-export const Block = mongoose.models.Block || mongoose.model<IBlock>('Block', blockSchema);
+export const Block = createPrismaModelAdapter<IBlock>('block', {"blocker":"blockerId","blockedUser":"blockedUserId"});

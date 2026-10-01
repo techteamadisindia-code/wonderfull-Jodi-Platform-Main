@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema, Types } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IPasswordResetToken extends Document {
   user: Types.ObjectId;
@@ -24,6 +24,4 @@ const passwordResetTokenSchema = new Schema<IPasswordResetToken>(
 // Auto-clean tokens after 7 days
 passwordResetTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60 });
 
-export const PasswordResetToken =
-  mongoose.models.PasswordResetToken ||
-  mongoose.model<IPasswordResetToken>('PasswordResetToken', passwordResetTokenSchema);
+export const PasswordResetToken = createPrismaModelAdapter<IPasswordResetToken>('passwordResetToken', {"user":"userId"});

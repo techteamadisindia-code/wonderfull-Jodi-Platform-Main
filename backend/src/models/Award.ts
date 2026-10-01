@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IAward extends Document {
   name: string;
@@ -53,4 +53,4 @@ const awardSchema = new Schema<IAward>(
 awardSchema.index({ isActive: 1, isDeleted: 1, displayOrder: 1, awardYear: -1 });
 awardSchema.index({ isFeatured: 1, isActive: 1, isDeleted: 1, displayOrder: 1 });
 
-export const Award = mongoose.models.Award || mongoose.model<IAward>('Award', awardSchema);
+export const Award = createPrismaModelAdapter<IAward>('award', {"deletedBy":"deletedById","createdBy":"createdById","updatedBy":"updatedById"});

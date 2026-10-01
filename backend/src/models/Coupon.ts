@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type CouponStatus =
   | 'DRAFT'
@@ -108,5 +108,4 @@ const couponSchema = new Schema<ICoupon>(
 
 couponSchema.index({ status: 1, expiryDate: 1 });
 
-export const Coupon =
-  mongoose.models.Coupon || mongoose.model<ICoupon>('Coupon', couponSchema);
+export const Coupon = createPrismaModelAdapter<ICoupon>('coupon', {"campaign":"campaignId","issuedToUser":"issuedToUserId","createdBy":"createdById"});

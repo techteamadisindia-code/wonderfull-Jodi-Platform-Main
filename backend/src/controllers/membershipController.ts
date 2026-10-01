@@ -414,7 +414,7 @@ export async function claimFreeMembership(req: AuthRequest, res: Response, next:
     const contactCredits = getContactCreditLimit(plan.slug);
     const claimId = `claim_free_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-    let subscription = existingActiveSub;
+    let subscription: any = existingActiveSub;
     let expiryDate: Date;
 
     if (existingActiveSub) {

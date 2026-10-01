@@ -1,4 +1,3 @@
-import mongoose from 'mongoose';
 import { Broadcast, BroadcastType, BroadcastTargetType, IBroadcast } from '../models/Broadcast';
 import { Notification } from '../models/Notification';
 import { User } from '../models/User';
@@ -91,7 +90,7 @@ export async function getRecipientCount(
 export async function resolveRecipientIds(
   targetType: BroadcastTargetType,
   targetUserIds?: string[]
-): Promise<mongoose.Types.ObjectId[]> {
+): Promise<any[]> {
   switch (targetType) {
     case 'ALL_USERS': {
       const users = await User.find({ role: 'user' }).select('_id');
@@ -127,7 +126,7 @@ export async function resolveRecipientIds(
         status: 'ACTIVE',
         $or: [{ expiryDate: { $gt: new Date() } }, { expiryDate: null }],
       });
-      return subscribedUserIds as mongoose.Types.ObjectId[];
+      return subscribedUserIds as any[];
     }
 
     case 'SELECTED_USERS': {
@@ -176,7 +175,7 @@ export async function createAndDispatchBroadcast(params: {
         ? recipientIds
         : undefined,
     actionUrl: sanitizedUrl,
-    createdBy: new mongoose.Types.ObjectId(adminId),
+    createdBy: adminId,
     status: 'SENT',
     totalRecipients: recipientIds.length,
     deliveredCount: recipientIds.length,

@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface ISecurityLog extends Document {
   user?: mongoose.Types.ObjectId;
@@ -57,5 +57,4 @@ const securityLogSchema = new Schema<ISecurityLog>(
 // TTL index to automatically purge old logs after 90 days
 securityLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
 
-export const SecurityLog =
-  mongoose.models.SecurityLog || mongoose.model<ISecurityLog>('SecurityLog', securityLogSchema);
+export const SecurityLog = createPrismaModelAdapter<ISecurityLog>('securityLog', {"user":"userId"});

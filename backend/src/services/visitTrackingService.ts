@@ -1,6 +1,6 @@
 import { Request } from 'express';
-import mongoose from 'mongoose';
 import { DailyUserVisit } from '../models/DailyUserVisit';
+import { isValidObjectId } from '../utils/securityUtils';
 
 export const APP_TIMEZONE = 'Asia/Kolkata';
 
@@ -27,10 +27,11 @@ export function getFormattedVisitDate(date: Date = new Date()): string {
  * Idempotent, safe against concurrency, and non-blocking.
  */
 export async function recordUserVisit(
-  userId: string | mongoose.Types.ObjectId,
+  userId: string | any,
   req?: Request
 ): Promise<void> {
-  if (!userId || !mongoose.isValidObjectId(userId)) return;
+  const uid = typeof userId === 'object' ? String(userId._id || userId.id) : String(userId);
+  if (!uid || !isValidObjectId(uid)) return;
 
   const visitDate = getFormattedVisitDate();
   const now = new Date();
@@ -48,12 +49,12 @@ export async function recordUserVisit(
   try {
     await DailyUserVisit.findOneAndUpdate(
       {
-        user: new mongoose.Types.ObjectId(userId),
+        userId: uid,
         visitDate,
       },
       {
         $setOnInsert: {
-          user: new mongoose.Types.ObjectId(userId),
+          userId: uid,
           visitDate,
           firstVisitedAt: now,
         },
@@ -67,13 +68,9 @@ export async function recordUserVisit(
       {
         upsert: true,
         new: true,
-        setDefaultsOnInsert: true,
       }
     );
   } catch (err: any) {
-    // Ignore duplicate key race condition (MongoDB code 11000)
-    if (err.code !== 11000) {
-      console.error('Error tracking daily user visit:', err?.message || err);
-    }
+    console.error('Error tracking daily user visit:', err?.message || err);
   }
 }

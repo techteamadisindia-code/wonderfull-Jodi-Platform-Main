@@ -18,6 +18,12 @@
  * 3. Manglik / Mangal Dosha Analysis with reliable birth-time validation.
  */
 
+import {
+  calculate36GunaMilan as _gm_calculate36GunaMilan,
+  AshtakootaReport,
+  KootaResult,
+} from './gunaMilanService';
+
 // ─── CANONICAL VEDIC DATA DEFINITIONS ───
 
 export interface RashiInfo {
@@ -337,25 +343,20 @@ export function computePlanetaryBirthDetails(
   };
 }
 
-// ─── CANONICAL 36 GUNA MILAN (ASHTA-KOOTA) ENGINE ───
+// ─── 36 GUNA MILAN ─── delegated to gunaMilanService (single source of truth)
 
-export interface KootaScore {
-  name: string;
-  obtained: number;
-  max: number;
-  status: 'Excellent' | 'Good' | 'Average' | 'Low';
-  description: string;
-}
+/** Re-export KootaResult under the legacy KootaScore name for backwards compatibility */
+export type { KootaResult as KootaScore };
 
 export interface AshtaKootaResult {
-  varna: KootaScore;
-  vashya: KootaScore;
-  tara: KootaScore;
-  yoni: KootaScore;
-  grahaMaitri: KootaScore;
-  gana: KootaScore;
-  bhakoot: KootaScore;
-  nadi: KootaScore;
+  varna: KootaResult;
+  vashya: KootaResult;
+  tara: KootaResult;
+  yoni: KootaResult;
+  grahaMaitri: KootaResult;
+  gana: KootaResult;
+  bhakoot: KootaResult;
+  nadi: KootaResult;
   totalScore: number;
   maxScore: 36;
   compatibilityIndicator: string;
@@ -364,299 +365,10 @@ export interface AshtaKootaResult {
 }
 
 /**
- * 1. Varna Koota (Max 1 point) - Spiritual & ego compatibility based on Rashi Varna rank
- */
-export function calculateVarna(groomRashiIndex: number, brideRashiIndex: number): KootaScore {
-  const groomVarna = RASHIS[groomRashiIndex].varnaRank;
-  const brideVarna = RASHIS[brideRashiIndex].varnaRank;
-
-  // If groom's varna rank is equal or higher than bride's, full 1 point is awarded
-  const obtained = groomVarna >= brideVarna ? 1 : 0;
-
-  return {
-    name: 'Varna',
-    obtained,
-    max: 1,
-    status: obtained === 1 ? 'Good' : 'Low',
-    description:
-      obtained === 1
-        ? 'Mutual spiritual and intellectual temperament is well-aligned according to traditional varna grouping.'
-        : 'Slight difference in traditional varna inclinations; easily balanced with mutual understanding and shared values.',
-  };
-}
-
-/**
- * 2. Vashya Koota (Max 2 points) - Mutual attraction and emotional control
- */
-export function calculateVashya(groomRashiIndex: number, brideRashiIndex: number): KootaScore {
-  const gType = RASHIS[groomRashiIndex].vashyaType;
-  const bType = RASHIS[brideRashiIndex].vashyaType;
-
-  let obtained = 0;
-  if (gType === bType) {
-    obtained = 2;
-  } else if (
-    (gType === 'Manava' && (bType === 'Chatushpada' || bType === 'Jalachara')) ||
-    (bType === 'Manava' && (gType === 'Chatushpada' || gType === 'Jalachara'))
-  ) {
-    obtained = 1;
-  } else if (gType === 'Vanachara' || bType === 'Vanachara') {
-    obtained = gType === bType ? 2 : 0;
-  } else {
-    obtained = 1; // Standard neutral pairing
-  }
-
-  return {
-    name: 'Vashya',
-    obtained,
-    max: 2,
-    status: obtained === 2 ? 'Excellent' : obtained === 1 ? 'Good' : 'Low',
-    description:
-      obtained === 2
-        ? 'Harmonious mutual magnetic attraction and emotional understanding.'
-        : obtained === 1
-        ? 'Moderate mutual respect with balanced relationship dynamics.'
-        : 'Diverse independent nature; communication ensures steady relationship flow.',
-  };
-}
-
-/**
- * 3. Tara Koota (Max 3 points) - Health, well-being and longevity of the bond
- */
-export function calculateTara(groomNakIndex: number, brideNakIndex: number): KootaScore {
-  // Tara from Bride to Groom
-  const count1 = ((groomNakIndex - brideNakIndex + 27) % 9) + 1;
-  // Tara from Groom to Bride
-  const count2 = ((brideNakIndex - groomNakIndex + 27) % 9) + 1;
-
-  // Inauspicious Taras: 3 (Vipat), 5 (Pratyak), 7 (Vadha/Naidhana)
-  const isAuspicious1 = ![3, 5, 7].includes(count1);
-  const isAuspicious2 = ![3, 5, 7].includes(count2);
-
-  let obtained = 0;
-  if (isAuspicious1 && isAuspicious2) obtained = 3;
-  else if (isAuspicious1 || isAuspicious2) obtained = 1.5;
-  else obtained = 0;
-
-  return {
-    name: 'Tara',
-    obtained,
-    max: 3,
-    status: obtained === 3 ? 'Excellent' : obtained === 1.5 ? 'Good' : 'Low',
-    description:
-      obtained === 3
-        ? 'Both lunar birth stars reflect high vitality, mutual health, and positive life luck.'
-        : obtained === 1.5
-        ? 'Satisfactory destiny harmony between birth constellations.'
-        : 'Tara point suggests conscious focus on health and open support for one another.',
-  };
-}
-
-// Animal Yoni friendship lookup matrix
-const YONI_ENEMIES: Record<string, string> = {
-  Horse: 'Buffalo',
-  Buffalo: 'Horse',
-  Elephant: 'Lion',
-  Lion: 'Elephant',
-  Sheep: 'Monkey',
-  Monkey: 'Sheep',
-  Serpent: 'Mongoose',
-  Mongoose: 'Serpent',
-  Dog: 'Deer',
-  Deer: 'Dog',
-  Cat: 'Rat',
-  Rat: 'Cat',
-  Cow: 'Tiger',
-  Tiger: 'Cow',
-};
-
-/**
- * 4. Yoni Koota (Max 4 points) - Physical, psychological and intimate compatibility
- */
-export function calculateYoni(groomNakIndex: number, brideNakIndex: number): KootaScore {
-  const gYoni = NAKSHATRAS[groomNakIndex].yoni;
-  const bYoni = NAKSHATRAS[brideNakIndex].yoni;
-
-  let obtained = 2; // Default neutral
-  if (gYoni === bYoni) {
-    obtained = 4; // Identical Yoni = Full points
-  } else if (YONI_ENEMIES[gYoni] === bYoni) {
-    obtained = 0; // Natural enemy pair = 0
-  } else {
-    obtained = 3; // Friendly pair
-  }
-
-  return {
-    name: 'Yoni',
-    obtained,
-    max: 4,
-    status: obtained >= 3 ? 'Excellent' : obtained >= 2 ? 'Good' : 'Low',
-    description:
-      obtained === 4
-        ? 'Perfect biological and instinctive harmony indicated between birth constellations.'
-        : obtained === 3
-        ? 'Warm, pleasant instinctive harmony and mutual physical ease.'
-        : obtained === 2
-        ? 'Balanced, stable affinity; emotional intimacy fosters deeper closeness.'
-        : 'Contrasting instinctive nature; patience and mutual empathy provide a strong foundation.',
-  };
-}
-
-// Planetary natural relationships: 1 = Friend, 0 = Neutral, -1 = Enemy
-const PLANET_RELATIONS: Record<string, Record<string, number>> = {
-  Sun: { Sun: 1, Moon: 1, Mars: 1, Mercury: 0, Jupiter: 1, Venus: -1, Saturn: -1 },
-  Moon: { Sun: 1, Moon: 1, Mars: 0, Mercury: 1, Jupiter: 0, Venus: 0, Saturn: 0 },
-  Mars: { Sun: 1, Moon: 1, Mars: 1, Mercury: -1, Jupiter: 1, Venus: 0, Saturn: 0 },
-  Mercury: { Sun: 1, Moon: -1, Mars: 0, Mercury: 1, Jupiter: 0, Venus: 1, Saturn: 0 },
-  Jupiter: { Sun: 1, Moon: 1, Mars: 1, Mercury: -1, Jupiter: 1, Venus: -1, Saturn: 0 },
-  Venus: { Sun: -1, Moon: -1, Mars: 0, Mercury: 1, Jupiter: 0, Venus: 1, Saturn: 1 },
-  Saturn: { Sun: -1, Moon: -1, Mars: -1, Mercury: 1, Jupiter: 0, Venus: 1, Saturn: 1 },
-};
-
-/**
- * 5. Graha Maitri (Max 5 points) - Mental harmony and intellectual friendship of Moon sign lords
- */
-export function calculateGrahaMaitri(groomRashiIndex: number, brideRashiIndex: number): KootaScore {
-  const gLord = RASHIS[groomRashiIndex].lord;
-  const bLord = RASHIS[brideRashiIndex].lord;
-
-  if (gLord === bLord) {
-    return {
-      name: 'Graha Maitri',
-      obtained: 5,
-      max: 5,
-      status: 'Excellent',
-      description: 'Both Moon signs are ruled by the same planetary lord, assuring exceptional intellectual friendship.',
-    };
-  }
-
-  const rel1 = PLANET_RELATIONS[gLord]?.[bLord] ?? 0;
-  const rel2 = PLANET_RELATIONS[bLord]?.[gLord] ?? 0;
-
-  let obtained = 0;
-  if (rel1 === 1 && rel2 === 1) obtained = 5;
-  else if ((rel1 === 1 && rel2 === 0) || (rel1 === 0 && rel2 === 1)) obtained = 4;
-  else if (rel1 === 0 && rel2 === 0) obtained = 3;
-  else if ((rel1 === 1 && rel2 === -1) || (rel1 === -1 && rel2 === 1)) obtained = 1;
-  else if ((rel1 === 0 && rel2 === -1) || (rel1 === -1 && rel2 === 0)) obtained = 0.5;
-  else obtained = 0;
-
-  return {
-    name: 'Graha Maitri',
-    obtained,
-    max: 5,
-    status: obtained >= 4 ? 'Excellent' : obtained >= 3 ? 'Good' : 'Low',
-    description:
-      obtained >= 4
-        ? 'Planetary lords share deep friendship, fostering natural intellectual alignment and mutual admiration.'
-        : obtained >= 3
-        ? 'Neutral to friendly planetary rapport ensuring peaceful cooperation and shared understanding.'
-        : 'Differing viewpoints; professional doctors often bridge this naturally with reasoned dialogue.',
-  };
-}
-
-/**
- * 6. Gana Koota (Max 6 points) - Behavioral nature & temperament (Deva, Manushya, Rakshasa)
- */
-export function calculateGana(groomNakIndex: number, brideNakIndex: number): KootaScore {
-  const gGana = NAKSHATRAS[groomNakIndex].gana;
-  const bGana = NAKSHATRAS[brideNakIndex].gana;
-
-  let obtained = 0;
-  if (gGana === bGana) {
-    obtained = 6;
-  } else if ((gGana === 'Deva' && bGana === 'Manushya') || (gGana === 'Manushya' && bGana === 'Deva')) {
-    obtained = 5;
-  } else if (gGana === 'Rakshasa' && bGana === 'Manushya') {
-    obtained = 1;
-  } else {
-    obtained = 0; // Deva + Rakshasa or Manushya + Rakshasa
-  }
-
-  return {
-    name: 'Gana',
-    obtained,
-    max: 6,
-    status: obtained >= 5 ? 'Excellent' : obtained > 0 ? 'Good' : 'Low',
-    description:
-      obtained === 6
-        ? `Identical ${gGana} Gana; matching temperament and life approach.`
-        : obtained === 5
-        ? 'Harmonious Gana blend (Deva & Manushya), bringing patience and stability to daily life.'
-        : 'Gana variation noted; emotional maturity and open communication ensure balance.',
-  };
-}
-
-/**
- * 7. Bhakoot Koota (Max 7 points) - Emotional welfare, prosperity, family growth
- */
-export function calculateBhakoot(groomRashiIndex: number, brideRashiIndex: number): KootaScore {
-  // Distance from groom to bride (1 to 12)
-  const dist = ((brideRashiIndex - groomRashiIndex + 12) % 12) + 1;
-
-  // Inauspicious distances: 2/12 (Dwidwadasha), 5/9 (Navapanchama), 6/8 (Shadashtaka)
-  const inauspicious = [2, 12, 5, 9, 6, 8].includes(dist);
-
-  // Classical Bhakoot Dosha cancellations:
-  // If lords of both rashis are identical or mutual friends, Dosha is cancelled!
-  const gLord = RASHIS[groomRashiIndex].lord;
-  const bLord = RASHIS[brideRashiIndex].lord;
-  const isCancelled = gLord === bLord || (PLANET_RELATIONS[gLord]?.[bLord] === 1 && PLANET_RELATIONS[bLord]?.[gLord] === 1);
-
-  const obtained = !inauspicious || isCancelled ? 7 : 0;
-
-  return {
-    name: 'Bhakoot',
-    obtained,
-    max: 7,
-    status: obtained === 7 ? 'Excellent' : 'Low',
-    description:
-      obtained === 7
-        ? isCancelled && inauspicious
-          ? 'Favorable Bhakoot: potential sign distance divergence is successfully cancelled by planetary friendship.'
-          : 'Highly auspicious emotional bond ensuring family welfare and long-term prosperity.'
-        : 'Sign distance suggests mindful emotional alignment and collaborative family decision-making.',
-  };
-}
-
-/**
- * 8. Nadi Koota (Max 8 points) - Genetic, physiological and health compatibility (Aadi, Madhya, Antya)
- */
-export function calculateNadi(groomNakIndex: number, brideNakIndex: number): KootaScore {
-  const gNadi = NAKSHATRAS[groomNakIndex].nadi;
-  const bNadi = NAKSHATRAS[brideNakIndex].nadi;
-
-  let obtained = 0;
-  let isCancelled = false;
-
-  if (gNadi !== bNadi) {
-    obtained = 8;
-  } else {
-    // Classical Nadi Dosha cancellation:
-    // If same Nakshatra but different Pada or different Rashi, Nadi Dosha is pacified
-    if (groomNakIndex === brideNakIndex) {
-      // Same Nakshatra can be cancelled if pada/rashi differs
-      isCancelled = true;
-      obtained = 8;
-    }
-  }
-
-  return {
-    name: 'Nadi',
-    obtained,
-    max: 8,
-    status: obtained === 8 ? 'Excellent' : 'Low',
-    description:
-      obtained === 8
-        ? isCancelled
-          ? 'Compliant Nadi score: Nakshatra pada differences neutralize traditional physiological tension.'
-          : `Distinct ${gNadi} and ${bNadi} Nadis indicate sound genetic and physiological complementarity.`
-        : `Identical ${gNadi} Nadi noted in traditional text; consult a trusted astrologer or focus on shared health wellness.`,
-  };
-}
-
-/**
  * Complete 36 Guna Milan Calculation
+ *
+ * Adapter: delegates to gunaMilanService (single source of truth) and maps
+ * the result into the AshtaKootaResult shape expected by kundaliController.
  */
 export function calculate36GunaMilan(
   groomRashiIndex: number,
@@ -664,60 +376,46 @@ export function calculate36GunaMilan(
   brideRashiIndex: number,
   brideNakIndex: number
 ): AshtaKootaResult {
-  const varna = calculateVarna(groomRashiIndex, brideRashiIndex);
-  const vashya = calculateVashya(groomRashiIndex, brideRashiIndex);
-  const tara = calculateTara(groomNakIndex, brideNakIndex);
-  const yoni = calculateYoni(groomNakIndex, brideNakIndex);
-  const grahaMaitri = calculateGrahaMaitri(groomRashiIndex, brideRashiIndex);
-  const gana = calculateGana(groomNakIndex, brideNakIndex);
-  const bhakoot = calculateBhakoot(groomRashiIndex, brideRashiIndex);
-  const nadi = calculateNadi(groomNakIndex, brideNakIndex);
+  const shared: AshtakootaReport = _gm_calculate36GunaMilan(
+    groomRashiIndex,
+    groomNakIndex,
+    brideRashiIndex,
+    brideNakIndex
+  );
 
-  const totalScore =
-    varna.obtained +
-    vashya.obtained +
-    tara.obtained +
-    yoni.obtained +
-    grahaMaitri.obtained +
-    gana.obtained +
-    bhakoot.obtained +
-    nadi.obtained;
+  const totalScore = shared.totalObtained;
 
-  // Traditional compatibility interpretation
-  let compatibilityIndicator = '';
-  let summary = '';
+  // Derive compatibilityIndicator wording (mirrors original astrologyEngine thresholds)
+  let compatibilityIndicator: string;
   if (totalScore >= 28) {
     compatibilityIndicator = 'Strong traditional compatibility indicator';
-    summary = 'Outstanding astrological accord across spiritual, emotional, mental, and physiological dimensions.';
   } else if (totalScore >= 21) {
     compatibilityIndicator = 'Favorable traditional compatibility';
-    summary = 'Good traditional compatibility score above the traditional 18-point threshold for happy matrimony.';
   } else if (totalScore >= 18) {
     compatibilityIndicator = 'Acceptable traditional compatibility';
-    summary = 'Meets traditional Vedic matrimonial threshold; healthy communication and values strengthen the bond.';
   } else {
     compatibilityIndicator = 'Below average traditional compatibility';
-    summary = 'Moderate score under traditional measures; personal harmony, shared values, and life goals remain the primary basis.';
   }
 
+  // Derive doshas from the shared Koota scores
   const doshas: string[] = [];
-  if (bhakoot.obtained === 0) doshas.push('Bhakoot Dosha');
-  if (nadi.obtained === 0) doshas.push('Nadi Dosha');
-  if (gana.obtained === 0) doshas.push('Gana Dosha');
+  if (shared.bhakoot.obtained === 0) doshas.push('Bhakoot Dosha');
+  if (shared.nadi.obtained === 0) doshas.push('Nadi Dosha');
+  if (shared.gana.obtained === 0) doshas.push('Gana Dosha');
 
   return {
-    varna,
-    vashya,
-    tara,
-    yoni,
-    grahaMaitri,
-    gana,
-    bhakoot,
-    nadi,
+    varna: shared.varna,
+    vashya: shared.vashya,
+    tara: shared.tara,
+    yoni: shared.yoni,
+    grahaMaitri: shared.grahaMaitri,
+    gana: shared.gana,
+    bhakoot: shared.bhakoot,
+    nadi: shared.nadi,
     totalScore,
     maxScore: 36,
     compatibilityIndicator,
-    summary,
+    summary: shared.summary,
     doshas,
   };
 }

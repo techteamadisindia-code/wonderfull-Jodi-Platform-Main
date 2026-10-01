@@ -3,7 +3,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { Report } from '../models/Report';
 import { User } from '../models/User';
 import { Profile } from '../models/Profile';
-import mongoose from 'mongoose';
+import mongoose from '../db/prismaBridge';
 
 export async function submitReport(req: AuthRequest, res: Response, next: NextFunction) {
   try {

@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 import { getNextCandidateId } from './Counter';
 
 export interface IProfile extends Document {
@@ -545,17 +545,8 @@ const profileSchema = new Schema<IProfile>(
   { timestamps: true }
 );
 
-profileSchema.pre('save', async function (next) {
-  if (!this.candidateId) {
-    try {
-      this.candidateId = await getNextCandidateId();
-    } catch (err: any) {
-      return next(err);
-    }
-  }
-  next();
-});
+
 
 profileSchema.index({ gender: 1, city: 1, religion: 1, caste: 1, education: 1, profession: 1 });
 
-export const Profile = mongoose.models.Profile || mongoose.model<IProfile>('Profile', profileSchema);
+export const Profile = createPrismaModelAdapter<IProfile>('profile', {"user":"userId","statusChangedBy":"statusChangedById","deletedBy":"deletedById"});

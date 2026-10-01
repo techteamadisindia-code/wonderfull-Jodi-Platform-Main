@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IMembershipPlan extends Document {
   name: string;
@@ -67,22 +67,6 @@ const membershipPlanSchema = new Schema<IMembershipPlan>(
   { timestamps: true }
 );
 
-// Middleware to keep price in sync with discountedPrice if not explicitly set
-membershipPlanSchema.pre('save', function (next) {
-  if (this.discountedPrice !== undefined && this.discountedPrice !== null) {
-    this.price = this.discountedPrice;
-  } else if (this.originalPrice !== undefined) {
-    this.price = this.originalPrice;
-  }
-  if (!this.key && this.slug) {
-    this.key = this.slug.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
-  }
-  if (!this.planId && this.slug) {
-    this.planId = `plan_${this.slug.replace(/[^a-zA-Z0-9]/g, '_')}`;
-  }
-  next();
-});
 
-export const MembershipPlan =
-  mongoose.models.MembershipPlan ||
-  mongoose.model<IMembershipPlan>('MembershipPlan', membershipPlanSchema);
+
+export const MembershipPlan = createPrismaModelAdapter<IMembershipPlan>('membershipPlan');

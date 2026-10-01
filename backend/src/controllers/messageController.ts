@@ -1,5 +1,5 @@
 import { Response, NextFunction } from 'express';
-import mongoose from 'mongoose';
+import mongoose from '../db/prismaBridge';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { Message } from '../models/Message';
 import { Conversation } from '../models/Conversation';

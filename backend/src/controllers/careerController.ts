@@ -1,5 +1,4 @@
 import { Request, Response, NextFunction } from 'express';
-import mongoose from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { JobOpening, IJobOpening } from '../models/JobOpening';
 import { JobApplication } from '../models/JobApplication';

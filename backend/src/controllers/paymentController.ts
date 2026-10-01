@@ -142,7 +142,7 @@ export async function getAdminPayments(req: AuthRequest, res: Response, next: Ne
         { refundId: { $regex: q, $options: 'i' } },
       ];
 
-      if (userFilterIds.length > 0) {
+      if (userFilterIds && userFilterIds.length > 0) {
         searchConditions.push({ user: { $in: userFilterIds } });
       }
 

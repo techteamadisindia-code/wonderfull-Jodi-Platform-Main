@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IInterest extends Document {
   sender: mongoose.Types.ObjectId;
@@ -30,4 +30,4 @@ interestSchema.index({ sender: 1, receiver: 1 }, { unique: true });
 interestSchema.index({ createdAt: -1 });
 interestSchema.index({ status: 1, createdAt: -1 });
 
-export const Interest = mongoose.models.Interest || mongoose.model<IInterest>('Interest', interestSchema);
+export const Interest = createPrismaModelAdapter<IInterest>('interest', {"sender":"senderId","receiver":"receiverId","senderProfile":"senderProfileId","receiverProfile":"receiverProfileId"});

@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IMessage extends Document {
   conversation: mongoose.Types.ObjectId;
@@ -51,4 +51,4 @@ messageSchema.index({ conversation: 1, createdAt: 1 });
 messageSchema.index({ sender: 1, receiver: 1 });
 messageSchema.index({ moderationStatus: 1, moderationCategory: 1 });
 
-export const Message = mongoose.models.Message || mongoose.model<IMessage>('Message', messageSchema);
+export const Message = createPrismaModelAdapter<IMessage>('message', {"conversation":"conversationId","sender":"senderId","receiver":"receiverId"});

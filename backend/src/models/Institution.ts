@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type InstitutionType = 'COLLEGE' | 'UNIVERSITY' | 'HOSPITAL' | 'INSTITUTE';
 
@@ -96,5 +96,4 @@ institutionSchema.index({ normalizedName: 1 });
 institutionSchema.index({ usageCount: -1, name: 1 });
 institutionSchema.index({ name: 'text', city: 'text', state: 'text' });
 
-export const Institution =
-  mongoose.models.Institution || mongoose.model<IInstitution>('Institution', institutionSchema);
+export const Institution = createPrismaModelAdapter<IInstitution>('institution', {"createdBy":"createdById"});

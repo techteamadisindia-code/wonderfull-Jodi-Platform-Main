@@ -628,8 +628,8 @@ export async function saveStep(req: Request, res: Response, next: NextFunction) 
 
     // Merge section data into stepData
     if (section && typeof section === 'string') {
-      registration.stepData[section] = {
-        ...(registration.stepData[section] || {}),
+      (registration.stepData as any)[section] = {
+        ...((registration.stepData as any)[section] || {}),
         ...data,
       };
     }
@@ -742,8 +742,8 @@ export async function autoSave(req: Request, res: Response, next: NextFunction) 
     }
 
     if (section && typeof section === 'string') {
-      registration.stepData[section] = {
-        ...(registration.stepData[section] || {}),
+      (registration.stepData as any)[section] = {
+        ...((registration.stepData as any)[section] || {}),
         ...data,
       };
     }
@@ -1067,7 +1067,7 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
     ).trim();
     const candidateEmail = (basic.email || registration.email || raw.email || '').toLowerCase().trim();
     const candidateMobile = (basic.mobile || registration.mobile || raw.mobile || '').replace(/\D/g, '');
-    const candidateGender = basic.gender || personal.gender || registration.gender || raw.gender || 'Female';
+    const candidateGender = basic.gender || (personal as any).gender || registration.gender || raw.gender || 'Female';
 
     if (!candidateFullName || candidateFullName.length < 2) {
       return res.status(400).json({
@@ -1254,7 +1254,7 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
       medicalRegistrationNumber: edu.medicalRegistrationNumber || raw.medicalRegistrationNumber || '',
       medicalCollege: edu.medicalCollege || raw.medicalCollege || '',
       medicalExperience: edu.medicalExperience || raw.medicalExperience || raw.experience || '',
-      familyType: family.familyType || personal.familyType || raw.familyType || '',
+      familyType: family.familyType || (personal as any).familyType || raw.familyType || '',
       fatherOccupation: family.fatherProfession || family.fatherOccupation || raw.fatherOccupation || '',
       motherOccupation: family.motherProfession || family.motherOccupation || raw.motherOccupation || '',
       siblings:
@@ -1273,7 +1273,7 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
       hobbiesInterests: personal.hobbiesInterests || raw.hobbiesInterests || '',
       careerGoals: personal.careerGoals || raw.careerGoals || '',
       familyBackground: {
-        familyType: family.familyType || personal.familyType || raw.familyType || '',
+        familyType: family.familyType || (personal as any).familyType || raw.familyType || '',
         familyStatus: family.familyStatus || raw.familyStatus || '',
         fatherName: family.fatherName || raw.fatherName || '',
         fatherProfession: family.fatherProfession || family.fatherOccupation || raw.fatherOccupation || '',
@@ -1320,12 +1320,12 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
       country: personal.country || 'India',
       state: personal.state || '',
       city: finalCity,
-      currentLocation: personal.currentLocation || {
-        countryId: personal.countryId,
-        stateId: personal.stateId,
-        districtId: personal.districtId,
-        cityId: personal.cityId,
-        pincode: personal.pinCode || personal.pincode,
+      currentLocation: (personal as any).currentLocation || {
+        countryId: (personal as any).countryId,
+        stateId: (personal as any).stateId,
+        districtId: (personal as any).districtId,
+        cityId: (personal as any).cityId,
+        pincode: (personal as any).pinCode || (personal as any).pincode,
         formattedAddress: [finalCity, personal.state, 'India'].filter(Boolean).join(', '),
       },
       primaryPhoto: primaryPhotoUrl,
@@ -1352,7 +1352,7 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
     const referralCode =
       req.body.referralCode ||
       raw.referralCode ||
-      basic.referralCode ||
+      (basic as any).referralCode ||
       (req.cookies && req.cookies.wj_referral_code);
 
     if (referralCode) {
@@ -1371,7 +1371,7 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
     // 4. Generate Auth JWT Token for immediate login
     const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
     const accessToken = jwt.sign(
-      { userId: newUser._id.toString(), role: newUser.role },
+      { userId: String(newUser._id || (newUser as any).id), role: newUser.role },
       secret,
       { expiresIn: '7d' }
     );

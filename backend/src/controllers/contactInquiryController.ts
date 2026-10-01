@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import mongoose from 'mongoose';
+import mongoose from '../db/prismaBridge';
 import { ContactInquiry, getNextContactInquiryId, InquiryStatus } from '../models/ContactInquiry';
 import { AuditLog } from '../models/AuditLog';
 import { Notification } from '../models/Notification';

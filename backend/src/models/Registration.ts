@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type RegistrationStatus = 'STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED';
 
@@ -422,5 +422,4 @@ registrationSchema.index({ status: 1, lastActiveAt: -1 });
 registrationSchema.index({ status: 1, currentStep: 1 });
 registrationSchema.index({ status: 1, completionPercentage: -1 });
 
-export const Registration =
-  mongoose.models.Registration || mongoose.model<IRegistration>('Registration', registrationSchema);
+export const Registration = createPrismaModelAdapter<IRegistration>('registration', {"user":"userId","profile":"profileId"});

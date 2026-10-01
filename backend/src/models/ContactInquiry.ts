@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 import { Counter } from './Counter';
 
 export type InquiryStatus = 'NEW' | 'IN_PROGRESS' | 'WAITING_FOR_USER' | 'RESOLVED' | 'CLOSED';
@@ -150,9 +150,7 @@ contactInquirySchema.index({ category: 1, createdAt: -1 });
 contactInquirySchema.index({ email: 1, createdAt: -1 });
 contactInquirySchema.index({ createdAt: -1 });
 
-export const ContactInquiry =
-  mongoose.models.ContactInquiry ||
-  mongoose.model<IContactInquiry>('ContactInquiry', contactInquirySchema);
+export const ContactInquiry = createPrismaModelAdapter<IContactInquiry>('contactInquiry', {"user":"userId","assignedTo":"assignedToId"});
 
 /**
  * Generate a unique contact inquiry ID in format WJ-CON-YYYY-XXXX
@@ -171,7 +169,7 @@ export async function getNextContactInquiryId(): Promise<string> {
       { new: true, upsert: true }
     );
 
-    const seqRaw = result.seq;
+    const seqRaw = result?.seq || 1;
     const seqNum = seqRaw > 10000 ? seqRaw - 100000 : seqRaw;
     const padded = String(Math.abs(seqNum)).padStart(4, '0');
     candidateId = `WJ-CON-${year}-${padded}`;

@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IReport extends Document {
   reporter: mongoose.Types.ObjectId;
@@ -73,5 +73,5 @@ const reportSchema = new Schema<IReport>(
   { timestamps: true }
 );
 
-export const Report = mongoose.models.Report || mongoose.model<IReport>('Report', reportSchema);
+export const Report = createPrismaModelAdapter<IReport>('report', {"reporter":"reporterId","reportedUser":"reportedUserId","reportedProfile":"reportedProfileId","moderator":"moderatorId","handledByAdminId":"handledByAdminId"});
 

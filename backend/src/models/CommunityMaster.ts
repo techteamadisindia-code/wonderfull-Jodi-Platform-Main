@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 // ─── LANGUAGE MODEL ───
 export interface ILanguage extends Document {
@@ -117,7 +117,7 @@ const subCasteSchema = new Schema<ISubCaste>(
 );
 subCasteSchema.index({ casteId: 1, name: 1 }, { unique: true });
 
-export const Language = mongoose.model<ILanguage>('Language', languageSchema);
-export const Religion = mongoose.model<IReligion>('Religion', religionSchema);
-export const Caste = mongoose.model<ICaste>('Caste', casteSchema);
-export const SubCaste = mongoose.model<ISubCaste>('SubCaste', subCasteSchema);
+export const Language = createPrismaModelAdapter<ILanguage>('language');
+export const Religion = createPrismaModelAdapter<IReligion>('religion');
+export const Caste = createPrismaModelAdapter<ICaste>('caste', { religion: 'religionId', religionId: 'religionId' });
+export const SubCaste = createPrismaModelAdapter<ISubCaste>('subCaste', { caste: 'casteId', casteId: 'casteId' });

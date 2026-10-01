@@ -4,7 +4,7 @@ import { User } from '../models/User';
 import { Profile } from '../models/Profile';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { isValidObjectId } from '../utils/securityUtils';
-import mongoose from 'mongoose';
+import mongoose from '../db/prismaBridge';
 
 // Helper to resolve User ID whether given a User ID or a Profile ID
 async function resolveTargetUserId(idOrProfileId: string): Promise<string | null> {

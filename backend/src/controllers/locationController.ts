@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import mongoose from 'mongoose';
+import mongoose from '../db/prismaBridge';
 import { Country, State, District, SubDistrict, City, Village } from '../models/Location';
 import { escapeRegex } from '../utils/securityUtils';
 

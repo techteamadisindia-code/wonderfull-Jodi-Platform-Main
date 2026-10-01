@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface IDailyUserVisit extends Document {
   user: mongoose.Types.ObjectId;
@@ -59,7 +59,4 @@ dailyUserVisitSchema.index({ user: 1, visitDate: 1 }, { unique: true });
 // Compound index for date range aggregations
 dailyUserVisitSchema.index({ visitDate: 1, user: 1 });
 
-export const DailyUserVisit = mongoose.model<IDailyUserVisit>(
-  'DailyUserVisit',
-  dailyUserVisitSchema
-);
+export const DailyUserVisit = createPrismaModelAdapter<IDailyUserVisit>('dailyUserVisit', {"user":"userId"});

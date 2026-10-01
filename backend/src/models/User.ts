@@ -1,31 +1,34 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 import { CURRENT_TERMS_VERSION } from '../config/termsConfig';
 
 export interface IUser extends Document {
+  id: string;
+  _id: string;
   fullName: string;
   email: string;
   mobile: string;
   password: string;
-  role: 'user' | 'admin';
-  verified: boolean;
-  verificationStatus: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
-  isActive: boolean;
-  status: 'Active' | 'Under Review' | 'Suspended' | 'Blocked' | 'Deleted';
-  isDeleted: boolean;
-  deletedAt?: Date;
-  deletedBy?: mongoose.Types.ObjectId;
-  deletionReason?: string;
-  suspensionReason?: string;
-  suspendedAt?: Date;
-  suspendedBy?: mongoose.Types.ObjectId;
-  termsAccepted: boolean;
-  termsVersion: string;
-  termsAcceptedAt?: Date;
-  createdAt: Date;
-  updatedAt: Date;
+  role: 'user' | 'admin' | string;
+  verified?: boolean;
+  verificationStatus?: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED' | string;
+  isActive?: boolean;
+  status?: 'Active' | 'Under Review' | 'Suspended' | 'Blocked' | 'Deleted' | string;
+  isDeleted?: boolean;
+  deletedAt?: Date | null;
+  deletedBy?: any;
+  deletionReason?: string | null;
+  suspensionReason?: string | null;
+  suspendedAt?: Date | null;
+  suspendedBy?: any;
+  termsAccepted?: boolean;
+  termsVersion?: string;
+  termsAcceptedAt?: Date | null;
+  createdAt?: Date;
+  updatedAt?: Date;
+  [key: string]: any;
 }
 
-const userSchema = new Schema<IUser>(
+const userSchema = new Schema(
   {
     fullName: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
@@ -60,5 +63,4 @@ const userSchema = new Schema<IUser>(
   { timestamps: true }
 );
 
-export const User = mongoose.models.User || mongoose.model<IUser>('User', userSchema);
-
+export const User = createPrismaModelAdapter<IUser>('user');

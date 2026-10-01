@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 // ─── COUNTRY MODEL ───
 export interface ICountry extends Document {
@@ -211,9 +211,9 @@ const villageSchema = new Schema<IVillage>(
 villageSchema.index({ subDistrictId: 1, name: 1 });
 villageSchema.index({ name: 'text' });
 
-export const Country = mongoose.model<ICountry>('Country', countrySchema);
-export const State = mongoose.model<IState>('State', stateSchema);
-export const District = mongoose.model<IDistrict>('District', districtSchema);
-export const SubDistrict = mongoose.model<ISubDistrict>('SubDistrict', subDistrictSchema);
-export const City = mongoose.model<ICity>('City', citySchema);
-export const Village = mongoose.model<IVillage>('Village', villageSchema);
+export const Country = createPrismaModelAdapter<ICountry>('country');
+export const State = createPrismaModelAdapter<IState>('state', { country: 'countryId', countryId: 'countryId' });
+export const District = createPrismaModelAdapter<IDistrict>('district', { state: 'stateId', stateId: 'stateId', country: 'countryId', countryId: 'countryId' });
+export const SubDistrict = createPrismaModelAdapter<ISubDistrict>('subDistrict', { district: 'districtId', districtId: 'districtId' });
+export const City = createPrismaModelAdapter<ICity>('city', { state: 'stateId', stateId: 'stateId', district: 'districtId', districtId: 'districtId', subDistrict: 'subDistrictId', subDistrictId: 'subDistrictId' });
+export const Village = createPrismaModelAdapter<IVillage>('village', { subDistrict: 'subDistrictId', subDistrictId: 'subDistrictId', district: 'districtId', districtId: 'districtId', state: 'stateId', stateId: 'stateId' });

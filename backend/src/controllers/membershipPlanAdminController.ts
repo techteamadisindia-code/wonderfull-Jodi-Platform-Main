@@ -1,5 +1,4 @@
 import { Response, NextFunction } from 'express';
-import mongoose from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { MembershipPlan, IMembershipPlan } from '../models/MembershipPlan';
 

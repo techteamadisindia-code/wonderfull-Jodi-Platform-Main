@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 import crypto from 'crypto';
 
 export interface IBiodataSectionVisibility {
@@ -284,4 +284,4 @@ const biodataSchema = new Schema<IBiodata>(
 biodataSchema.index({ userId: 1, createdAt: -1 });
 biodataSchema.index({ profileId: 1 });
 
-export const Biodata = mongoose.models.Biodata || mongoose.model<IBiodata>('Biodata', biodataSchema);
+export const Biodata = createPrismaModelAdapter<IBiodata>('biodata', {"user":"userId","profile":"profileId"});

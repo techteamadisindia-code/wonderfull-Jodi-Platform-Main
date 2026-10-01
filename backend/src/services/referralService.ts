@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import mongoose from 'mongoose';
 import { Referral, IReferral } from '../models/Referral';
 import { ReferralRewardConfig, getActiveReferralConfig } from '../models/ReferralRewardConfig';
 import { ReferralRewardRecord } from '../models/ReferralRewardRecord';

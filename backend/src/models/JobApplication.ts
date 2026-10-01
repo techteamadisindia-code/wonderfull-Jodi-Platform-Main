@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type ApplicationStatus =
   | 'RECEIVED'
@@ -93,6 +93,4 @@ const jobApplicationSchema = new Schema<IJobApplication>(
 jobApplicationSchema.index({ jobId: 1, createdAt: -1 });
 jobApplicationSchema.index({ email: 1, jobId: 1 });
 
-export const JobApplication =
-  mongoose.models.JobApplication ||
-  mongoose.model<IJobApplication>('JobApplication', jobApplicationSchema);
+export const JobApplication = createPrismaModelAdapter<IJobApplication>('jobApplication', {"job":"jobId"});

@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type DocumentTypeCategory =
   | 'GOVERNMENT_ID'
@@ -108,5 +108,4 @@ verificationSchema.index({ user: 1, documentType: 1, status: 1 });
 verificationSchema.index({ status: 1, createdAt: -1 });
 verificationSchema.index({ createdAt: -1 });
 
-export const Verification =
-  mongoose.models.Verification || mongoose.model<IVerification>('Verification', verificationSchema);
+export const Verification = createPrismaModelAdapter<IVerification>('verification', {"user":"userId","reviewedBy":"reviewedById"});

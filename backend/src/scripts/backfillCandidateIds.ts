@@ -1,16 +1,11 @@
-import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 dotenv.config();
 
 import { Profile } from '../models/Profile';
 import { Counter } from '../models/Counter';
 
-const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://localhost:27017/wonderfuljodi';
-
 async function backfill() {
-  console.log('Connecting to MongoDB at:', MONGO_URI);
-  await mongoose.connect(MONGO_URI);
-  console.log('Connected.');
+  console.log('Running backfill on database...');
 
   // Find all profiles
   const allProfiles = await Profile.find({}).sort({ createdAt: 1 });
@@ -53,8 +48,7 @@ async function backfill() {
     console.log(`- ${p.candidateId}: ${p.displayName} (_id: ${p._id})`);
   }
 
-  await mongoose.disconnect();
-  console.log('Disconnected from MongoDB.');
+  console.log('Finished.');
 }
 
 backfill().catch((err) => {

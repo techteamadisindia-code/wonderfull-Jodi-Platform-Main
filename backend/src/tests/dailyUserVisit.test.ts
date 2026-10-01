@@ -1,5 +1,4 @@
 import axios from 'axios';
-import mongoose from 'mongoose';
 import { DailyUserVisit } from '../models/DailyUserVisit';
 import { User } from '../models/User';
 import { recordUserVisit, getFormattedVisitDate } from '../services/visitTrackingService';
@@ -12,14 +11,6 @@ async function runDailyVisitsTests() {
   console.log('================================================================\n');
 
   try {
-    if (mongoose.connection.readyState === 0) {
-      const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/wonderful_jodi';
-      try {
-        await mongoose.connect(uri, { serverSelectionTimeoutMS: 2000 });
-      } catch {
-        // Fallback to in-memory or backend server
-      }
-    }
     // 1. Authenticate as Admin
     console.log('[TEST 1/8] Authenticating as Administrator...');
     const adminLoginRes = await axios.post(`${BASE_URL}/admin/auth/login`, {
@@ -134,10 +125,10 @@ async function runDailyVisitsTests() {
     // Simulate User 1 visiting yesterday as well
     if (user1Id) {
       await DailyUserVisit.findOneAndUpdate(
-        { user: new mongoose.Types.ObjectId(user1Id), visitDate: yesterdayDateStr },
+        { user: user1Id, visitDate: yesterdayDateStr },
         {
           $setOnInsert: {
-            user: new mongoose.Types.ObjectId(user1Id),
+            user: user1Id,
             visitDate: yesterdayDateStr,
             firstVisitedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
           },

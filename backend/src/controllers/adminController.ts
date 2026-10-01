@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+import mongoose from '../db/prismaBridge';
 import { Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
 import { AuthRequest } from '../middleware/authMiddleware';
@@ -4191,6 +4191,7 @@ export async function updateMaintenanceSettings(req: AuthRequest, res: Response,
 
     const prevSettings = await Setting.findOne();
     const settings = await Setting.findOneAndUpdate({}, { $set: updatePayload }, { upsert: true, new: true });
+    if (!settings) throw new Error('Failed to update settings');
     invalidateMaintenanceCache();
 
     const action =

@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import mongoose from 'mongoose';
 import { CookieOptions, Request } from 'express';
 import { SecurityLog, ISecurityLog } from '../models/SecurityLog';
 
@@ -18,18 +17,18 @@ export function hashToken(token: string): string {
 }
 
 /**
- * Escape special characters in user input before passing to MongoDB RegExp
+ * Escape special characters in user input before passing to RegExp
  */
 export function escapeRegex(text: string): string {
   return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
 }
 
 /**
- * Check if a string is a valid 24-character hex MongoDB ObjectId
+ * Check if a string is a valid 24-character hex ID (compatible with MongoDB ObjectId format)
  */
 export function isValidObjectId(id: string | undefined | null): boolean {
   if (!id || typeof id !== 'string') return false;
-  return mongoose.Types.ObjectId.isValid(id) && new mongoose.Types.ObjectId(id).toString() === id;
+  return /^[0-9a-fA-F]{24}$/.test(id);
 }
 
 /**

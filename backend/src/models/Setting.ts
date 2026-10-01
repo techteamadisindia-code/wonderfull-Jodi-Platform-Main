@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export interface ISetting extends Document {
   siteName: string;
@@ -54,5 +54,4 @@ const settingSchema = new Schema<ISetting>(
   { timestamps: true }
 );
 
-export const Setting =
-  mongoose.models.Setting || mongoose.model<ISetting>('Setting', settingSchema);
+export const Setting = createPrismaModelAdapter<ISetting>('setting');

@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
 
 export type LocationImportStatus =
   | 'UPLOADED'
@@ -128,5 +128,4 @@ const locationImportSchema = new Schema<ILocationImport>(
   { timestamps: true }
 );
 
-export const LocationImport =
-  mongoose.models.LocationImport || mongoose.model<ILocationImport>('LocationImport', locationImportSchema);
+export const LocationImport = createPrismaModelAdapter<ILocationImport>('locationImport', {"uploadedBy":"uploadedById"});

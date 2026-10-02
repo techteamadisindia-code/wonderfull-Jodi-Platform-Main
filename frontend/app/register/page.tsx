@@ -1008,9 +1008,20 @@ function RegisterForm() {
         setStep(2);
       }
     } catch (err: any) {
-      const msg = err.response?.data?.message || '';
+      const rawData = err.response?.data;
+      const msg =
+        (typeof rawData === 'object' && rawData?.message) ||
+        (typeof rawData === 'string' && rawData.length < 200 ? rawData : '') ||
+        err?.message ||
+        '';
+      const status = err.response?.status;
+
       if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('exists')) {
         setGlobalError('This email or mobile is already registered with an active account. Please sign in instead.');
+      } else if (status === 503 || msg.toLowerCase().includes('database')) {
+        setGlobalError('Database service is temporarily unavailable. Please try again shortly.');
+      } else if (err.code === 'ERR_NETWORK' || msg.toLowerCase().includes('network') || msg.toLowerCase().includes('socket')) {
+        setGlobalError('Network connection issue. Please check your internet connection or server availability.');
       } else {
         setGlobalError(msg || 'Could not save registration progress. Please check your details.');
       }

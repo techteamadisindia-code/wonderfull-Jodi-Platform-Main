@@ -13,38 +13,49 @@ export function normalizeApiUrl(rawUrl: string): string {
 
 /**
  * Dynamically resolves the API base URL:
- * 1. Explicit NEXT_PUBLIC_API_URL or NEXT_PUBLIC_BACKEND_URL (if provided)
+ * 1. In browser (production): always returns same-origin '/api' to avoid CORS, cookie, and proxy loops
  * 2. In browser (LAN/dev mode): connects directly to host PC on port 5000 (e.g. http://192.168.1.102:5000/api)
- * 3. Fallback to /api for production relative paths or SSR
+ * 3. In SSR (Server-Side Rendering): connects to local Express backend on 127.0.0.1
  */
 export function getApiBaseUrl(): string {
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    return normalizeApiUrl(process.env.NEXT_PUBLIC_API_URL);
-  }
-
-  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
-    return normalizeApiUrl(process.env.NEXT_PUBLIC_BACKEND_URL);
-  }
-
+  // 1. Browser runtime context
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname;
     const protocol = window.location.protocol;
-    // In production domain without IP
+
+    // Local / LAN network testing in non-production
     if (
-      process.env.NODE_ENV === 'production' &&
-      !/^(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)$/.test(
+      process.env.NODE_ENV !== 'production' &&
+      /^(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)$/.test(
         hostname
       )
     ) {
-      return '/api';
+      if (process.env.NEXT_PUBLIC_API_URL) {
+        return normalizeApiUrl(process.env.NEXT_PUBLIC_API_URL);
+      }
+      return `${protocol}//${hostname}:5000/api`;
     }
-    // In local or LAN network, connect directly to port 5000 on the host machine
-    return `${protocol}//${hostname}:5000/api`;
+
+    // In production browser, always use same-origin relative '/api'.
+    // This ensures cookies are automatically attached, eliminates CORS preflights,
+    // and prevents recursive proxy loops.
+    return '/api';
   }
 
-  return process.env.NODE_ENV === 'production'
-    ? 'https://wonderfuljodi.com/api'
-    : 'http://localhost:5000/api';
+  // 2. Server-Side Rendering (SSR) context
+  // Connect directly to the internal Express backend on 127.0.0.1
+  if (process.env.INTERNAL_BACKEND_URL) {
+    return normalizeApiUrl(process.env.INTERNAL_BACKEND_URL);
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    const port =
+      process.env.BACKEND_PORT ||
+      (process.env.PORT && process.env.FRONTEND_PORT ? process.env.PORT : '5000');
+    return `http://127.0.0.1:${port}/api`;
+  }
+
+  return 'http://127.0.0.1:5000/api';
 }
 
 export const apiClient = axios.create({

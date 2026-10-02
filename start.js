@@ -82,24 +82,12 @@ function launchNextServer() {
 
         HOSTNAME: '127.0.0.1',
 
-        /*
-         * IMPORTANT:
-         * Do NOT use 127.0.0.1 as the public backend URL.
-         *
-         * Next.js server-side rewrites can communicate with
-         * Express through localhost, but browser-side code
-         * must use the public domain.
-         */
+        // Internal Express backend location for Next.js server-side proxy
+        INTERNAL_BACKEND_URL: `http://127.0.0.1:${PUBLIC_PORT}`,
+        BACKEND_PORT: String(PUBLIC_PORT),
+
         NEXT_PUBLIC_APP_URL:
           process.env.NEXT_PUBLIC_APP_URL ||
-          'https://wonderfuljodi.com',
-
-        NEXT_PUBLIC_BACKEND_URL:
-          process.env.NEXT_PUBLIC_BACKEND_URL ||
-          'https://wonderfuljodi.com',
-
-        NEXT_PUBLIC_API_URL:
-          process.env.NEXT_PUBLIC_API_URL ||
           'https://wonderfuljodi.com',
       },
 
@@ -205,3 +193,12 @@ process.on(
   'SIGINT',
   () => handleShutdown('SIGINT')
 );
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Unhandled Rejection:', (reason && reason.message) || reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[Process] Uncaught Exception:', (error && error.message) || error);
+});
+

@@ -209,3 +209,12 @@ server.listen(PORT, HOST, async () => {
   );
   console.log('');
 });
+
+process.on('unhandledRejection', (reason: any) => {
+  console.error('[Process] Unhandled Rejection:', reason?.message || reason);
+});
+
+process.on('uncaughtException', (error: Error) => {
+  console.error('[Process] Uncaught Exception:', error?.message || error);
+});
+

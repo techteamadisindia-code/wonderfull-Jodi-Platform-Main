@@ -159,10 +159,19 @@ export async function adminLogin(req: Request, res: Response, next: NextFunction
     const normalizedEmail = email.toLowerCase().trim();
 
     // Query database for admin user
-    const user = await User.findOne({ email: normalizedEmail });
+    let user: any = null;
+    try {
+      user = await User.findOne({ email: normalizedEmail });
+    } catch (dbErr: any) {
+      console.error('[Admin Auth] Database lookup error during admin login:', dbErr?.message || dbErr);
+      return res.status(503).json({
+        success: false,
+        message: 'Database service is temporarily unavailable. Please verify database connection and credentials.',
+      });
+    }
 
-    const isUserAdmin = user && user.role === 'admin';
-    const passwordToCompare = (isUserAdmin && user.password) ? user.password : DUMMY_HASH;
+    const isUserAdmin = Boolean(user && user.role === 'admin');
+    const passwordToCompare = (isUserAdmin && user?.password) ? user.password : DUMMY_HASH;
 
     // Constant-time password comparison to prevent timing enumeration
     const isPasswordValid = await bcrypt.compare(password, passwordToCompare);
@@ -221,16 +230,20 @@ export async function adminLogin(req: Request, res: Response, next: NextFunction
       '127.0.0.1';
     const userAgent = req.headers['user-agent'] || 'Unknown';
 
-    await RefreshToken.create({
-      user: user._id,
-      tokenHash,
-      family: sessionFamily,
-      isUsed: false,
-      isRevoked: false,
-      expiresAt,
-      ipAddress,
-      userAgent,
-    });
+    try {
+      await RefreshToken.create({
+        user: user._id,
+        tokenHash,
+        family: sessionFamily,
+        isUsed: false,
+        isRevoked: false,
+        expiresAt,
+        ipAddress,
+        userAgent,
+      });
+    } catch (refErr: any) {
+      console.warn('[Admin Auth] Non-blocking RefreshToken create warning:', refErr?.message || refErr);
+    }
 
     const accessToken = signAdminAccessToken(user._id.toString(), user.role || 'admin', user.email, sessionId);
 
@@ -238,7 +251,12 @@ export async function adminLogin(req: Request, res: Response, next: NextFunction
     setAdminCookies(res, accessToken, rawRefreshToken);
 
     // Fetch extra permissions if Admin model record exists
-    const adminRecord = await Admin.findOne({ user: user._id });
+    let adminRecord = null;
+    try {
+      adminRecord = await Admin.findOne({ user: user._id });
+    } catch (adminErr: any) {
+      console.warn('[Admin Auth] Non-blocking Admin record lookup warning:', adminErr?.message || adminErr);
+    }
 
     // Record success audit & security log
     await recordAdminAudit(

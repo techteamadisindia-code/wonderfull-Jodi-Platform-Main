@@ -75,11 +75,16 @@ import {
   seedDefaultInstitutionsIfEmpty,
 } from './controllers/institutionController';
 
+import { ensureAdminUserExists } from './config/seed';
+
 import { globalLimiter } from './middleware/rateLimiters';
 import { errorHandler } from './middleware/errorHandler';
 import { checkMaintenanceMode } from './middleware/maintenanceMiddleware';
 
 dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), 'backend', '.env') });
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+dotenv.config({ path: path.resolve(__dirname, '..', '..', '.env') });
 
 const app = express();
 
@@ -894,6 +899,8 @@ connectDatabase()
      * These functions must use Prisma/MySQL.
      */
     try {
+      await ensureAdminUserExists();
+
       await seedDefaultCareersIfEmpty();
 
       await seedDefaultBlogsIfEmpty();
@@ -922,19 +929,9 @@ connectDatabase()
         error
     );
 
-    /*
-     * IMPORTANT:
-     * Do not silently continue with a broken
-     * production database.
-     */
-    if (
-      process.env.NODE_ENV ===
-      'production'
-    ) {
-      process.nextTick(() => {
-        process.exit(1);
-      });
-    }
+    console.warn(
+      '[Database] ⚠️ Server will remain running in degraded mode to serve health/error statuses. Please update DATABASE_URL with valid credentials.'
+    );
   });
 
 export default app;

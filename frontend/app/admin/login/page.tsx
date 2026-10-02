@@ -103,10 +103,17 @@ function AdminLoginForm() {
       router.replace(targetUrl);
     } catch (err: any) {
       console.error('Admin login authentication error:', err?.message);
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        'Invalid email or password.';
+      let msg = err?.response?.data?.message;
+      if (!msg) {
+        const statusCode = err?.response?.status;
+        if (statusCode === 500 || statusCode === 503) {
+          msg = 'Unable to reach the authentication database. Please ensure the backend database credentials in backend/.env are configured and active.';
+        } else if (err?.code === 'ERR_NETWORK' || err?.message?.includes('Network Error')) {
+          msg = 'Network connection failed. Please verify that the backend API server is reachable.';
+        } else {
+          msg = err?.message || 'Invalid email or password.';
+        }
+      }
       setError(msg);
     } finally {
       setLoading(false);

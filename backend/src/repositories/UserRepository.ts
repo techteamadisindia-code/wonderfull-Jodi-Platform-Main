@@ -62,30 +62,24 @@ export class UserRepository {
     return toClient(user);
   }
 
-  static async updateStatus(id: string, status: string, reason?: string, byAdminId?: string) {
+  static async updateStatus(id: string, status: string, _reason?: string, _byAdminId?: string) {
     const user = await prisma.user.update({
       where: { id: String(id) },
       data: {
         status,
         isActive: status === 'Active',
-        suspensionReason: reason,
-        suspendedAt: status === 'Suspended' ? new Date() : null,
-        suspendedById: byAdminId,
       },
     });
     return toClient(user);
   }
 
-  static async softDelete(id: string, reason?: string, byAdminId?: string) {
+  static async softDelete(id: string, _reason?: string, _byAdminId?: string) {
     const user = await prisma.user.update({
       where: { id: String(id) },
       data: {
         isDeleted: true,
         status: 'Deleted',
         isActive: false,
-        deletedAt: new Date(),
-        deletedById: byAdminId,
-        deletionReason: reason,
       },
     });
     return toClient(user);

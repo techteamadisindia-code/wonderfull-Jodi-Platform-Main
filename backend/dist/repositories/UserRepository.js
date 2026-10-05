@@ -51,29 +51,23 @@ class UserRepository {
         });
         return (0, client_1.toClient)(user);
     }
-    static async updateStatus(id, status, reason, byAdminId) {
+    static async updateStatus(id, status, _reason, _byAdminId) {
         const user = await client_1.prisma.user.update({
             where: { id: String(id) },
             data: {
                 status,
                 isActive: status === 'Active',
-                suspensionReason: reason,
-                suspendedAt: status === 'Suspended' ? new Date() : null,
-                suspendedById: byAdminId,
             },
         });
         return (0, client_1.toClient)(user);
     }
-    static async softDelete(id, reason, byAdminId) {
+    static async softDelete(id, _reason, _byAdminId) {
         const user = await client_1.prisma.user.update({
             where: { id: String(id) },
             data: {
                 isDeleted: true,
                 status: 'Deleted',
                 isActive: false,
-                deletedAt: new Date(),
-                deletedById: byAdminId,
-                deletionReason: reason,
             },
         });
         return (0, client_1.toClient)(user);

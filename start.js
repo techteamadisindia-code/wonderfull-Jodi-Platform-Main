@@ -156,7 +156,7 @@ function patchRoutesManifest() {
 // 6. FRONTEND READINESS PROBE
 // ─────────────────────────────────────────────────────────────────────────────
 
-function waitForFrontendReady(port, host = '127.0.0.1', timeoutMs = 12000) {
+function waitForFrontendReady(port, host = '127.0.0.1', timeoutMs = 30000) {
   const start = Date.now();
   return new Promise((resolve) => {
     function tryProbe() {
@@ -169,22 +169,27 @@ function waitForFrontendReady(port, host = '127.0.0.1', timeoutMs = 12000) {
           hostname: host,
           port: port,
           path: '/',
-          method: 'HEAD',
-          timeout: 1000,
+          method: 'GET',
+          timeout: 4000,
+          headers: {
+            'User-Agent': 'WonderfulJodi-ReadinessProbe/1.0',
+            'Accept': 'text/html,*/*',
+          },
         },
         (res) => {
           res.resume();
+          // Any HTTP response proves the Next.js HTTP server is active and processing requests
           resolve(true);
         }
       );
 
       req.on('error', () => {
-        setTimeout(tryProbe, 200);
+        setTimeout(tryProbe, 250);
       });
 
       req.on('timeout', () => {
         req.destroy();
-        setTimeout(tryProbe, 200);
+        setTimeout(tryProbe, 250);
       });
 
       req.end();
@@ -247,10 +252,10 @@ async function startFrontend() {
   frontendProcess = child;
   isStartingFrontend = false;
 
-  console.log(`[Frontend] Next.js started successfully with PID ${child.pid}`);
+  console.log(`[Frontend] Next.js process spawned successfully (PID: ${child.pid}, Host: 127.0.0.1, Port: ${FRONTEND_PORT})`);
 
   child.on('error', (error) => {
-    console.error(`[Frontend] Next.js process failed to start (PID: ${child.pid || 'unknown'}):`, error.message);
+    console.error(`[Frontend] Next.js child process failed to start (PID: ${child.pid || 'unknown'}):`, error.message);
     if (frontendProcess === child) {
       frontendProcess = null;
     }
@@ -266,20 +271,20 @@ async function startFrontend() {
     }
 
     if (isShuttingDown) {
-      console.log(`[Shutdown] Next.js frontend (PID ${pid}) exited during shutdown (Code: ${code}, Signal: ${signal}).`);
+      console.log(`[Shutdown] Next.js frontend (PID: ${pid}) exited during shutdown (Exit Code: ${code}, Signal: ${signal}).`);
     } else {
-      console.error(`[Frontend] Next.js exited unexpectedly (Code: ${code}, Signal: ${signal}) on 127.0.0.1:${FRONTEND_PORT} (PID: ${pid})`);
+      console.error(`[Frontend] Next.js child process (PID: ${pid}) exited unexpectedly (Exit Code: ${code}, Signal: ${signal}) on 127.0.0.1:${FRONTEND_PORT}`);
       // Do not leave Express running in a broken half-state without frontend
       handleShutdown('SIGTERM');
     }
   });
 
-  // Probe until Next.js is responding before Express opens to the public
-  const ready = await waitForFrontendReady(FRONTEND_PORT, '127.0.0.1', 12000);
+  // Probe until Next.js is responding to real HTTP requests
+  const ready = await waitForFrontendReady(FRONTEND_PORT, '127.0.0.1', 30000);
   if (ready) {
-    console.log(`[Frontend] Next.js is ready and listening on 127.0.0.1:${FRONTEND_PORT}`);
+    console.log(`[Frontend] Next.js is confirmed ready and responding to HTTP requests on 127.0.0.1:${FRONTEND_PORT}`);
   } else if (!isShuttingDown) {
-    console.error(`[Frontend] ERROR: Next.js did not become ready on 127.0.0.1:${FRONTEND_PORT} within 12s. Cannot start production application.`);
+    console.error(`[Frontend] ERROR: Next.js did not respond to HTTP requests on 127.0.0.1:${FRONTEND_PORT} within 30s. Cannot start production application.`);
     await handleShutdown('SIGTERM');
   }
 }

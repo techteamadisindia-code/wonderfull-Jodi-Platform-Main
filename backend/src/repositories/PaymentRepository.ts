@@ -33,12 +33,11 @@ export class PaymentRepository {
     return toClient(payment);
   }
 
-  static async verifyPayment(orderId: string, paymentId: string, signature: string) {
+  static async verifyPayment(orderId: string, paymentId: string, _signature: string) {
     const payment = await prisma.payment.updateMany({
       where: { orderId },
       data: {
         paymentId,
-        razorpaySignature: signature,
         status: 'SUCCESS',
       },
     });

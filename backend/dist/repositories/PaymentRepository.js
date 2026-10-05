@@ -26,12 +26,11 @@ class PaymentRepository {
         });
         return (0, client_1.toClient)(payment);
     }
-    static async verifyPayment(orderId, paymentId, signature) {
+    static async verifyPayment(orderId, paymentId, _signature) {
         const payment = await client_1.prisma.payment.updateMany({
             where: { orderId },
             data: {
                 paymentId,
-                razorpaySignature: signature,
                 status: 'SUCCESS',
             },
         });

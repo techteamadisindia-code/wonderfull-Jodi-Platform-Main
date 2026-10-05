@@ -1,8 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PrismaQueryBuilder = void 0;
+exports.mongoose = exports.Schema = exports.Types = exports.PrismaUpdateQuery = exports.PrismaQueryBuilder = void 0;
 exports.normalizeFilter = normalizeFilter;
 exports.normalizeSort = normalizeSort;
+exports.cleanPrismaData = cleanPrismaData;
+exports.prepareUpdateData = prepareUpdateData;
+exports.prepareSetOnInsertData = prepareSetOnInsertData;
+exports.runPrismaAggregate = runPrismaAggregate;
 exports.createPrismaModelAdapter = createPrismaModelAdapter;
 const client_1 = require("./client");
 /**
@@ -14,14 +18,60 @@ function normalizeFilter(filter = {}, fieldMap = {}) {
     if (Array.isArray(filter))
         return filter.map((f) => normalizeFilter(f, fieldMap));
     const where = {};
-    for (const [rawKey, rawVal] of Object.entries(filter)) {
+    for (const [rawKey, rawValInitial] of Object.entries(filter)) {
         let key = rawKey;
+        let rawVal = rawValInitial;
         // Handle _id -> id mapping
         if (key === '_id') {
             key = 'id';
         }
         else if (fieldMap[key]) {
             key = fieldMap[key];
+        }
+        // Convert ObjectId instances or objects with _id/id to string
+        if (rawVal && typeof rawVal === 'object') {
+            if (rawVal._id)
+                rawVal = String(rawVal._id);
+            else if (rawVal.id && typeof rawVal.id === 'string' && rawVal.id.length >= 24)
+                rawVal = String(rawVal.id);
+            else if (typeof rawVal.toString === 'function' && rawVal.constructor?.name === 'ObjectId') {
+                rawVal = rawVal.toString();
+            }
+        }
+        // Participants relational filter mapping for Conversation
+        if (key === 'participants') {
+            if (rawVal && typeof rawVal === 'object' && ('$all' in rawVal || Array.isArray(rawVal.$all))) {
+                const allList = rawVal.$all || [];
+                const normalizedIds = allList.map((v) => v && typeof v === 'object' ? String(v._id || v.id) : String(v));
+                if (!where.AND)
+                    where.AND = [];
+                for (const pId of normalizedIds) {
+                    where.AND.push({ participants: { some: { userId: pId } } });
+                }
+                where.AND.push({ participants: { every: { userId: { in: normalizedIds } } } });
+                continue;
+            }
+            if (rawVal && typeof rawVal === 'object' && '$in' in rawVal) {
+                const inList = rawVal.$in || [];
+                const normalizedIds = (Array.isArray(inList) ? inList : [inList]).map((v) => v && typeof v === 'object' ? String(v._id || v.id) : String(v));
+                where.participants = { some: { userId: { in: normalizedIds } } };
+                continue;
+            }
+            if (rawVal && typeof rawVal === 'object' && '$eq' in rawVal) {
+                const eqVal = rawVal.$eq;
+                const targetId = eqVal && typeof eqVal === 'object' ? String(eqVal._id || eqVal.id) : String(eqVal);
+                where.participants = { some: { userId: targetId } };
+                continue;
+            }
+            if (rawVal && typeof rawVal === 'object' && !Array.isArray(rawVal) && !(rawVal instanceof Date)) {
+                if (rawVal.some || rawVal.every || rawVal.none) {
+                    where.participants = rawVal;
+                    continue;
+                }
+            }
+            const targetId = rawVal && typeof rawVal === 'object' ? String(rawVal._id || rawVal.id || rawVal.toString()) : String(rawVal);
+            where.participants = { some: { userId: targetId } };
+            continue;
         }
         // Logical Operators
         if (key === '$or') {
@@ -58,11 +108,19 @@ function normalizeFilter(filter = {}, fieldMap = {}) {
                 hasOp = true;
             }
             if ('$in' in opObj) {
-                parsedOps.in = Array.isArray(opObj.$in) ? opObj.$in : [opObj.$in];
+                parsedOps.in = (Array.isArray(opObj.$in) ? opObj.$in : [opObj.$in]).map((v) => v && typeof v === 'object' && (v._id || v.id)
+                    ? String(v._id || v.id)
+                    : v && typeof v.toString === 'function' && v.constructor?.name === 'ObjectId'
+                        ? v.toString()
+                        : v);
                 hasOp = true;
             }
             if ('$nin' in opObj) {
-                parsedOps.notIn = Array.isArray(opObj.$nin) ? opObj.$nin : [opObj.$nin];
+                parsedOps.notIn = (Array.isArray(opObj.$nin) ? opObj.$nin : [opObj.$nin]).map((v) => v && typeof v === 'object' && (v._id || v.id)
+                    ? String(v._id || v.id)
+                    : v && typeof v.toString === 'function' && v.constructor?.name === 'ObjectId'
+                        ? v.toString()
+                        : v);
                 hasOp = true;
             }
             if ('$gt' in opObj) {
@@ -130,15 +188,169 @@ function normalizeSort(sort) {
     return undefined;
 }
 /**
+ * Clean data to conform to Prisma expectations
+ */
+function cleanPrismaData(data, fieldMap = {}) {
+    if (!data || typeof data !== 'object')
+        return data;
+    const clean = { ...data };
+    // Remove internal artifacts
+    delete clean.__v;
+    delete clean.save;
+    delete clean.toObject;
+    delete clean.toJSON;
+    delete clean.$__;
+    delete clean.$isNew;
+    // Remap fields from fieldMap (e.g. user -> userId)
+    for (const [k, v] of Object.entries(fieldMap)) {
+        if (clean[k] !== undefined) {
+            const val = clean[k];
+            clean[v] =
+                val && typeof val === 'object' && (val._id || val.id)
+                    ? String(val._id || val.id)
+                    : val && typeof val.toString === 'function' && val.constructor?.name === 'ObjectId'
+                        ? val.toString()
+                        : val;
+            delete clean[k];
+        }
+    }
+    // Convert any remaining ObjectId values in fields to string
+    for (const [key, val] of Object.entries(clean)) {
+        if (val && typeof val === 'object') {
+            const v = val;
+            if (v._id)
+                clean[key] = String(v._id);
+            else if (v.id && typeof v.id === 'string' && v.id.length >= 24)
+                clean[key] = String(v.id);
+            else if (typeof v.toString === 'function' && v.constructor?.name === 'ObjectId') {
+                clean[key] = v.toString();
+            }
+        }
+    }
+    return clean;
+}
+/**
+ * Prepares data for update operation.
+ * Returns normal update data; `$setOnInsert` is handled separately
+ * by the upsert-aware update methods.
+ */
+function prepareUpdateData(update, fieldMap = {}) {
+    if (!update || typeof update !== 'object')
+        return {};
+    let data = {};
+    if (update.$set) {
+        data = { ...update.$set };
+    }
+    else {
+        data = { ...update };
+    }
+    delete data._id;
+    delete data.id;
+    delete data.$set;
+    delete data.$unset;
+    delete data.$setOnInsert;
+    delete data.$inc;
+    // Handle $inc
+    if (update.$inc) {
+        for (const [incKey, incVal] of Object.entries(update.$inc)) {
+            const targetKey = fieldMap[incKey] || incKey;
+            data[targetKey] = { increment: Number(incVal) };
+        }
+    }
+    // Strip raw participants array on scalar update to avoid Prisma validation error
+    if (Array.isArray(data.participants)) {
+        delete data.participants;
+    }
+    return cleanPrismaData(data, fieldMap);
+}
+/**
+ * Prepares fields that should only be applied when an upsert
+ * creates a new record.
+ */
+function prepareSetOnInsertData(update, fieldMap = {}) {
+    if (!update || typeof update !== 'object' || !update.$setOnInsert) {
+        return {};
+    }
+    const data = { ...update.$setOnInsert };
+    delete data._id;
+    delete data.id;
+    return cleanPrismaData(data, fieldMap);
+}
+/**
+ * Attaches a `.save()` method to a returned database record so it behaves like a Mongoose document.
+ */
+function attachSave(record, delegate, fieldMap = {}) {
+    if (!record || typeof record !== 'object')
+        return record;
+    Object.defineProperty(record, 'save', {
+        enumerable: false,
+        writable: true,
+        configurable: true,
+        value: async function () {
+            const self = this;
+            const id = self.id || self._id;
+            const dataToSave = cleanPrismaData({ ...self }, fieldMap);
+            delete dataToSave.id;
+            delete dataToSave._id;
+            if (Array.isArray(dataToSave.participants)) {
+                delete dataToSave.participants;
+            }
+            for (const [key, val] of Object.entries(dataToSave)) {
+                if (typeof val === 'function') {
+                    delete dataToSave[key];
+                }
+            }
+            const currentParticipants = self.participants;
+            const saved = await delegate.upsert({
+                where: { id },
+                create: { id, ...dataToSave },
+                update: dataToSave,
+            });
+            Object.assign(self, (0, client_1.toClient)(saved));
+            if (currentParticipants !== undefined) {
+                self.participants = currentParticipants;
+            }
+            return self;
+        },
+    });
+    if (!record.toObject) {
+        Object.defineProperty(record, 'toObject', {
+            enumerable: false,
+            writable: true,
+            configurable: true,
+            value: function () {
+                const obj = { ...this };
+                delete obj.save;
+                delete obj.toObject;
+                delete obj.toJSON;
+                return obj;
+            },
+        });
+    }
+    if (!record.toJSON) {
+        Object.defineProperty(record, 'toJSON', {
+            enumerable: false,
+            writable: true,
+            configurable: true,
+            value: function () {
+                return this.toObject ? this.toObject() : { ...this };
+            },
+        });
+    }
+    return record;
+}
+/**
  * Chainable query builder simulating Mongoose Query API on top of Prisma.
  */
 class PrismaQueryBuilder {
-    constructor(prismaDelegate, filter = {}, isFindOne = false, fieldMap = {}) {
+    constructor(prismaDelegate, filter = {}, isFindOne = false, fieldMap = {}, delegateName = '') {
         this.queryOptions = {};
+        this.populateParticipants = false;
         this.prismaDelegate = prismaDelegate;
         this.fieldMap = fieldMap;
         this.where = normalizeFilter(filter, fieldMap);
         this.isFindOne = isFindOne;
+        this.delegateName = delegateName;
     }
     sort(sortObj) {
         this.queryOptions.sort = normalizeSort(sortObj);
@@ -153,7 +365,6 @@ class PrismaQueryBuilder {
         return this;
     }
     select(fields) {
-        // If fields is string like "-password" or "fullName email"
         if (typeof fields === 'string') {
             const parts = fields.split(/\s+/).filter(Boolean);
             const isExclusion = parts.some((p) => p.startsWith('-'));
@@ -173,6 +384,28 @@ class PrismaQueryBuilder {
         if (!this.queryOptions.include) {
             this.queryOptions.include = {};
         }
+        if (this.delegateName === 'conversation' && targetPath === 'participants') {
+            const selectFieldsObj = { id: true };
+            if (targetSelect && typeof targetSelect === 'string') {
+                targetSelect.split(/\s+/).filter(Boolean).forEach((f) => {
+                    selectFieldsObj[f === '_id' ? 'id' : f] = true;
+                });
+                this.queryOptions.include.participants = {
+                    include: {
+                        user: { select: selectFieldsObj },
+                    },
+                };
+            }
+            else {
+                this.queryOptions.include.participants = {
+                    include: {
+                        user: true,
+                    },
+                };
+            }
+            this.populateParticipants = true;
+            return this;
+        }
         if (targetSelect && typeof targetSelect === 'string') {
             const selectFieldsObj = { id: true };
             targetSelect.split(/\s+/).filter(Boolean).forEach((f) => {
@@ -190,6 +423,11 @@ class PrismaQueryBuilder {
     }
     async exec() {
         const args = { where: this.where };
+        if (this.delegateName === 'conversation' && !this.queryOptions.select && !this.queryOptions.include?.participants) {
+            if (!this.queryOptions.include)
+                this.queryOptions.include = {};
+            this.queryOptions.include.participants = true;
+        }
         if (this.queryOptions.sort)
             args.orderBy = this.queryOptions.sort;
         if (this.queryOptions.skip !== undefined)
@@ -200,13 +438,28 @@ class PrismaQueryBuilder {
             args.select = this.queryOptions.select;
         if (this.queryOptions.include)
             args.include = this.queryOptions.include;
+        const formatConversation = (rec) => {
+            if (!rec)
+                return rec;
+            if (this.delegateName === 'conversation' && Array.isArray(rec.participants)) {
+                if (this.populateParticipants) {
+                    rec.participants = rec.participants.map((cp) => (0, client_1.toClient)(cp.user ? { ...cp.user, _id: cp.user.id } : { _id: cp.userId, id: cp.userId }));
+                }
+                else {
+                    rec.participants = rec.participants.map((cp) => cp.userId ? cp.userId : String(cp._id || cp.id || cp));
+                }
+            }
+            return rec;
+        };
         if (this.isFindOne) {
             const record = await this.prismaDelegate.findFirst(args);
-            return (0, client_1.toClient)(record);
+            const clientRecord = formatConversation((0, client_1.toClient)(record));
+            return attachSave(clientRecord, this.prismaDelegate, this.fieldMap);
         }
         else {
             const records = await this.prismaDelegate.findMany(args);
-            return (0, client_1.toClientArray)(records);
+            const clientRecords = (0, client_1.toClientArray)(records).map((r) => attachSave(formatConversation(r), this.prismaDelegate, this.fieldMap));
+            return clientRecords;
         }
     }
     then(onfulfilled, onrejected) {
@@ -217,131 +470,552 @@ class PrismaQueryBuilder {
     }
 }
 exports.PrismaQueryBuilder = PrismaQueryBuilder;
+class PrismaUpdateQuery {
+    constructor(updateFn) {
+        this.populateList = [];
+        this.updateFn = updateFn;
+    }
+    select(...args) {
+        return this;
+    }
+    populate(path, selectFields) {
+        const targetPath = typeof path === 'string' ? path : path.path;
+        const targetSelect = typeof path === 'object' && path.select ? path.select : selectFields;
+        this.populateList.push({ path: targetPath, select: targetSelect });
+        return this;
+    }
+    lean() {
+        return this;
+    }
+    exec() {
+        return this.updateFn({ populate: this.populateList });
+    }
+    then(onfulfilled, onrejected) {
+        return this.exec().then(onfulfilled, onrejected);
+    }
+    catch(onrejected) {
+        return this.exec().catch(onrejected);
+    }
+}
+exports.PrismaUpdateQuery = PrismaUpdateQuery;
+/**
+ * Robust in-memory aggregation runner for MongoDB pipelines over MySQL/Prisma records.
+ */
+async function runPrismaAggregate(delegate, pipeline = [], fieldMap = {}) {
+    if (!Array.isArray(pipeline) || pipeline.length === 0) {
+        return [];
+    }
+    let initialWhere = {};
+    let startIndex = 0;
+    if (pipeline[0] && pipeline[0].$match) {
+        initialWhere = normalizeFilter(pipeline[0].$match, fieldMap);
+        startIndex = 1;
+    }
+    const rawRecords = await delegate.findMany({ where: initialWhere });
+    let current = (0, client_1.toClientArray)(rawRecords);
+    for (let i = startIndex; i < pipeline.length; i++) {
+        const stage = pipeline[i];
+        const stageType = Object.keys(stage)[0];
+        const stageVal = stage[stageType];
+        switch (stageType) {
+            case '$match': {
+                const filter = stageVal;
+                current = current.filter((item) => {
+                    for (const [k, v] of Object.entries(filter)) {
+                        const itemKey = k === '_id' ? 'id' : k;
+                        if (typeof v === 'object' && v !== null) {
+                            if ('$gt' in v && !(item[itemKey] > v.$gt))
+                                return false;
+                            if ('$gte' in v && !(item[itemKey] >= v.$gte))
+                                return false;
+                            if ('$lt' in v && !(item[itemKey] < v.$lt))
+                                return false;
+                            if ('$lte' in v && !(item[itemKey] <= v.$lte))
+                                return false;
+                            if ('$ne' in v && item[itemKey] === v.$ne)
+                                return false;
+                            if ('$in' in v && !(v.$in.includes(item[itemKey])))
+                                return false;
+                        }
+                        else if (item[itemKey] !== v) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+                break;
+            }
+            case '$group': {
+                const groups = new Map();
+                const idExpr = stageVal._id;
+                for (const doc of current) {
+                    let key = null;
+                    if (idExpr === null) {
+                        key = '__null__';
+                    }
+                    else if (typeof idExpr === 'string' && idExpr.startsWith('$')) {
+                        const field = idExpr.slice(1);
+                        key = doc[field];
+                    }
+                    else {
+                        key = idExpr;
+                    }
+                    const keyStr = typeof key === 'object' ? JSON.stringify(key) : String(key);
+                    if (!groups.has(keyStr)) {
+                        groups.set(keyStr, []);
+                    }
+                    groups.get(keyStr).push(doc);
+                }
+                const results = [];
+                for (const [, docs] of groups.entries()) {
+                    const groupResult = {};
+                    const first = docs[0];
+                    if (idExpr === null) {
+                        groupResult._id = null;
+                    }
+                    else if (typeof idExpr === 'string' && idExpr.startsWith('$')) {
+                        const field = idExpr.slice(1);
+                        groupResult._id = first[field];
+                    }
+                    else {
+                        groupResult._id = idExpr;
+                    }
+                    for (const [prop, acc] of Object.entries(stageVal)) {
+                        if (prop === '_id')
+                            continue;
+                        if (typeof acc === 'object' && acc !== null) {
+                            if ('$sum' in acc) {
+                                const sumExpr = acc.$sum;
+                                let sum = 0;
+                                for (const d of docs) {
+                                    if (typeof sumExpr === 'number') {
+                                        sum += sumExpr;
+                                    }
+                                    else if (typeof sumExpr === 'string' && sumExpr.startsWith('$')) {
+                                        sum += Number(d[sumExpr.slice(1)]) || 0;
+                                    }
+                                    else if (typeof sumExpr === 'object' && sumExpr.$cond) {
+                                        const [cond, trueVal, falseVal] = sumExpr.$cond;
+                                        let isTrue = false;
+                                        if (cond?.$in) {
+                                            const [targetField, targetList] = cond.$in;
+                                            const val = typeof targetField === 'string' && targetField.startsWith('$')
+                                                ? d[targetField.slice(1)]
+                                                : targetField;
+                                            isTrue = Array.isArray(targetList) && targetList.includes(val);
+                                        }
+                                        const valToAdd = isTrue
+                                            ? typeof trueVal === 'string' && trueVal.startsWith('$')
+                                                ? Number(d[trueVal.slice(1)]) || 0
+                                                : Number(trueVal) || 0
+                                            : typeof falseVal === 'string' && falseVal.startsWith('$')
+                                                ? Number(d[falseVal.slice(1)]) || 0
+                                                : Number(falseVal) || 0;
+                                        sum += valToAdd;
+                                    }
+                                }
+                                groupResult[prop] = sum;
+                            }
+                            else if ('$addToSet' in acc) {
+                                const field = acc.$addToSet;
+                                const set = new Set();
+                                for (const d of docs) {
+                                    const val = typeof field === 'string' && field.startsWith('$') ? d[field.slice(1)] : field;
+                                    if (val !== undefined && val !== null)
+                                        set.add(val);
+                                }
+                                groupResult[prop] = Array.from(set);
+                            }
+                            else if ('$push' in acc) {
+                                const field = acc.$push;
+                                groupResult[prop] = docs.map((d) => typeof field === 'string' && field.startsWith('$') ? d[field.slice(1)] : field);
+                            }
+                        }
+                    }
+                    results.push(groupResult);
+                }
+                current = results;
+                break;
+            }
+            case '$project': {
+                current = current.map((doc) => {
+                    const res = {};
+                    for (const [field, spec] of Object.entries(stageVal)) {
+                        if (spec === 1 || spec === true) {
+                            res[field] = doc[field];
+                        }
+                        else if (typeof spec === 'string' && spec.startsWith('$')) {
+                            res[field] = doc[spec.slice(1)];
+                        }
+                        else if (typeof spec === 'object' && spec !== null) {
+                            if ('$size' in spec) {
+                                const target = spec.$size;
+                                const arr = typeof target === 'string' && target.startsWith('$') ? doc[target.slice(1)] : target;
+                                res[field] = Array.isArray(arr) ? arr.length : 0;
+                            }
+                        }
+                    }
+                    return res;
+                });
+                break;
+            }
+            case '$sort': {
+                const norm = normalizeSort(stageVal);
+                if (norm) {
+                    current = [...current].sort((a, b) => {
+                        for (const [field, dir] of Object.entries(norm)) {
+                            const valA = a[field];
+                            const valB = b[field];
+                            if (valA < valB)
+                                return dir === 'desc' ? 1 : -1;
+                            if (valA > valB)
+                                return dir === 'desc' ? -1 : 1;
+                        }
+                        return 0;
+                    });
+                }
+                break;
+            }
+            case '$skip': {
+                current = current.slice(Number(stageVal) || 0);
+                break;
+            }
+            case '$limit': {
+                current = current.slice(0, Number(stageVal) || 0);
+                break;
+            }
+            case '$count': {
+                current = [{ [stageVal]: current.length }];
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return current;
+}
 /**
  * Creates a Model Adapter wrapping a Prisma Delegate.
+ * Provides a 100% MySQL/Prisma backed drop-in replacement for Mongoose models.
  */
 function createPrismaModelAdapter(delegateName, fieldMap = {}) {
-    const delegate = client_1.prisma[delegateName];
-    return {
-        find(filter = {}) {
-            return new PrismaQueryBuilder(delegate, filter, false, fieldMap);
-        },
-        findOne(filter = {}) {
-            return new PrismaQueryBuilder(delegate, filter, true, fieldMap);
-        },
-        findById(id) {
-            const stringId = id?._id ? String(id._id) : String(id);
-            return new PrismaQueryBuilder(delegate, { id: stringId }, true, fieldMap);
-        },
-        async create(data) {
-            if (Array.isArray(data)) {
-                const results = [];
-                for (const item of data) {
-                    const id = item.id || item._id || (0, client_1.generateObjectId)();
-                    const cleanItem = { ...item, id };
-                    delete cleanItem._id;
-                    const created = await delegate.create({ data: cleanItem });
-                    results.push((0, client_1.toClient)(created));
-                }
-                return results;
+    const getDelegate = () => client_1.prisma[delegateName];
+    function ModelConstructor(data = {}) {
+        if (!(this instanceof ModelConstructor)) {
+            return new ModelConstructor(data);
+        }
+        const clean = cleanPrismaData(data, fieldMap);
+        Object.assign(this, clean);
+        const self = this;
+        if (!self.id && !self._id) {
+            const newId = (0, client_1.generateObjectId)();
+            self.id = newId;
+            self._id = newId;
+        }
+        else if (self.id && !self._id) {
+            self._id = self.id;
+        }
+        else if (self._id && !self.id) {
+            self.id = self._id;
+        }
+        attachSave(this, getDelegate(), fieldMap);
+    }
+    ModelConstructor.prototype.toObject = function () {
+        const obj = { ...this };
+        delete obj.save;
+        delete obj.toObject;
+        delete obj.toJSON;
+        return obj;
+    };
+    ModelConstructor.prototype.toJSON = function () {
+        return this.toObject();
+    };
+    ModelConstructor.find = function (filter = {}) {
+        return new PrismaQueryBuilder(getDelegate(), filter, false, fieldMap, String(delegateName));
+    };
+    ModelConstructor.findOne = function (filter = {}) {
+        return new PrismaQueryBuilder(getDelegate(), filter, true, fieldMap, String(delegateName));
+    };
+    ModelConstructor.findById = function (id) {
+        const stringId = id?._id ? String(id._id) : id?.id ? String(id.id) : String(id);
+        return new PrismaQueryBuilder(getDelegate(), { id: stringId }, true, fieldMap, String(delegateName));
+    };
+    ModelConstructor.create = async function (data) {
+        const delegate = getDelegate();
+        if (Array.isArray(data)) {
+            const results = [];
+            for (const item of data) {
+                const res = await ModelConstructor.create(item);
+                results.push(res);
             }
-            const id = data.id || data._id || (0, client_1.generateObjectId)();
-            const cleanData = { ...data, id };
-            delete cleanData._id;
-            // Map relation fields if needed (e.g. user -> userId)
-            for (const [k, v] of Object.entries(fieldMap)) {
-                if (cleanData[k] !== undefined) {
-                    cleanData[v] = typeof cleanData[k] === 'object' && cleanData[k]?._id
-                        ? String(cleanData[k]._id)
-                        : String(cleanData[k]);
-                    delete cleanData[k];
-                }
-            }
-            const created = await delegate.create({ data: cleanData });
-            return (0, client_1.toClient)(created);
-        },
-        async updateOne(filter, update, options = {}) {
-            const where = normalizeFilter(filter, fieldMap);
-            const updateData = update.$set ? { ...update.$set } : { ...update };
-            delete updateData._id;
-            delete updateData.id;
-            // Handle increment
-            if (update.$inc) {
-                for (const [incKey, incVal] of Object.entries(update.$inc)) {
-                    updateData[incKey] = { increment: incVal };
-                }
-            }
-            const result = await delegate.updateMany({
-                where,
-                data: updateData,
+            return results;
+        }
+        const id = data.id || data._id || (0, client_1.generateObjectId)();
+        if (delegateName === 'conversation' && data.participants && Array.isArray(data.participants)) {
+            const participantIds = data.participants.map((p) => p && typeof p === 'object' ? String(p._id || p.id) : String(p));
+            const cleanData = cleanPrismaData({ ...data, id }, fieldMap);
+            delete cleanData.participants;
+            const created = await delegate.create({
+                data: {
+                    ...cleanData,
+                    participants: {
+                        create: participantIds.map((uId) => ({ userId: uId })),
+                    },
+                },
+                include: {
+                    participants: true,
+                },
             });
-            return {
-                acknowledged: true,
-                matchedCount: result.count,
-                modifiedCount: result.count,
-                upsertedId: null,
-            };
-        },
-        async updateMany(filter, update, options = {}) {
-            return this.updateOne(filter, update, options);
-        },
-        async findByIdAndUpdate(id, update, options = {}) {
-            const stringId = id?._id ? String(id._id) : String(id);
-            const updateData = update.$set ? { ...update.$set } : { ...update };
-            delete updateData._id;
-            delete updateData.id;
-            if (update.$inc) {
-                for (const [incKey, incVal] of Object.entries(update.$inc)) {
-                    updateData[incKey] = { increment: incVal };
-                }
-            }
+            const clientObj = (0, client_1.toClient)(created);
+            clientObj.participants = participantIds;
+            return attachSave(clientObj, delegate, fieldMap);
+        }
+        const cleanData = cleanPrismaData({ ...data, id }, fieldMap);
+        const created = await delegate.create({ data: cleanData });
+        return attachSave((0, client_1.toClient)(created), delegate, fieldMap);
+    };
+    ModelConstructor.insertMany = async function (data, options) {
+        return ModelConstructor.create(data);
+    };
+    ModelConstructor.updateOne = async function (filter, update, options = {}) {
+        const delegate = getDelegate();
+        const where = normalizeFilter(filter, fieldMap);
+        const updateData = prepareUpdateData(update, fieldMap);
+        const result = await delegate.updateMany({
+            where,
+            data: updateData,
+        });
+        return {
+            acknowledged: true,
+            matchedCount: result.count,
+            modifiedCount: result.count,
+            upsertedId: null,
+        };
+    };
+    ModelConstructor.updateMany = async function (filter, update, options = {}) {
+        return ModelConstructor.updateOne(filter, update, options);
+    };
+    ModelConstructor.findByIdAndUpdate = function (id, update, options = {}) {
+        return new PrismaUpdateQuery(async (opts) => {
+            const delegate = getDelegate();
+            const stringId = id?._id ? String(id._id) : id?.id ? String(id.id) : String(id);
+            const updateData = prepareUpdateData(update, fieldMap);
             try {
                 const updated = await delegate.update({
                     where: { id: stringId },
                     data: updateData,
                 });
-                return (0, client_1.toClient)(updated);
+                const clientObj = (0, client_1.toClient)(updated);
+                if (delegateName === 'conversation') {
+                    const populateParticipantsOpt = opts?.populate?.find((p) => p.path === 'participants');
+                    const pRows = await client_1.prisma.conversationParticipant.findMany({
+                        where: { conversationId: stringId },
+                        include: populateParticipantsOpt ? { user: true } : undefined,
+                    });
+                    if (populateParticipantsOpt) {
+                        clientObj.participants = pRows.map((cp) => (0, client_1.toClient)(cp.user ? { ...cp.user, _id: cp.user.id } : { _id: cp.userId, id: cp.userId }));
+                    }
+                    else {
+                        clientObj.participants = pRows.map((cp) => cp.userId);
+                    }
+                }
+                return attachSave(clientObj, delegate, fieldMap);
             }
             catch (err) {
                 if (err.code === 'P2025') {
-                    return null; // Record not found
+                    if (options?.upsert) {
+                        const setOnInsertData = prepareSetOnInsertData(update, fieldMap);
+                        const created = await delegate.create({
+                            data: {
+                                id: stringId,
+                                ...setOnInsertData,
+                                ...updateData,
+                            },
+                        });
+                        return attachSave((0, client_1.toClient)(created), delegate, fieldMap);
+                    }
+                    return null;
                 }
                 throw err;
             }
-        },
-        async deleteOne(filter) {
+        });
+    };
+    ModelConstructor.findOneAndUpdate = function (filter, update, options = {}) {
+        return new PrismaUpdateQuery(async (opts) => {
+            const delegate = getDelegate();
             const where = normalizeFilter(filter, fieldMap);
-            const result = await delegate.deleteMany({ where });
-            return { acknowledged: true, deletedCount: result.count };
-        },
-        async deleteMany(filter) {
-            return this.deleteOne(filter);
-        },
-        async findByIdAndDelete(id) {
-            const stringId = id?._id ? String(id._id) : String(id);
-            try {
-                const deleted = await delegate.delete({ where: { id: stringId } });
-                return (0, client_1.toClient)(deleted);
+            const updateData = prepareUpdateData(update, fieldMap);
+            const existing = await delegate.findFirst({ where });
+            if (!existing) {
+                if (options?.upsert) {
+                    const id = (0, client_1.generateObjectId)();
+                    const setOnInsertData = prepareSetOnInsertData(update, fieldMap);
+                    const created = await delegate.create({
+                        data: {
+                            id,
+                            ...where,
+                            ...setOnInsertData,
+                            ...updateData,
+                        },
+                    });
+                    return attachSave((0, client_1.toClient)(created), delegate, fieldMap);
+                }
+                return null;
             }
-            catch (err) {
-                if (err.code === 'P2025')
-                    return null;
-                throw err;
-            }
-        },
-        async countDocuments(filter = {}) {
-            const where = normalizeFilter(filter, fieldMap);
-            return delegate.count({ where });
-        },
-        async distinct(field, filter = {}) {
-            const where = normalizeFilter(filter, fieldMap);
-            const records = await delegate.findMany({
-                where,
-                select: { [field]: true },
-                distinct: [field],
+            const updated = await delegate.update({
+                where: { id: existing.id },
+                data: updateData,
             });
-            return records.map((r) => r[field]).filter((v) => v !== null && v !== undefined);
+            const clientObj = (0, client_1.toClient)(updated);
+            if (delegateName === 'conversation') {
+                const populateParticipantsOpt = opts?.populate?.find((p) => p.path === 'participants');
+                const pRows = await client_1.prisma.conversationParticipant.findMany({
+                    where: { conversationId: existing.id },
+                    include: populateParticipantsOpt ? { user: true } : undefined,
+                });
+                if (populateParticipantsOpt) {
+                    clientObj.participants = pRows.map((cp) => (0, client_1.toClient)(cp.user ? { ...cp.user, _id: cp.user.id } : { _id: cp.userId, id: cp.userId }));
+                }
+                else {
+                    clientObj.participants = pRows.map((cp) => cp.userId);
+                }
+            }
+            return attachSave(clientObj, delegate, fieldMap);
+        });
+    };
+    ModelConstructor.deleteOne = async function (filter) {
+        const delegate = getDelegate();
+        const where = normalizeFilter(filter, fieldMap);
+        const result = await delegate.deleteMany({ where });
+        return { acknowledged: true, deletedCount: result.count };
+    };
+    ModelConstructor.deleteMany = async function (filter) {
+        return ModelConstructor.deleteOne(filter);
+    };
+    ModelConstructor.findByIdAndDelete = async function (id) {
+        const delegate = getDelegate();
+        const stringId = id?._id ? String(id._id) : id?.id ? String(id.id) : String(id);
+        try {
+            const deleted = await delegate.delete({ where: { id: stringId } });
+            return (0, client_1.toClient)(deleted);
+        }
+        catch (err) {
+            if (err.code === 'P2025')
+                return null;
+            throw err;
+        }
+    };
+    ModelConstructor.countDocuments = async function (filter = {}) {
+        const delegate = getDelegate();
+        const where = normalizeFilter(filter, fieldMap);
+        return delegate.count({ where });
+    };
+    ModelConstructor.estimatedDocumentCount = async function () {
+        return getDelegate().count();
+    };
+    ModelConstructor.distinct = async function (field, filter = {}) {
+        const delegate = getDelegate();
+        const where = normalizeFilter(filter, fieldMap);
+        const prismaField = fieldMap[field] || (field === '_id' ? 'id' : field);
+        const records = await delegate.findMany({
+            where,
+            select: { [prismaField]: true },
+            distinct: [prismaField],
+        });
+        return records.map((r) => r[prismaField]).filter((v) => v !== null && v !== undefined);
+    };
+    ModelConstructor.aggregate = async function (pipeline = []) {
+        return runPrismaAggregate(getDelegate(), pipeline, fieldMap);
+    };
+    return ModelConstructor;
+}
+/**
+ * Types & ObjectId compatibility helper to replace mongoose.Types without needing MongoDB.
+ */
+exports.Types = {
+    ObjectId: class ObjectId {
+        constructor(id) {
+            if (id && typeof id === 'object' && (id._id || id.id)) {
+                this.id = String(id._id || id.id);
+            }
+            else {
+                this.id = id ? String(id) : (0, client_1.generateObjectId)();
+            }
+        }
+        toString() {
+            return this.id;
+        }
+        valueOf() {
+            return this.id;
+        }
+        toJSON() {
+            return this.id;
+        }
+        equals(other) {
+            return this.id === String(other?._id || other?.id || other);
+        }
+        static isValid(id) {
+            return typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id);
+        }
+    },
+};
+exports.Schema = Object.assign(function Schema(def = {}, options = {}) {
+    const virtualObj = {
+        get: function (..._args) {
+            return virtualObj;
+        },
+        set: function (..._args) {
+            return virtualObj;
         },
     };
-}
+    const schemaObj = {
+        def,
+        options,
+        methods: {},
+        statics: {},
+        index: function (..._args) {
+            return schemaObj;
+        },
+        virtual: function (..._args) {
+            return virtualObj;
+        },
+        pre: function (..._args) {
+            return schemaObj;
+        },
+        post: function (..._args) {
+            return schemaObj;
+        },
+        plugin: function (..._args) {
+            return schemaObj;
+        },
+        set: function (..._args) {
+            return schemaObj;
+        },
+        path: function (..._args) {
+            return {};
+        },
+    };
+    return schemaObj;
+}, {
+    Types: {
+        ObjectId: exports.Types.ObjectId,
+        Mixed: 'Mixed',
+        String: String,
+        Number: Number,
+        Boolean: Boolean,
+        Date: Date,
+        Array: Array,
+    },
+});
+exports.mongoose = {
+    Types: exports.Types,
+    Schema: exports.Schema,
+    models: {},
+    model: (name, schema) => {
+        const delegate = name.charAt(0).toLowerCase() + name.slice(1);
+        return createPrismaModelAdapter(delegate);
+    },
+    isValidObjectId: (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id),
+};
+exports.default = exports.mongoose;
 //# sourceMappingURL=prismaBridge.js.map

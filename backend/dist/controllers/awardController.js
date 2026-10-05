@@ -16,7 +16,7 @@ exports.toggleAwardFeatured = toggleAwardFeatured;
 exports.updateAwardOrder = updateAwardOrder;
 exports.uploadAwardImage = uploadAwardImage;
 exports.seedDefaultAwardsIfEmpty = seedDefaultAwardsIfEmpty;
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const crypto_1 = __importDefault(require("crypto"));
@@ -56,8 +56,8 @@ async function generateUniqueAwardSlug(name, excludeId) {
     }
 }
 function safeObjectId(id) {
-    if (id && mongoose_1.default.Types.ObjectId.isValid(id)) {
-        return new mongoose_1.default.Types.ObjectId(id);
+    if (id && prismaBridge_1.default.Types.ObjectId.isValid(id)) {
+        return new prismaBridge_1.default.Types.ObjectId(id);
     }
     return undefined;
 }
@@ -250,7 +250,7 @@ async function getAdminAwards(req, res, next) {
 async function getAdminAwardById(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid award ID format' });
         }
         const award = await Award_1.Award.findById(id)
@@ -333,7 +333,7 @@ async function createAward(req, res, next) {
 async function updateAward(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid award ID format' });
         }
         const award = await Award_1.Award.findById(id);
@@ -406,7 +406,7 @@ async function updateAward(req, res, next) {
 async function deleteAward(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid award ID format' });
         }
         const award = await Award_1.Award.findById(id);
@@ -435,7 +435,7 @@ async function updateAwardStatus(req, res, next) {
     try {
         const { id } = req.params;
         const { isActive } = req.body;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid award ID format' });
         }
         const award = await Award_1.Award.findById(id);
@@ -469,7 +469,7 @@ async function toggleAwardFeatured(req, res, next) {
     try {
         const { id } = req.params;
         const { isFeatured } = req.body;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid award ID format' });
         }
         const award = await Award_1.Award.findById(id);
@@ -498,7 +498,7 @@ async function updateAwardOrder(req, res, next) {
     try {
         const { id } = req.params;
         const { displayOrder } = req.body;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid award ID format' });
         }
         const orderNum = parseInt(displayOrder, 10);

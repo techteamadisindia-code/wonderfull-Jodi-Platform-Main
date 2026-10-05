@@ -1,13 +1,10 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.APP_TIMEZONE = void 0;
 exports.getFormattedVisitDate = getFormattedVisitDate;
 exports.recordUserVisit = recordUserVisit;
-const mongoose_1 = __importDefault(require("mongoose"));
 const DailyUserVisit_1 = require("../models/DailyUserVisit");
+const securityUtils_1 = require("../utils/securityUtils");
 exports.APP_TIMEZONE = 'Asia/Kolkata';
 /**
  * Returns formatted date string (YYYY-MM-DD) for a given date in the application timezone.
@@ -32,7 +29,8 @@ function getFormattedVisitDate(date = new Date()) {
  * Idempotent, safe against concurrency, and non-blocking.
  */
 async function recordUserVisit(userId, req) {
-    if (!userId || !mongoose_1.default.isValidObjectId(userId))
+    const uid = typeof userId === 'object' ? String(userId._id || userId.id) : String(userId);
+    if (!uid || !(0, securityUtils_1.isValidObjectId)(uid))
         return;
     const visitDate = getFormattedVisitDate();
     const now = new Date();
@@ -46,11 +44,11 @@ async function recordUserVisit(userId, req) {
         : undefined;
     try {
         await DailyUserVisit_1.DailyUserVisit.findOneAndUpdate({
-            user: new mongoose_1.default.Types.ObjectId(userId),
+            userId: uid,
             visitDate,
         }, {
             $setOnInsert: {
-                user: new mongoose_1.default.Types.ObjectId(userId),
+                userId: uid,
                 visitDate,
                 firstVisitedAt: now,
             },
@@ -63,14 +61,10 @@ async function recordUserVisit(userId, req) {
         }, {
             upsert: true,
             new: true,
-            setDefaultsOnInsert: true,
         });
     }
     catch (err) {
-        // Ignore duplicate key race condition (MongoDB code 11000)
-        if (err.code !== 11000) {
-            console.error('Error tracking daily user visit:', err?.message || err);
-        }
+        console.error('Error tracking daily user visit:', err?.message || err);
     }
 }
 //# sourceMappingURL=visitTrackingService.js.map

@@ -1307,7 +1307,7 @@ async function completeRegistration(req, res, next) {
         }
         // 4. Generate Auth JWT Token for immediate login
         const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
-        const accessToken = jsonwebtoken_1.default.sign({ userId: newUser._id.toString(), role: newUser.role }, secret, { expiresIn: '7d' });
+        const accessToken = jsonwebtoken_1.default.sign({ userId: String(newUser._id || newUser.id), role: newUser.role }, secret, { expiresIn: '7d' });
         return res.status(201).json({
             success: true,
             message: 'Registration completed successfully! Welcome to Wonderful Jodi.',

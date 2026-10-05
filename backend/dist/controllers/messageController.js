@@ -9,7 +9,7 @@ exports.sendMessage = sendMessage;
 exports.initiateConversation = initiateConversation;
 exports.getUserConversations = getUserConversations;
 exports.getConversationMessagesForUser = getConversationMessagesForUser;
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 const Message_1 = require("../models/Message");
 const Conversation_1 = require("../models/Conversation");
 const User_1 = require("../models/User");
@@ -35,7 +35,7 @@ exports.PAID_PLANS = [
  * DO NOT trust client state. Status must be ACTIVE and expiryDate must be in the future.
  */
 async function isUserPaidMember(userId) {
-    if (!userId || !mongoose_1.default.isValidObjectId(userId))
+    if (!userId || !prismaBridge_1.default.isValidObjectId(userId))
         return false;
     const now = new Date();
     const activeSub = await Subscription_1.Subscription.findOne({
@@ -76,13 +76,13 @@ async function sendMessage(req, res, next) {
         let conversation = null;
         let actualReceiverId = receiverId;
         // Resolve receiver from profileId if passed
-        if (!actualReceiverId && profileId && mongoose_1.default.isValidObjectId(profileId)) {
+        if (!actualReceiverId && profileId && prismaBridge_1.default.isValidObjectId(profileId)) {
             const targetProfile = await Profile_1.Profile.findById(profileId);
             if (targetProfile && targetProfile.user) {
                 actualReceiverId = String(targetProfile.user);
             }
         }
-        if (conversationId && mongoose_1.default.isValidObjectId(conversationId)) {
+        if (conversationId && prismaBridge_1.default.isValidObjectId(conversationId)) {
             conversation = await Conversation_1.Conversation.findById(conversationId);
             if (!conversation) {
                 return res.status(404).json({ success: false, message: 'Conversation not found' });
@@ -98,7 +98,7 @@ async function sendMessage(req, res, next) {
                 actualReceiverId = other ? String(other) : null;
             }
         }
-        else if (actualReceiverId && mongoose_1.default.isValidObjectId(actualReceiverId)) {
+        else if (actualReceiverId && prismaBridge_1.default.isValidObjectId(actualReceiverId)) {
             // Find or prepare conversation
             conversation = await Conversation_1.Conversation.findOne({
                 participants: { $all: [senderId, actualReceiverId], $size: 2 },
@@ -277,13 +277,13 @@ async function initiateConversation(req, res, next) {
         }
         const { targetUserId, receiverId, profileId } = req.body;
         let actualReceiverId = targetUserId || receiverId;
-        if (!actualReceiverId && profileId && mongoose_1.default.isValidObjectId(profileId)) {
+        if (!actualReceiverId && profileId && prismaBridge_1.default.isValidObjectId(profileId)) {
             const profile = await Profile_1.Profile.findById(profileId);
             if (profile && profile.user) {
                 actualReceiverId = String(profile.user);
             }
         }
-        if (!actualReceiverId || !mongoose_1.default.isValidObjectId(actualReceiverId)) {
+        if (!actualReceiverId || !prismaBridge_1.default.isValidObjectId(actualReceiverId)) {
             return res.status(400).json({ success: false, message: 'Valid target user or profile is required' });
         }
         if (String(senderId) === String(actualReceiverId)) {
@@ -420,7 +420,7 @@ async function getConversationMessagesForUser(req, res, next) {
         if (!userId) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
-        if (!mongoose_1.default.isValidObjectId(id)) {
+        if (!prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid conversation ID' });
         }
         const conversation = await Conversation_1.Conversation.findOne({

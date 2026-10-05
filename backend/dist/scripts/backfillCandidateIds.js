@@ -3,16 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const mongoose_1 = __importDefault(require("mongoose"));
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
 const Profile_1 = require("../models/Profile");
 const Counter_1 = require("../models/Counter");
-const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://localhost:27017/wonderfuljodi';
 async function backfill() {
-    console.log('Connecting to MongoDB at:', MONGO_URI);
-    await mongoose_1.default.connect(MONGO_URI);
-    console.log('Connected.');
+    console.log('Running backfill on database...');
     // Find all profiles
     const allProfiles = await Profile_1.Profile.find({}).sort({ createdAt: 1 });
     console.log(`Total profiles in database: ${allProfiles.length}`);
@@ -46,8 +42,7 @@ async function backfill() {
     for (const p of updatedProfiles) {
         console.log(`- ${p.candidateId}: ${p.displayName} (_id: ${p._id})`);
     }
-    await mongoose_1.default.disconnect();
-    console.log('Disconnected from MongoDB.');
+    console.log('Finished.');
 }
 backfill().catch((err) => {
     console.error('Backfill error:', err);

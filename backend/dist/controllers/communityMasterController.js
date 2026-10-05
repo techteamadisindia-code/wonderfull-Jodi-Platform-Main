@@ -8,7 +8,7 @@ exports.getCastes = getCastes;
 exports.getSubCastes = getSubCastes;
 exports.getLanguages = getLanguages;
 exports.validateCommunityHierarchy = validateCommunityHierarchy;
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 const CommunityMaster_1 = require("../models/CommunityMaster");
 const securityUtils_1 = require("../utils/securityUtils");
 /**
@@ -41,7 +41,7 @@ async function getCastes(req, res, next) {
                 targetReligionId = relDoc._id.toString();
             }
         }
-        if (targetReligionId && mongoose_1.default.isValidObjectId(targetReligionId)) {
+        if (targetReligionId && prismaBridge_1.default.isValidObjectId(targetReligionId)) {
             filter.religionId = targetReligionId;
         }
         if (category && typeof category === 'string' && category !== 'All' && category.trim()) {
@@ -70,7 +70,7 @@ async function getCastes(req, res, next) {
 async function getSubCastes(req, res, next) {
     try {
         const { casteId, search } = req.query;
-        if (!casteId || !mongoose_1.default.isValidObjectId(casteId)) {
+        if (!casteId || !prismaBridge_1.default.isValidObjectId(casteId)) {
             return res.status(400).json({ success: false, message: 'Valid casteId is required to fetch sub-castes.' });
         }
         const filter = { casteId, isActive: true };
@@ -120,7 +120,7 @@ async function validateCommunityHierarchy(data) {
     try {
         const resolved = {};
         if (data.religionId) {
-            if (!mongoose_1.default.isValidObjectId(data.religionId))
+            if (!prismaBridge_1.default.isValidObjectId(data.religionId))
                 return { isValid: false, error: 'Invalid religionId' };
             const rel = await CommunityMaster_1.Religion.findById(data.religionId);
             if (!rel)
@@ -128,7 +128,7 @@ async function validateCommunityHierarchy(data) {
             resolved.religion = rel.name;
         }
         if (data.casteId) {
-            if (!mongoose_1.default.isValidObjectId(data.casteId))
+            if (!prismaBridge_1.default.isValidObjectId(data.casteId))
                 return { isValid: false, error: 'Invalid casteId' };
             const caste = await CommunityMaster_1.Caste.findById(data.casteId);
             if (!caste)
@@ -140,7 +140,7 @@ async function validateCommunityHierarchy(data) {
             resolved.category = caste.category;
         }
         if (data.subCasteId) {
-            if (!mongoose_1.default.isValidObjectId(data.subCasteId))
+            if (!prismaBridge_1.default.isValidObjectId(data.subCasteId))
                 return { isValid: false, error: 'Invalid subCasteId' };
             const sub = await CommunityMaster_1.SubCaste.findById(data.subCasteId);
             if (!sub)

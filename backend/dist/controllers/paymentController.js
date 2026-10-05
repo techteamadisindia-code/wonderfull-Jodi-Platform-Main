@@ -125,7 +125,7 @@ async function getAdminPayments(req, res, next) {
                 { receipt: { $regex: q, $options: 'i' } },
                 { refundId: { $regex: q, $options: 'i' } },
             ];
-            if (userFilterIds.length > 0) {
+            if (userFilterIds && userFilterIds.length > 0) {
                 searchConditions.push({ user: { $in: userFilterIds } });
             }
             if (query.$or) {

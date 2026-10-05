@@ -1,13 +1,10 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMemberAttributes = getMemberAttributes;
 exports.resolvePlan = resolvePlan;
 exports.evaluateCampaignEligibility = evaluateCampaignEligibility;
 exports.calculateOffer = calculateOffer;
-const mongoose_1 = __importDefault(require("mongoose"));
+const securityUtils_1 = require("../utils/securityUtils");
 const Campaign_1 = require("../models/Campaign");
 const Coupon_1 = require("../models/Coupon");
 const CouponRedemption_1 = require("../models/CouponRedemption");
@@ -20,7 +17,7 @@ const Payment_1 = require("../models/Payment");
  * Resolve member profile attributes from database safely
  */
 async function getMemberAttributes(userId) {
-    if (!userId || !mongoose_1.default.Types.ObjectId.isValid(userId)) {
+    if (!userId || !(0, securityUtils_1.isValidObjectId)(userId)) {
         return null;
     }
     const user = await User_1.User.findById(userId);
@@ -42,7 +39,7 @@ async function getMemberAttributes(userId) {
         }
     }
     // Registration status: new if registered < 14 days ago and no prior subscriptions
-    const regDays = (Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+    const regDays = (Date.now() - new Date(user.createdAt || Date.now()).getTime()) / (1000 * 60 * 60 * 24);
     const registrationStatus = regDays <= 14 && subCount === 0 ? 'New Member' : 'Existing Member';
     // Profile completeness check
     const isComplete = Boolean(profile &&
@@ -314,16 +311,17 @@ async function calculateOffer(params) {
         if (eligible) {
             // Calculate campaign discount
             let disc = 0;
-            if (campaign.discountType === 'FREE' ||
-                campaign.discountType === 'FREE_100_PERCENT' ||
+            const dType = campaign.discountType;
+            if (dType === 'FREE' ||
+                dType === 'FREE_100_PERCENT' ||
                 campaign.discountValue === 100) {
                 disc = originalPrice;
             }
-            else if (campaign.discountType === 'PERCENTAGE') {
+            else if (dType === 'PERCENTAGE') {
                 const pct = Math.min(100, Math.max(0, campaign.discountValue));
                 disc = (originalPrice * pct) / 100;
             }
-            else if (campaign.discountType === 'FIXED' || campaign.discountType === 'FIXED_AMOUNT') {
+            else if (dType === 'FIXED' || dType === 'FIXED_AMOUNT') {
                 disc = Math.min(originalPrice, Math.max(0, campaign.discountValue));
             }
             selectedCampaign = {
@@ -428,15 +426,16 @@ async function calculateOffer(params) {
             else {
                 // Valid coupon!
                 let disc = 0;
-                if (coupon.discountType === 'FREE' ||
-                    coupon.discountType === 'FREE_100_PERCENT' ||
+                const cdType = coupon.discountType;
+                if (cdType === 'FREE' ||
+                    cdType === 'FREE_100_PERCENT' ||
                     coupon.discountValue === 100) {
                     disc = originalPrice;
                 }
-                else if (coupon.discountType === 'PERCENTAGE') {
+                else if (cdType === 'PERCENTAGE') {
                     disc = (originalPrice * Math.min(100, Math.max(0, coupon.discountValue))) / 100;
                 }
-                else if (coupon.discountType === 'FIXED' || coupon.discountType === 'FIXED_AMOUNT') {
+                else if (cdType === 'FIXED' || cdType === 'FIXED_AMOUNT') {
                     disc = Math.min(originalPrice, Math.max(0, coupon.discountValue));
                 }
                 selectedCoupon = {

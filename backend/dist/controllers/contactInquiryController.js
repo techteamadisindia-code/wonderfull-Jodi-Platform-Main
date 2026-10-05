@@ -11,7 +11,7 @@ exports.deleteContactInquiry = deleteContactInquiry;
 exports.replyToContactInquiry = replyToContactInquiry;
 exports.getContactInquirySummary = getContactInquirySummary;
 const zod_1 = require("zod");
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 const ContactInquiry_1 = require("../models/ContactInquiry");
 const AuditLog_1 = require("../models/AuditLog");
 const emailService_1 = require("../services/emailService");
@@ -73,7 +73,7 @@ async function submitContactInquiry(req, res, next) {
         const { name, mobileNumber, email, message } = parsed.data;
         // Determine if the user is registered
         const isRegistered = !!(req.user?.userId && req.user.role !== 'admin');
-        const userId = isRegistered ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined;
+        const userId = isRegistered ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
         // Generate a unique inquiry ID
         const inquiryId = await (0, ContactInquiry_1.getNextContactInquiryId)();
         const inquiry = await ContactInquiry_1.ContactInquiry.create({
@@ -210,7 +210,7 @@ async function listContactInquiries(req, res, next) {
 async function getContactInquiry(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose_1.default.isValidObjectId(id)) {
+        if (!prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid inquiry ID' });
         }
         const inquiry = await ContactInquiry_1.ContactInquiry.findById(id)
@@ -230,7 +230,7 @@ async function getContactInquiry(req, res, next) {
 async function updateContactInquiry(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose_1.default.isValidObjectId(id)) {
+        if (!prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid inquiry ID' });
         }
         const parsed = updateInquirySchema.safeParse(req.body);
@@ -245,7 +245,7 @@ async function updateContactInquiry(req, res, next) {
             return res.status(404).json({ success: false, message: 'Contact inquiry not found' });
         }
         const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
-        const adminId = req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined;
+        const adminId = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
         const previousStatus = inquiry.status;
         const updates = {};
         // Status change
@@ -273,8 +273,8 @@ async function updateContactInquiry(req, res, next) {
         // Assignment
         if (parsed.data.assignedTo !== undefined) {
             updates.assignedTo =
-                parsed.data.assignedTo && mongoose_1.default.isValidObjectId(parsed.data.assignedTo)
-                    ? new mongoose_1.default.Types.ObjectId(parsed.data.assignedTo)
+                parsed.data.assignedTo && prismaBridge_1.default.isValidObjectId(parsed.data.assignedTo)
+                    ? new prismaBridge_1.default.Types.ObjectId(parsed.data.assignedTo)
                     : null;
         }
         const { $push, ...setUpdates } = updates;
@@ -307,7 +307,7 @@ async function updateContactInquiry(req, res, next) {
 async function deleteContactInquiry(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose_1.default.isValidObjectId(id)) {
+        if (!prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid inquiry ID' });
         }
         const inquiry = await ContactInquiry_1.ContactInquiry.findById(id);
@@ -315,7 +315,7 @@ async function deleteContactInquiry(req, res, next) {
             return res.status(404).json({ success: false, message: 'Contact inquiry not found' });
         }
         const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
-        const adminId = req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined;
+        const adminId = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
         await ContactInquiry_1.ContactInquiry.findByIdAndDelete(id);
         // Audit log
         await AuditLog_1.AuditLog.create({
@@ -338,7 +338,7 @@ async function deleteContactInquiry(req, res, next) {
 async function replyToContactInquiry(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose_1.default.isValidObjectId(id)) {
+        if (!prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid inquiry ID' });
         }
         const parsed = replySchema.safeParse(req.body);
@@ -353,7 +353,7 @@ async function replyToContactInquiry(req, res, next) {
             return res.status(404).json({ success: false, message: 'Contact inquiry not found' });
         }
         const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
-        const adminId = req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined;
+        const adminId = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
         const emailConfig = (0, emailService_1.getEmailConfig)();
         const isEmailConfigured = !!(emailConfig.host && emailConfig.user && emailConfig.pass);
         let emailSent = false;

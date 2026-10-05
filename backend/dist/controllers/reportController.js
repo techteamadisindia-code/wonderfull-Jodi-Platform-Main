@@ -8,7 +8,7 @@ exports.getMyReports = getMyReports;
 const Report_1 = require("../models/Report");
 const User_1 = require("../models/User");
 const Profile_1 = require("../models/Profile");
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 async function submitReport(req, res, next) {
     try {
         const reporterId = req.user?.userId || req.user?._id;
@@ -23,7 +23,7 @@ async function submitReport(req, res, next) {
         let targetProfileId = undefined;
         // If profileId was supplied instead of reportedUserId, resolve target user from profile
         if (!targetUserId && profileId) {
-            if (!mongoose_1.default.Types.ObjectId.isValid(profileId)) {
+            if (!prismaBridge_1.default.Types.ObjectId.isValid(profileId)) {
                 return res.status(400).json({ success: false, message: 'Invalid profile ID format' });
             }
             const prof = await Profile_1.Profile.findById(profileId);
@@ -32,7 +32,7 @@ async function submitReport(req, res, next) {
             }
             targetUserId = prof.user;
         }
-        if (!targetUserId || !mongoose_1.default.Types.ObjectId.isValid(targetUserId)) {
+        if (!targetUserId || !prismaBridge_1.default.Types.ObjectId.isValid(targetUserId)) {
             return res.status(400).json({ success: false, message: 'A valid reported user or profile ID is required.' });
         }
         if (String(reporterId) === String(targetUserId)) {
@@ -62,7 +62,7 @@ async function submitReport(req, res, next) {
                 targetProfileId = p._id;
             }
         }
-        else if (profileId && mongoose_1.default.Types.ObjectId.isValid(profileId)) {
+        else if (profileId && prismaBridge_1.default.Types.ObjectId.isValid(profileId)) {
             targetProfileId = profileId;
         }
         const report = await Report_1.Report.create({

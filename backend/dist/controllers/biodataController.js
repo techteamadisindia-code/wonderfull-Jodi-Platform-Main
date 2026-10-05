@@ -13,7 +13,7 @@ exports.generateBiodataPdf = generateBiodataPdf;
 exports.downloadBiodataPdf = downloadBiodataPdf;
 exports.getPublicBiodata = getPublicBiodata;
 exports.getAdminBiodataStats = getAdminBiodataStats;
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const crypto_1 = __importDefault(require("crypto"));
@@ -258,7 +258,7 @@ async function getBiodataById(req, res, next) {
     try {
         const userId = getAuthUserId(req);
         const { id } = req.params;
-        if (!mongoose_1.default.isValidObjectId(id)) {
+        if (!prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid biodata ID format' });
         }
         const biodata = await Biodata_1.Biodata.findById(id);
@@ -283,7 +283,7 @@ async function updateBiodata(req, res, next) {
     try {
         const userId = getAuthUserId(req);
         const { id } = req.params;
-        if (!mongoose_1.default.isValidObjectId(id)) {
+        if (!prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid biodata ID format' });
         }
         const biodata = await Biodata_1.Biodata.findById(id);
@@ -321,7 +321,7 @@ async function deleteBiodata(req, res, next) {
     try {
         const userId = getAuthUserId(req);
         const { id } = req.params;
-        if (!mongoose_1.default.isValidObjectId(id)) {
+        if (!prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid biodata ID format' });
         }
         const biodata = await Biodata_1.Biodata.findById(id);
@@ -357,7 +357,7 @@ async function generateBiodataPdf(req, res, next) {
     try {
         const userId = getAuthUserId(req);
         const { id } = req.params;
-        if (!mongoose_1.default.isValidObjectId(id)) {
+        if (!prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid biodata ID format' });
         }
         const biodata = await Biodata_1.Biodata.findById(id);
@@ -404,7 +404,7 @@ async function downloadBiodataPdf(req, res, next) {
     try {
         const userId = getAuthUserId(req);
         const { id } = req.params;
-        if (!mongoose_1.default.isValidObjectId(id)) {
+        if (!prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid biodata ID format' });
         }
         const biodata = await Biodata_1.Biodata.findById(id);

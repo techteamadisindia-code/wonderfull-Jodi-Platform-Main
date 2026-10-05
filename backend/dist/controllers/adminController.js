@@ -104,7 +104,7 @@ exports.updateMaintenanceSettings = updateMaintenanceSettings;
 exports.getInquiries = getInquiries;
 exports.updateInquiryStatus = updateInquiryStatus;
 exports.getAuditLogs = getAuditLogs;
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const User_1 = require("../models/User");
 const Profile_1 = require("../models/Profile");
@@ -861,7 +861,7 @@ async function updateProfile(req, res, next) {
         const targetId = req.params.id;
         // 1. Resolve target profile (by Profile._id or User._id)
         let profile = null;
-        if (mongoose_1.default.Types.ObjectId.isValid(targetId)) {
+        if (prismaBridge_1.default.Types.ObjectId.isValid(targetId)) {
             profile = await Profile_1.Profile.findById(targetId);
             if (!profile) {
                 profile = await Profile_1.Profile.findOne({ user: targetId });
@@ -1037,13 +1037,13 @@ async function updateProfile(req, res, next) {
                 else if (requestedAccountStatus === 'Suspended' || requestedAccountStatus === 'Blocked') {
                     user.isActive = false;
                     user.suspendedAt = new Date();
-                    user.suspendedBy = req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined;
+                    user.suspendedBy = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
                 }
                 else if (requestedAccountStatus === 'Deleted') {
                     user.isDeleted = true;
                     user.isActive = false;
                     user.deletedAt = new Date();
-                    user.deletedBy = req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined;
+                    user.deletedBy = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
                 }
                 userChanged = true;
             }
@@ -1116,7 +1116,7 @@ async function updateProfile(req, res, next) {
         Object.assign(profile, updateData);
         if (updateData.status && updateData.status !== profile.status) {
             profile.statusChangedAt = new Date();
-            profile.statusChangedBy = req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined;
+            profile.statusChangedBy = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
         }
         await profile.save();
         if (userChanged && user) {
@@ -1127,7 +1127,7 @@ async function updateProfile(req, res, next) {
         if (changes.length > 0) {
             const adminNameStr = req.user?.email ? req.user.email.split('@')[0] : 'Administrator';
             await logAdminAction(req.user?.email || 'admin@wonderfuljodi.com', 'PROFILE_EDITED', `Admin modified profile for ${profile.displayName || user?.fullName || profile._id}: ${changedFieldNames.join(', ')}`, 'Profile', String(profile._id), {
-                adminId: req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined,
+                adminId: req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined,
                 adminName: adminNameStr,
                 targetProfileId: profile._id,
                 targetUserId: profile.user,
@@ -3662,6 +3662,8 @@ async function updateMaintenanceSettings(req, res, next) {
         updatePayload.maintenanceUpdatedBy = adminEmail;
         const prevSettings = await Setting_1.Setting.findOne();
         const settings = await Setting_1.Setting.findOneAndUpdate({}, { $set: updatePayload }, { upsert: true, new: true });
+        if (!settings)
+            throw new Error('Failed to update settings');
         (0, maintenanceMiddleware_1.invalidateMaintenanceCache)();
         const action = updatePayload.maintenanceMode !== undefined
             ? updatePayload.maintenanceMode

@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.searchProfiles = searchProfiles;
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const Profile_1 = require("../models/Profile");
 const User_1 = require("../models/User");
@@ -67,7 +67,7 @@ async function searchProfiles(req, res, next) {
             }
         }
         // Religion filter
-        if (religionId && mongoose_1.default.isValidObjectId(religionId)) {
+        if (religionId && prismaBridge_1.default.isValidObjectId(religionId)) {
             filters['communityDetails.religionId'] = religionId;
         }
         else if (religion) {
@@ -78,23 +78,23 @@ async function searchProfiles(req, res, next) {
             }
         }
         // Caste filter
-        if (casteId && mongoose_1.default.isValidObjectId(casteId)) {
+        if (casteId && prismaBridge_1.default.isValidObjectId(casteId)) {
             filters['communityDetails.casteId'] = casteId;
         }
         else if (caste && caste !== 'All' && caste !== 'Any' && caste.trim() !== '') {
             filters.caste = { $regex: new RegExp((0, securityUtils_1.escapeRegex)(caste.trim()), 'i') };
         }
         // Structured Location IDs
-        if (cityId && mongoose_1.default.isValidObjectId(cityId)) {
+        if (cityId && prismaBridge_1.default.isValidObjectId(cityId)) {
             filters['currentLocation.cityId'] = cityId;
         }
-        if (districtId && mongoose_1.default.isValidObjectId(districtId)) {
+        if (districtId && prismaBridge_1.default.isValidObjectId(districtId)) {
             filters['currentLocation.districtId'] = districtId;
         }
-        if (stateId && mongoose_1.default.isValidObjectId(stateId)) {
+        if (stateId && prismaBridge_1.default.isValidObjectId(stateId)) {
             filters['currentLocation.stateId'] = stateId;
         }
-        if (countryId && mongoose_1.default.isValidObjectId(countryId)) {
+        if (countryId && prismaBridge_1.default.isValidObjectId(countryId)) {
             filters['currentLocation.countryId'] = countryId;
         }
         // Location / City filter fallback (escaped regex)
@@ -119,7 +119,7 @@ async function searchProfiles(req, res, next) {
         if (maritalStatus && maritalStatus !== 'All' && maritalStatus !== 'Any' && maritalStatus.trim() !== '') {
             filters.maritalStatus = maritalStatus.trim();
         }
-        if (motherTongueId && mongoose_1.default.isValidObjectId(motherTongueId)) {
+        if (motherTongueId && prismaBridge_1.default.isValidObjectId(motherTongueId)) {
             filters['languageDetails.motherTongueId'] = motherTongueId;
         }
         else if (motherTongue && motherTongue !== 'All' && motherTongue !== 'Any' && motherTongue.trim() !== '') {

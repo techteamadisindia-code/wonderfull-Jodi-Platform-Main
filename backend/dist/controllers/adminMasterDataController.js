@@ -13,7 +13,7 @@ exports.uploadLocationPdf = uploadLocationPdf;
 exports.confirmLocationImport = confirmLocationImport;
 exports.getImportHistory = getImportHistory;
 exports.downloadImportErrorReport = downloadImportErrorReport;
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 const crypto_1 = __importDefault(require("crypto"));
 const Location_1 = require("../models/Location");
 const CommunityMaster_1 = require("../models/CommunityMaster");
@@ -120,7 +120,7 @@ async function getMasterDataItems(req, res, next) {
                 return res.status(400).json({ success: false, message: `Unknown master entity: ${entity}` });
         }
         const filter = {};
-        if (parentId && parentField && mongoose_1.default.isValidObjectId(parentId)) {
+        if (parentId && parentField && prismaBridge_1.default.isValidObjectId(parentId)) {
             filter[parentField] = parentId;
         }
         if (search && typeof search === 'string' && search.trim()) {
@@ -209,7 +209,7 @@ async function updateMasterDataItem(req, res, next) {
     try {
         const { id } = req.params;
         const { entity, data } = req.body;
-        if (!id || !mongoose_1.default.isValidObjectId(id)) {
+        if (!id || !prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid ID' });
         }
         let model;
@@ -264,7 +264,7 @@ async function deleteMasterDataItem(req, res, next) {
     try {
         const { id } = req.params;
         const { entity, permanent } = req.query;
-        if (!id || !mongoose_1.default.isValidObjectId(id)) {
+        if (!id || !prismaBridge_1.default.isValidObjectId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid ID' });
         }
         let model;

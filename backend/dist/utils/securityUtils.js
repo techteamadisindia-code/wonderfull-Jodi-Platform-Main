@@ -18,7 +18,6 @@ exports.serializePublicProfile = serializePublicProfile;
 exports.serializePrivateProfile = serializePrivateProfile;
 exports.recordSecurityEvent = recordSecurityEvent;
 const crypto_1 = __importDefault(require("crypto"));
-const mongoose_1 = __importDefault(require("mongoose"));
 const SecurityLog_1 = require("../models/SecurityLog");
 /**
  * Generate cryptographically secure random token in hex format
@@ -33,18 +32,18 @@ function hashToken(token) {
     return crypto_1.default.createHash('sha256').update(token.trim()).digest('hex');
 }
 /**
- * Escape special characters in user input before passing to MongoDB RegExp
+ * Escape special characters in user input before passing to RegExp
  */
 function escapeRegex(text) {
     return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
 }
 /**
- * Check if a string is a valid 24-character hex MongoDB ObjectId
+ * Check if a string is a valid 24-character hex ID (compatible with MongoDB ObjectId format)
  */
 function isValidObjectId(id) {
     if (!id || typeof id !== 'string')
         return false;
-    return mongoose_1.default.Types.ObjectId.isValid(id) && new mongoose_1.default.Types.ObjectId(id).toString() === id;
+    return /^[0-9a-fA-F]{24}$/.test(id);
 }
 /**
  * Inspect actual binary file headers (magic bytes) to verify genuine image content

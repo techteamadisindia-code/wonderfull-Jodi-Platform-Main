@@ -8,7 +8,7 @@ exports.getContactRequests = getContactRequests;
 exports.acceptContactRequest = acceptContactRequest;
 exports.declineContactRequest = declineContactRequest;
 exports.getContactAccessStatus = getContactAccessStatus;
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 const ContactRequest_1 = require("../models/ContactRequest");
 const ContactAccessLog_1 = require("../models/ContactAccessLog");
 const Subscription_1 = require("../models/Subscription");
@@ -29,7 +29,7 @@ async function createContactRequest(req, res, next) {
         let targetUserId = recipientId || null;
         // If profileId provided, resolve user from Profile
         if (!targetUserId && profileId) {
-            if (!mongoose_1.default.Types.ObjectId.isValid(profileId)) {
+            if (!prismaBridge_1.default.Types.ObjectId.isValid(profileId)) {
                 return res.status(400).json({ success: false, message: 'Invalid profile ID' });
             }
             const profile = await Profile_1.Profile.findById(profileId);
@@ -44,7 +44,7 @@ async function createContactRequest(req, res, next) {
                 message: 'Recipient ID or Profile ID is required to request contact.',
             });
         }
-        if (!mongoose_1.default.Types.ObjectId.isValid(targetUserId)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(targetUserId)) {
             return res.status(400).json({ success: false, message: 'Invalid recipient ID' });
         }
         if (requesterId.toString() === targetUserId.toString()) {
@@ -212,7 +212,7 @@ async function acceptContactRequest(req, res, next) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
         const { id } = req.params;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid request ID' });
         }
         const contactRequest = await ContactRequest_1.ContactRequest.findById(id);
@@ -306,7 +306,7 @@ async function declineContactRequest(req, res, next) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
         const { id } = req.params;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid request ID' });
         }
         const contactRequest = await ContactRequest_1.ContactRequest.findById(id);
@@ -349,7 +349,7 @@ async function getContactAccessStatus(req, res, next) {
     try {
         const userId = req.user?.userId;
         const { profileId } = req.params;
-        if (!mongoose_1.default.Types.ObjectId.isValid(profileId)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(profileId)) {
             return res.status(400).json({ success: false, message: 'Invalid profile ID' });
         }
         const targetProfile = await Profile_1.Profile.findById(profileId).populate('user', 'fullName email mobile verified verificationStatus');

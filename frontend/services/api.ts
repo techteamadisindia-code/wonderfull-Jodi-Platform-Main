@@ -49,13 +49,11 @@ export function getApiBaseUrl(): string {
   }
 
   if (process.env.NODE_ENV === 'production') {
-    const port =
-      process.env.BACKEND_PORT ||
-      (process.env.PORT && process.env.FRONTEND_PORT ? process.env.PORT : '5000');
-    return `http://127.0.0.1:${port}/api`;
+    return '/api';
   }
 
-  return 'http://127.0.0.1:5000/api';
+  const devPort = process.env.BACKEND_PORT || process.env.PORT || '5000';
+  return `http://127.0.0.1:${devPort}/api`;
 }
 
 export const apiClient = axios.create({

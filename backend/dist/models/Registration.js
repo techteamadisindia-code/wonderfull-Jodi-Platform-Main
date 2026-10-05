@@ -1,41 +1,8 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Registration = void 0;
-const mongoose_1 = __importStar(require("mongoose"));
-const registrationSchema = new mongoose_1.Schema({
+const prismaBridge_1 = require("../db/prismaBridge");
+const registrationSchema = new prismaBridge_1.Schema({
     registrationId: {
         type: String,
         required: true,
@@ -171,7 +138,7 @@ const registrationSchema = new mongoose_1.Schema({
                 {
                     qualification: { type: String },
                     college: { type: String },
-                    collegeId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Institution' },
+                    collegeId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Institution' },
                     passingYear: { type: String },
                     status: { type: String },
                 },
@@ -181,7 +148,7 @@ const registrationSchema = new mongoose_1.Schema({
                     qualification: { type: String },
                     specialization: { type: String },
                     college: { type: String },
-                    collegeId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Institution' },
+                    collegeId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Institution' },
                     passingYear: { type: String },
                     status: { type: String },
                 },
@@ -191,15 +158,15 @@ const registrationSchema = new mongoose_1.Schema({
                     qualification: { type: String },
                     specialization: { type: String },
                     college: { type: String },
-                    collegeId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Institution' },
+                    collegeId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Institution' },
                     passingYear: { type: String },
                     status: { type: String },
                 },
             ],
         },
         partnerExpectations: {
-            ageMin: { type: mongoose_1.Schema.Types.Mixed },
-            ageMax: { type: mongoose_1.Schema.Types.Mixed },
+            ageMin: { type: prismaBridge_1.Schema.Types.Mixed },
+            ageMax: { type: prismaBridge_1.Schema.Types.Mixed },
             heightMin: { type: String },
             heightMax: { type: String },
             qualification: { type: String },
@@ -209,7 +176,7 @@ const registrationSchema = new mongoose_1.Schema({
                 state: { type: String },
                 city: { type: String },
             },
-            willingToRelocate: { type: mongoose_1.Schema.Types.Mixed },
+            willingToRelocate: { type: prismaBridge_1.Schema.Types.Mixed },
             maritalStatus: { type: String },
             lifestyle: {
                 diet: { type: String },
@@ -234,17 +201,17 @@ const registrationSchema = new mongoose_1.Schema({
             idProofUrl: { type: String },
         },
         rawFormData: {
-            type: mongoose_1.Schema.Types.Mixed,
+            type: prismaBridge_1.Schema.Types.Mixed,
             default: {},
         },
     },
     user: {
-        type: mongoose_1.Schema.Types.ObjectId,
+        type: prismaBridge_1.Schema.Types.ObjectId,
         ref: 'User',
         index: true,
     },
     profile: {
-        type: mongoose_1.Schema.Types.ObjectId,
+        type: prismaBridge_1.Schema.Types.ObjectId,
         ref: 'Profile',
         index: true,
     },
@@ -284,5 +251,5 @@ const registrationSchema = new mongoose_1.Schema({
 registrationSchema.index({ status: 1, lastActiveAt: -1 });
 registrationSchema.index({ status: 1, currentStep: 1 });
 registrationSchema.index({ status: 1, completionPercentage: -1 });
-exports.Registration = mongoose_1.default.models.Registration || mongoose_1.default.model('Registration', registrationSchema);
+exports.Registration = (0, prismaBridge_1.createPrismaModelAdapter)('registration', { "user": "userId", "profile": "profileId" });
 //# sourceMappingURL=Registration.js.map

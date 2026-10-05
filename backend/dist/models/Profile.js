@@ -1,43 +1,9 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Profile = void 0;
-const mongoose_1 = __importStar(require("mongoose"));
-const Counter_1 = require("./Counter");
-const profileSchema = new mongoose_1.Schema({
-    user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
+const prismaBridge_1 = require("../db/prismaBridge");
+const profileSchema = new prismaBridge_1.Schema({
+    user: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
     candidateId: { type: String, unique: true, sparse: true, index: true, trim: true },
     displayName: { type: String, required: true, trim: true, index: true },
     gender: { type: String, enum: ['Male', 'Female', 'Other'], required: true, index: true },
@@ -76,36 +42,36 @@ const profileSchema = new mongoose_1.Schema({
     familyLocation: { type: String, trim: true },
     profileManagedBy: { type: String, trim: true, default: 'Self' },
     currentLocation: {
-        countryId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Country', index: true },
-        stateId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'State', index: true },
-        districtId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'District', index: true },
-        subDistrictId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'SubDistrict', index: true },
-        cityId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'City', index: true },
-        villageId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Village', index: true },
+        countryId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Country', index: true },
+        stateId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'State', index: true },
+        districtId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'District', index: true },
+        subDistrictId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'SubDistrict', index: true },
+        cityId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'City', index: true },
+        villageId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Village', index: true },
         pincode: { type: String, trim: true },
         formattedAddress: { type: String, trim: true },
     },
     nativePlaceDetails: {
-        countryId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Country', index: true },
-        stateId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'State', index: true },
-        districtId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'District', index: true },
-        subDistrictId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'SubDistrict', index: true },
-        cityId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'City', index: true },
-        villageId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Village', index: true },
+        countryId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Country', index: true },
+        stateId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'State', index: true },
+        districtId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'District', index: true },
+        subDistrictId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'SubDistrict', index: true },
+        cityId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'City', index: true },
+        villageId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Village', index: true },
         pincode: { type: String, trim: true },
         description: { type: String, trim: true },
         formattedAddress: { type: String, trim: true },
     },
     communityDetails: {
-        religionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Religion', index: true },
-        casteId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Caste', index: true },
-        subCasteId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'SubCaste', index: true },
+        religionId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Religion', index: true },
+        casteId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Caste', index: true },
+        subCasteId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'SubCaste', index: true },
         casteCategory: { type: String, trim: true },
         subCasteText: { type: String, trim: true },
     },
     languageDetails: {
-        motherTongueId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Language', index: true },
-        otherLanguagesIds: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'Language' }],
+        motherTongueId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Language', index: true },
+        otherLanguagesIds: [{ type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Language' }],
     },
     horoscope: {
         timeOfBirth: { type: String, trim: true },
@@ -152,7 +118,7 @@ const profileSchema = new mongoose_1.Schema({
             state: { type: String, trim: true },
             city: { type: String, trim: true },
         },
-        willingToRelocate: { type: mongoose_1.Schema.Types.Mixed },
+        willingToRelocate: { type: prismaBridge_1.Schema.Types.Mixed },
         maritalStatus: { type: String, trim: true },
         lifestyle: {
             diet: { type: String, trim: true },
@@ -213,7 +179,7 @@ const profileSchema = new mongoose_1.Schema({
             {
                 qualification: { type: String, trim: true },
                 college: { type: String, trim: true },
-                collegeId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Institution' },
+                collegeId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Institution' },
                 passingYear: { type: String, trim: true },
                 status: { type: String, trim: true },
             },
@@ -223,7 +189,7 @@ const profileSchema = new mongoose_1.Schema({
                 qualification: { type: String, trim: true },
                 specialization: { type: String, trim: true },
                 college: { type: String, trim: true },
-                collegeId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Institution' },
+                collegeId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Institution' },
                 passingYear: { type: String, trim: true },
                 status: { type: String, trim: true },
             },
@@ -233,7 +199,7 @@ const profileSchema = new mongoose_1.Schema({
                 qualification: { type: String, trim: true },
                 specialization: { type: String, trim: true },
                 college: { type: String, trim: true },
-                collegeId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Institution' },
+                collegeId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'Institution' },
                 passingYear: { type: String, trim: true },
                 status: { type: String, trim: true },
             },
@@ -321,33 +287,22 @@ const profileSchema = new mongoose_1.Schema({
     },
     statusReason: { type: String, trim: true },
     statusChangedAt: { type: Date },
-    statusChangedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    statusChangedBy: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'User' },
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date },
-    deletedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    deletedBy: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'User' },
     deletionReason: { type: String, trim: true },
     lastActiveAt: { type: Date, default: Date.now },
     adminNotes: [
         {
             note: { type: String, required: true, trim: true },
-            adminId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+            adminId: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'User' },
             adminEmail: { type: String, required: true, trim: true },
             adminName: { type: String, trim: true },
             createdAt: { type: Date, default: Date.now },
         },
     ],
 }, { timestamps: true });
-profileSchema.pre('save', async function (next) {
-    if (!this.candidateId) {
-        try {
-            this.candidateId = await (0, Counter_1.getNextCandidateId)();
-        }
-        catch (err) {
-            return next(err);
-        }
-    }
-    next();
-});
 profileSchema.index({ gender: 1, city: 1, religion: 1, caste: 1, education: 1, profession: 1 });
-exports.Profile = mongoose_1.default.models.Profile || mongoose_1.default.model('Profile', profileSchema);
+exports.Profile = (0, prismaBridge_1.createPrismaModelAdapter)('profile', { "user": "userId", "statusChangedBy": "statusChangedById", "deletedBy": "deletedById" });
 //# sourceMappingURL=Profile.js.map

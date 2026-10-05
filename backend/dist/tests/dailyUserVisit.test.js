@@ -4,7 +4,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const axios_1 = __importDefault(require("axios"));
-const mongoose_1 = __importDefault(require("mongoose"));
 const DailyUserVisit_1 = require("../models/DailyUserVisit");
 const visitTrackingService_1 = require("../services/visitTrackingService");
 const BASE_URL = 'http://localhost:5000/api';
@@ -13,15 +12,6 @@ async function runDailyVisitsTests() {
     console.log(' RUNNING DAILY VISITED USERS FULL-STACK ANALYTICS TEST SUITE');
     console.log('================================================================\n');
     try {
-        if (mongoose_1.default.connection.readyState === 0) {
-            const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/wonderful_jodi';
-            try {
-                await mongoose_1.default.connect(uri, { serverSelectionTimeoutMS: 2000 });
-            }
-            catch {
-                // Fallback to in-memory or backend server
-            }
-        }
         // 1. Authenticate as Admin
         console.log('[TEST 1/8] Authenticating as Administrator...');
         const adminLoginRes = await axios_1.default.post(`${BASE_URL}/admin/auth/login`, {
@@ -126,9 +116,9 @@ async function runDailyVisitsTests() {
         const yesterdayDateStr = (0, visitTrackingService_1.getFormattedVisitDate)(new Date(Date.now() - 24 * 60 * 60 * 1000));
         // Simulate User 1 visiting yesterday as well
         if (user1Id) {
-            await DailyUserVisit_1.DailyUserVisit.findOneAndUpdate({ user: new mongoose_1.default.Types.ObjectId(user1Id), visitDate: yesterdayDateStr }, {
+            await DailyUserVisit_1.DailyUserVisit.findOneAndUpdate({ user: user1Id, visitDate: yesterdayDateStr }, {
                 $setOnInsert: {
-                    user: new mongoose_1.default.Types.ObjectId(user1Id),
+                    user: user1Id,
                     visitDate: yesterdayDateStr,
                     firstVisitedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
                 },

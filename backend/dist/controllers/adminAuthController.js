@@ -130,9 +130,19 @@ async function adminLogin(req, res, next) {
         const { email, password } = parsed.data;
         const normalizedEmail = email.toLowerCase().trim();
         // Query database for admin user
-        const user = await User_1.User.findOne({ email: normalizedEmail });
-        const isUserAdmin = user && user.role === 'admin';
-        const passwordToCompare = isUserAdmin ? user.password : DUMMY_HASH;
+        let user = null;
+        try {
+            user = await User_1.User.findOne({ email: normalizedEmail });
+        }
+        catch (dbErr) {
+            console.error('[Admin Auth] Database lookup error during admin login:', dbErr?.message || dbErr);
+            return res.status(503).json({
+                success: false,
+                message: 'Database service is temporarily unavailable. Please verify database connection and credentials.',
+            });
+        }
+        const isUserAdmin = Boolean(user && user.role === 'admin');
+        const passwordToCompare = (isUserAdmin && user?.password) ? user.password : DUMMY_HASH;
         // Constant-time password comparison to prevent timing enumeration
         const isPasswordValid = await bcrypt_1.default.compare(password, passwordToCompare);
         if (!user || !isUserAdmin || !isPasswordValid) {
@@ -167,21 +177,32 @@ async function adminLogin(req, res, next) {
             req.socket.remoteAddress ||
             '127.0.0.1';
         const userAgent = req.headers['user-agent'] || 'Unknown';
-        await RefreshToken_1.RefreshToken.create({
-            user: user._id,
-            tokenHash,
-            family: sessionFamily,
-            isUsed: false,
-            isRevoked: false,
-            expiresAt,
-            ipAddress,
-            userAgent,
-        });
-        const accessToken = signAdminAccessToken(user._id.toString(), user.role, user.email, sessionId);
+        try {
+            await RefreshToken_1.RefreshToken.create({
+                user: user._id,
+                tokenHash,
+                family: sessionFamily,
+                isUsed: false,
+                isRevoked: false,
+                expiresAt,
+                ipAddress,
+                userAgent,
+            });
+        }
+        catch (refErr) {
+            console.warn('[Admin Auth] Non-blocking RefreshToken create warning:', refErr?.message || refErr);
+        }
+        const accessToken = signAdminAccessToken(user._id.toString(), user.role || 'admin', user.email, sessionId);
         // Set secure HTTP-only cookies
         setAdminCookies(res, accessToken, rawRefreshToken);
         // Fetch extra permissions if Admin model record exists
-        const adminRecord = await Admin_1.Admin.findOne({ user: user._id });
+        let adminRecord = null;
+        try {
+            adminRecord = await Admin_1.Admin.findOne({ user: user._id });
+        }
+        catch (adminErr) {
+            console.warn('[Admin Auth] Non-blocking Admin record lookup warning:', adminErr?.message || adminErr);
+        }
         // Record success audit & security log
         await recordAdminAudit(user.email, 'ADMIN_LOGIN_SUCCESS', req, `Admin logged in successfully via ${userAgent.slice(0, 100)}`, 'SUCCESS', user._id);
         await (0, securityUtils_1.recordSecurityEvent)('LOGIN_SUCCESS', {
@@ -301,7 +322,11 @@ async function adminForgotPassword(req, res, next) {
                 expiresAt,
                 isUsed: false,
             });
-            const clientOrigin = req.get('origin') || process.env.FRONTEND_URL || 'http://localhost:3000';
+            const clientOrigin = req.get('origin') ||
+                process.env.FRONTEND_URL ||
+                (process.env.NODE_ENV === 'production'
+                    ? 'https://wonderfuljodi.com'
+                    : 'http://localhost:3000');
             const frontendBaseUrl = clientOrigin.replace(/\/$/, '');
             const resetUrl = `${frontendBaseUrl}/admin/reset-password?token=${rawToken}`;
             await recordAdminAudit(user.email, 'ADMIN_PASSWORD_RESET_REQUESTED', req, 'Password reset link dispatched', 'SUCCESS', user._id);
@@ -425,7 +450,7 @@ async function adminChangePassword(req, res, next) {
         if (!user || user.role !== 'admin') {
             return res.status(404).json({ success: false, message: 'Admin account not found' });
         }
-        const isCurrentValid = await bcrypt_1.default.compare(currentPassword, user.password);
+        const isCurrentValid = await bcrypt_1.default.compare(currentPassword, user.password || '');
         if (!isCurrentValid) {
             await recordAdminAudit(user.email, 'ADMIN_PASSWORD_CHANGED', req, 'Failed password change: current password incorrect', 'FAILED', user._id);
             return res.status(400).json({ success: false, message: 'Incorrect current password.' });

@@ -20,7 +20,7 @@ exports.deleteBlog = deleteBlog;
 exports.restoreBlog = restoreBlog;
 exports.uploadBlogCoverImage = uploadBlogCoverImage;
 exports.seedDefaultBlogsIfEmpty = seedDefaultBlogsIfEmpty;
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const crypto_1 = __importDefault(require("crypto"));
@@ -360,7 +360,7 @@ async function getAdminBlogs(req, res, next) {
 async function getAdminBlogById(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid blog post ID format' });
         }
         const post = await BlogPost_1.BlogPost.findById(id)
@@ -425,8 +425,8 @@ async function createBlog(req, res, next) {
             isFeatured: Boolean(isFeatured),
             tags: Array.isArray(tags) ? tags.map((t) => String(t).trim()).filter(Boolean) : [],
             publishedAt: finalPublishedAt,
-            createdBy: req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined,
-            updatedBy: req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined,
+            createdBy: req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined,
+            updatedBy: req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined,
         });
         await logBlogAudit(req, 'BLOG_CREATED', `Created article: "${newBlog.title}" (${newBlog.slug})`, String(newBlog._id), {
             newStatus: newBlog.status,
@@ -449,7 +449,7 @@ async function createBlog(req, res, next) {
 async function updateBlog(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid blog post ID format' });
         }
         const existing = await BlogPost_1.BlogPost.findById(id);
@@ -515,7 +515,7 @@ async function updateBlog(req, res, next) {
         if (tags !== undefined && Array.isArray(tags)) {
             existing.tags = tags.map((t) => String(t).trim()).filter(Boolean);
         }
-        existing.updatedBy = req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined;
+        existing.updatedBy = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
         await existing.save();
         await logBlogAudit(req, 'BLOG_UPDATED', `Updated article: "${existing.title}" (${existing.slug})`, String(existing._id), {
             previousStatus,
@@ -540,7 +540,7 @@ async function updateBlogStatus(req, res, next) {
     try {
         const { id } = req.params;
         const { status } = req.body;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid blog post ID format' });
         }
         if (!['DRAFT', 'PUBLISHED', 'ARCHIVED'].includes(status)) {
@@ -564,7 +564,7 @@ async function updateBlogStatus(req, res, next) {
         if (status === 'PUBLISHED' && !blog.publishedAt) {
             blog.publishedAt = new Date();
         }
-        blog.updatedBy = req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined;
+        blog.updatedBy = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
         await blog.save();
         await logBlogAudit(req, 'BLOG_STATUS_CHANGED', `Changed status of "${blog.title}" from ${previousStatus} to ${status}`, String(blog._id), { previousStatus, newStatus: status });
         return res.status(200).json({
@@ -585,7 +585,7 @@ async function toggleBlogFeatured(req, res, next) {
     try {
         const { id } = req.params;
         const { isFeatured } = req.body;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid blog post ID format' });
         }
         const blog = await BlogPost_1.BlogPost.findById(id);
@@ -593,7 +593,7 @@ async function toggleBlogFeatured(req, res, next) {
             return res.status(404).json({ success: false, message: 'Blog post not found' });
         }
         blog.isFeatured = typeof isFeatured === 'boolean' ? isFeatured : !blog.isFeatured;
-        blog.updatedBy = req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined;
+        blog.updatedBy = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
         await blog.save();
         await logBlogAudit(req, 'BLOG_FEATURED_TOGGLED', `Marked "${blog.title}" as ${blog.isFeatured ? 'Featured' : 'Standard'}`, String(blog._id), { metadata: { isFeatured: blog.isFeatured } });
         return res.status(200).json({
@@ -613,7 +613,7 @@ async function toggleBlogFeatured(req, res, next) {
 async function deleteBlog(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid blog post ID format' });
         }
         const blog = await BlogPost_1.BlogPost.findById(id);
@@ -622,7 +622,7 @@ async function deleteBlog(req, res, next) {
         }
         blog.isDeleted = true;
         blog.deletedAt = new Date();
-        blog.deletedBy = req.user?.userId ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined;
+        blog.deletedBy = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
         await blog.save();
         await logBlogAudit(req, 'BLOG_DELETED', `Deleted blog post: "${blog.title}"`, String(blog._id));
         return res.status(200).json({
@@ -641,7 +641,7 @@ async function deleteBlog(req, res, next) {
 async function restoreBlog(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
             return res.status(400).json({ success: false, message: 'Invalid blog post ID format' });
         }
         const blog = await BlogPost_1.BlogPost.findById(id);

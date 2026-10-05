@@ -14,7 +14,7 @@
   "scripts": {
     "build:backend": "npm --prefix backend run build",
     "build:frontend": "npm --prefix frontend run build",
-    "postbuild:frontend": "node -e \"const fs=require('fs'),p=require('path');const src=p.join('frontend','.next','static');const dst=p.join('frontend','.next','standalone','frontend','.next','static');if(fs.existsSync(src)){fs.mkdirSync(dst,{recursive:true});fs.cpSync(src,dst,{recursive:true});}\"",
+    "postbuild:frontend": "node -e \"const fs=require('fs'),p=require('path'),root=__dirname;const sSrc=p.join(root,'frontend','.next','static');const pSrc=p.join(root,'frontend','public');[[sSrc,p.join(root,'frontend','.next','standalone','.next','static')],[sSrc,p.join(root,'frontend','.next','standalone','frontend','.next','static')],[pSrc,p.join(root,'frontend','.next','standalone','public')],[pSrc,p.join(root,'frontend','.next','standalone','frontend','public')]].forEach(([src,dst])=>{if(!fs.existsSync(src))return;fs.mkdirSync(p.dirname(dst),{recursive:true});fs.cpSync(src,dst,{recursive:true});console.log('Copied',src,'→',dst);});\"",
     "build": "npm run build:backend && npm run build:frontend",
     "dev": "npx -y concurrently --kill-others-on-fail -n \"backend,frontend\" -c \"bgBlue.bold,bgMagenta.bold\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "dev:backend": "npm --prefix backend run dev",

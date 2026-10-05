@@ -44,7 +44,7 @@ exports.getCities = getCities;
 exports.getVillages = getVillages;
 exports.validateLocationHierarchy = validateLocationHierarchy;
 exports.searchLocationsHandler = searchLocationsHandler;
-const mongoose_1 = __importDefault(require("mongoose"));
+const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
 const Location_1 = require("../models/Location");
 const securityUtils_1 = require("../utils/securityUtils");
 /**
@@ -81,7 +81,7 @@ async function getStates(req, res, next) {
             }
         }
         const filter = { isActive: true };
-        if (targetCountryId && mongoose_1.default.isValidObjectId(targetCountryId)) {
+        if (targetCountryId && prismaBridge_1.default.isValidObjectId(targetCountryId)) {
             filter.countryId = targetCountryId;
         }
         if (search && typeof search === 'string' && search.trim()) {
@@ -102,7 +102,7 @@ async function getStates(req, res, next) {
 async function getDistricts(req, res, next) {
     try {
         const { stateId, search } = req.query;
-        if (!stateId || !mongoose_1.default.isValidObjectId(stateId)) {
+        if (!stateId || !prismaBridge_1.default.isValidObjectId(stateId)) {
             return res.status(400).json({ success: false, message: 'Valid stateId query parameter is required.' });
         }
         // Verify state exists
@@ -129,7 +129,7 @@ async function getDistricts(req, res, next) {
 async function getSubDistricts(req, res, next) {
     try {
         const { districtId, search } = req.query;
-        if (!districtId || !mongoose_1.default.isValidObjectId(districtId)) {
+        if (!districtId || !prismaBridge_1.default.isValidObjectId(districtId)) {
             return res.status(400).json({ success: false, message: 'Valid districtId query parameter is required.' });
         }
         const districtExists = await Location_1.District.exists({ _id: districtId });
@@ -156,15 +156,15 @@ async function getCities(req, res, next) {
     try {
         const { districtId, subDistrictId, stateId, search, page = '1', limit = '30' } = req.query;
         const filter = { isActive: true };
-        if (districtId && mongoose_1.default.isValidObjectId(districtId)) {
+        if (districtId && prismaBridge_1.default.isValidObjectId(districtId)) {
             filter.districtId = districtId;
         }
-        if (subDistrictId && mongoose_1.default.isValidObjectId(subDistrictId)) {
+        if (subDistrictId && prismaBridge_1.default.isValidObjectId(subDistrictId)) {
             filter.subDistrictId = subDistrictId;
         }
         const targetState = stateId || req.query.state;
         if (targetState) {
-            if (mongoose_1.default.isValidObjectId(targetState)) {
+            if (prismaBridge_1.default.isValidObjectId(targetState)) {
                 filter.stateId = targetState;
             }
             else {
@@ -220,11 +220,11 @@ async function getCities(req, res, next) {
 async function getVillages(req, res, next) {
     try {
         const { subDistrictId, districtId, search, page = '1', limit = '30' } = req.query;
-        if (!subDistrictId || !mongoose_1.default.isValidObjectId(subDistrictId)) {
+        if (!subDistrictId || !prismaBridge_1.default.isValidObjectId(subDistrictId)) {
             return res.status(400).json({ success: false, message: 'Valid subDistrictId is required to search villages.' });
         }
         // Verify sub-district existence and parent consistency
-        if (districtId && mongoose_1.default.isValidObjectId(districtId)) {
+        if (districtId && prismaBridge_1.default.isValidObjectId(districtId)) {
             const validSub = await Location_1.SubDistrict.findOne({ _id: subDistrictId, districtId });
             if (!validSub) {
                 return res.status(400).json({ success: false, message: 'Sub-district does not belong to the provided district.' });
@@ -267,7 +267,7 @@ async function validateLocationHierarchy(data) {
     try {
         const resolved = {};
         if (data.countryId) {
-            if (!mongoose_1.default.isValidObjectId(data.countryId))
+            if (!prismaBridge_1.default.isValidObjectId(data.countryId))
                 return { isValid: false, error: 'Invalid countryId' };
             const country = await Location_1.Country.findById(data.countryId);
             if (!country)
@@ -275,7 +275,7 @@ async function validateLocationHierarchy(data) {
             resolved.country = country.name;
         }
         if (data.stateId) {
-            if (!mongoose_1.default.isValidObjectId(data.stateId))
+            if (!prismaBridge_1.default.isValidObjectId(data.stateId))
                 return { isValid: false, error: 'Invalid stateId' };
             const state = await Location_1.State.findById(data.stateId);
             if (!state)
@@ -286,7 +286,7 @@ async function validateLocationHierarchy(data) {
             resolved.state = state.name;
         }
         if (data.districtId) {
-            if (!mongoose_1.default.isValidObjectId(data.districtId))
+            if (!prismaBridge_1.default.isValidObjectId(data.districtId))
                 return { isValid: false, error: 'Invalid districtId' };
             const district = await Location_1.District.findById(data.districtId);
             if (!district)
@@ -297,7 +297,7 @@ async function validateLocationHierarchy(data) {
             resolved.district = district.name;
         }
         if (data.subDistrictId) {
-            if (!mongoose_1.default.isValidObjectId(data.subDistrictId))
+            if (!prismaBridge_1.default.isValidObjectId(data.subDistrictId))
                 return { isValid: false, error: 'Invalid subDistrictId' };
             const subDistrict = await Location_1.SubDistrict.findById(data.subDistrictId);
             if (!subDistrict)
@@ -309,7 +309,7 @@ async function validateLocationHierarchy(data) {
             resolved.subDistrictType = subDistrict.type;
         }
         if (data.cityId) {
-            if (!mongoose_1.default.isValidObjectId(data.cityId))
+            if (!prismaBridge_1.default.isValidObjectId(data.cityId))
                 return { isValid: false, error: 'Invalid cityId' };
             const city = await Location_1.City.findById(data.cityId);
             if (!city)
@@ -320,7 +320,7 @@ async function validateLocationHierarchy(data) {
             resolved.city = city.name;
         }
         if (data.villageId) {
-            if (!mongoose_1.default.isValidObjectId(data.villageId))
+            if (!prismaBridge_1.default.isValidObjectId(data.villageId))
                 return { isValid: false, error: 'Invalid villageId' };
             const village = await Location_1.Village.findById(data.villageId);
             if (!village)

@@ -35,6 +35,21 @@ function errorHandler(err, _req, res, _next) {
             message: 'Invalid or expired session',
         });
     }
+    // 5. Prisma / MySQL Database Connection Errors
+    if (err?.name === 'PrismaClientInitializationError' ||
+        err?.name === 'PrismaClientRustPanicError' ||
+        err?.code === 'P1000' ||
+        err?.code === 'P1001' ||
+        err?.code === 'P1002' ||
+        err?.code === 'P1003' ||
+        err?.code === 'P1017' ||
+        err?.message?.includes("Can't reach database server")) {
+        console.error('[Database Error] Prisma connection failure:', err.message);
+        return res.status(503).json({
+            success: false,
+            message: 'Database connection failed. Please verify that the database server is running and credentials in backend/.env are correct.',
+        });
+    }
     // Securely log full error on server
     console.error('Unhandled Application Error:', err);
     const status = typeof err.status === 'number' ? err.status : 500;

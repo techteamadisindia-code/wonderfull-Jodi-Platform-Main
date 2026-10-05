@@ -1,13 +1,9 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sanitizeActionUrl = sanitizeActionUrl;
 exports.getRecipientCount = getRecipientCount;
 exports.resolveRecipientIds = resolveRecipientIds;
 exports.createAndDispatchBroadcast = createAndDispatchBroadcast;
-const mongoose_1 = __importDefault(require("mongoose"));
 const Broadcast_1 = require("../models/Broadcast");
 const Notification_1 = require("../models/Notification");
 const User_1 = require("../models/User");
@@ -149,7 +145,7 @@ async function createAndDispatchBroadcast(params) {
             ? recipientIds
             : undefined,
         actionUrl: sanitizedUrl,
-        createdBy: new mongoose_1.default.Types.ObjectId(adminId),
+        createdBy: adminId,
         status: 'SENT',
         totalRecipients: recipientIds.length,
         deliveredCount: recipientIds.length,

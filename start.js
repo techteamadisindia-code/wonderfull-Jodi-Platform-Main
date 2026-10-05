@@ -24,6 +24,8 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const net = require('net');
+const http = require('http');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. PORT RESOLUTION
@@ -66,15 +68,53 @@ console.log('========================================');
 console.log('');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. FILE PATHS
+// 3. FILE PATHS & LIFECYCLE STATE
 // ─────────────────────────────────────────────────────────────────────────────
 
 const standaloneDir = path.join(__dirname, 'frontend', '.next', 'standalone');
 const nextServerPath = path.join(standaloneDir, 'server.js');
 const backendDistPath = path.join(__dirname, 'backend', 'dist', 'server.js');
 
+let frontendProcess = null;
+let isShuttingDown = false;
+let isStartingFrontend = false;
+
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. PATCH ROUTES MANIFEST
+// 4. PORT CHECKING HELPER
+// ─────────────────────────────────────────────────────────────────────────────
+
+function isPortAvailable(port, host = '127.0.0.1') {
+  return new Promise((resolve) => {
+    const tester = net.createServer();
+    tester.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(false);
+      } else {
+        resolve(true);
+      }
+    });
+    tester.once('listening', () => {
+      tester.once('close', () => resolve(true)).close();
+    });
+    tester.listen(port, host);
+  });
+}
+
+async function waitForPortAvailable(port, host = '127.0.0.1', timeoutMs = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const available = await isPortAvailable(port, host);
+    if (available) {
+      return true;
+    }
+    console.log(`[Frontend] Port ${host}:${port} is in use. Waiting for release...`);
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. PATCH ROUTES MANIFEST
 //
 // In Next.js standalone, rewrites are baked into routes-manifest.json at build
 // time. If built with a different port (e.g., 5000), Next.js will attempt to
@@ -97,7 +137,6 @@ function patchRoutesManifest() {
 
     try {
       const raw = fs.readFileSync(manifestPath, 'utf8');
-      // Replace any 127.0.0.1 or localhost with any port to the actual runtime INTERNAL_BACKEND_URL
       const patched = raw.replace(
         /https?:\/\/(127\.0\.0\.1|localhost):\d+/g,
         INTERNAL_BACKEND_URL
@@ -114,23 +153,80 @@ function patchRoutesManifest() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. START NEXT.JS STANDALONE SERVER (CHILD PROCESS)
+// 6. FRONTEND READINESS PROBE
 // ─────────────────────────────────────────────────────────────────────────────
 
-let frontendProcess = null;
+function waitForFrontendReady(port, host = '127.0.0.1', timeoutMs = 12000) {
+  const start = Date.now();
+  return new Promise((resolve) => {
+    function tryProbe() {
+      if (Date.now() - start > timeoutMs || isShuttingDown || !frontendProcess) {
+        return resolve(false);
+      }
 
-function startFrontend() {
+      const req = http.request(
+        {
+          hostname: host,
+          port: port,
+          path: '/',
+          method: 'HEAD',
+          timeout: 1000,
+        },
+        (res) => {
+          res.resume();
+          resolve(true);
+        }
+      );
+
+      req.on('error', () => {
+        setTimeout(tryProbe, 200);
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        setTimeout(tryProbe, 200);
+      });
+
+      req.end();
+    }
+
+    tryProbe();
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. START NEXT.JS STANDALONE SERVER (CHILD PROCESS)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function startFrontend() {
+  if (isStartingFrontend || (frontendProcess && !frontendProcess.killed)) {
+    console.log('[Frontend] Next.js standalone server is already running or starting.');
+    return;
+  }
+  isStartingFrontend = true;
+
   if (!fs.existsSync(nextServerPath)) {
     console.error('[Frontend] ERROR: Next.js standalone build is missing.');
     console.error(`[Frontend] Expected file: ${nextServerPath}`);
     console.error('[Frontend] Run "npm run build" before starting the application.');
-    return;
+    isStartingFrontend = false;
+    process.exit(1);
+  }
+
+  // Ensure internal port is free before spawning to prevent EADDRINUSE races
+  const portFree = await waitForPortAvailable(FRONTEND_PORT, '127.0.0.1', 5000);
+  if (!portFree) {
+    console.error(`[Frontend] ERROR: Port 127.0.0.1:${FRONTEND_PORT} is still in use after 5s. Cannot start Next.js.`);
+    isStartingFrontend = false;
+    process.exit(1);
   }
 
   // Patch routes manifest before spawning Next.js
   patchRoutesManifest();
 
-  frontendProcess = spawn(
+  console.log(`[Frontend] Starting Next.js standalone on 127.0.0.1:${FRONTEND_PORT}`);
+
+  const child = spawn(
     process.execPath,
     [nextServerPath],
     {
@@ -148,21 +244,48 @@ function startFrontend() {
     }
   );
 
-  console.log(`Next.js frontend started (listening internally on 127.0.0.1:${FRONTEND_PORT})`);
+  frontendProcess = child;
+  isStartingFrontend = false;
 
-  frontendProcess.on('error', (error) => {
-    console.error('[Frontend] Next.js process failed to start:', error.message);
-  });
+  console.log(`[Frontend] Next.js started successfully with PID ${child.pid}`);
 
-  frontendProcess.on('exit', (code, signal) => {
-    if (code !== 0 && signal !== 'SIGTERM' && signal !== 'SIGINT') {
-      console.error(`[Frontend] Next.js exited unexpectedly (Code: ${code}, Signal: ${signal})`);
+  child.on('error', (error) => {
+    console.error(`[Frontend] Next.js process failed to start (PID: ${child.pid || 'unknown'}):`, error.message);
+    if (frontendProcess === child) {
+      frontendProcess = null;
+    }
+    if (!isShuttingDown) {
+      handleShutdown('SIGTERM');
     }
   });
+
+  child.on('exit', (code, signal) => {
+    const pid = child.pid;
+    if (frontendProcess === child) {
+      frontendProcess = null;
+    }
+
+    if (isShuttingDown) {
+      console.log(`[Shutdown] Next.js frontend (PID ${pid}) exited during shutdown (Code: ${code}, Signal: ${signal}).`);
+    } else {
+      console.error(`[Frontend] Next.js exited unexpectedly (Code: ${code}, Signal: ${signal}) on 127.0.0.1:${FRONTEND_PORT} (PID: ${pid})`);
+      // Do not leave Express running in a broken half-state without frontend
+      handleShutdown('SIGTERM');
+    }
+  });
+
+  // Probe until Next.js is responding before Express opens to the public
+  const ready = await waitForFrontendReady(FRONTEND_PORT, '127.0.0.1', 12000);
+  if (ready) {
+    console.log(`[Frontend] Next.js is ready and listening on 127.0.0.1:${FRONTEND_PORT}`);
+  } else if (!isShuttingDown) {
+    console.error(`[Frontend] ERROR: Next.js did not become ready on 127.0.0.1:${FRONTEND_PORT} within 12s. Cannot start production application.`);
+    await handleShutdown('SIGTERM');
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. START EXPRESS BACKEND (PUBLIC SERVER)
+// 8. START EXPRESS BACKEND (PUBLIC SERVER)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function startBackend() {
@@ -192,21 +315,12 @@ function startBackend() {
       console.error('[Backend] Stack Trace:\n', err.stack);
     }
 
-    console.error('');
-    console.error('[Backend] Diagnostic Checklist:');
-    console.error('  1. Missing dependencies — run: npm install in root and backend/');
-    console.error('  2. Prisma client missing — run: npx prisma generate in backend/');
-    console.error('  3. Port conflict — check if port ' + PUBLIC_PORT + ' is already bound');
-    console.error('  4. Missing or invalid DATABASE_URL in backend/.env');
-    console.error('  5. Backend TypeScript compile error — run: npm run build:backend');
-    console.error('');
-
     process.exit(1);
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 7. PROCESS MONITORING & GRACEFUL SHUTDOWN
+// 9. PROCESS MONITORING & GRACEFUL SHUTDOWN
 // ─────────────────────────────────────────────────────────────────────────────
 
 process.on('unhandledRejection', (reason) => {
@@ -226,30 +340,91 @@ process.on('uncaughtException', (error) => {
   }
 });
 
-function handleShutdown(signal) {
+async function handleShutdown(signal) {
+  if (isShuttingDown) {
+    return;
+  }
+  isShuttingDown = true;
   console.log(`\n[Shutdown] Received ${signal}. Shutting down gracefully...`);
 
-  if (frontendProcess && !frontendProcess.killed) {
-    try {
-      frontendProcess.kill(signal);
-      console.log('[Shutdown] Next.js frontend stopped.');
-    } catch (_) {
-      // Ignore shutdown kill errors
-    }
+  const child = frontendProcess;
+  frontendProcess = null;
+
+  if (child) {
+    console.log('[Shutdown] Stopping Next.js frontend...');
+
+    await new Promise((resolve) => {
+      let resolved = false;
+      let forceKillTimer = null;
+
+      const done = () => {
+        if (!resolved) {
+          resolved = true;
+          if (forceKillTimer) {
+            clearTimeout(forceKillTimer);
+            forceKillTimer = null;
+          }
+          console.log('[Shutdown] Next.js frontend stopped.');
+          resolve();
+        }
+      };
+
+      // If the child has already exited, the 'exit' event was already emitted
+      // and once('exit', done) will never fire. Check child.exitCode to detect this.
+      if (child.exitCode !== null || child.signalCode !== null) {
+        return done();
+      }
+
+      child.once('exit', done);
+
+      // Send SIGTERM to request graceful exit
+      try {
+        child.kill(signal || 'SIGTERM');
+      } catch (err) {
+        console.warn('[Shutdown] Error sending signal to child process:', err.message);
+        // Signal failed — child may have already exited between our check and kill
+        done();
+      }
+
+      // If child does not exit in 5 seconds, force SIGKILL
+      forceKillTimer = setTimeout(() => {
+        if (!resolved) {
+          console.warn(`[Shutdown] Next.js child (PID ${child.pid}) did not exit in 5s. Sending SIGKILL...`);
+          try {
+            child.kill('SIGKILL');
+          } catch (_) {}
+          // Allow 2s for SIGKILL to take effect
+          setTimeout(done, 2000);
+        }
+      }, 5000);
+
+      if (forceKillTimer.unref) {
+        forceKillTimer.unref();
+      }
+    });
+  } else {
+    console.log('[Shutdown] No Next.js child process to stop.');
   }
 
-  process.exit(0);
+  process.exit(signal === 'SIGTERM' || signal === 'SIGINT' ? 0 : 1);
 }
 
 process.on('SIGTERM', () => handleShutdown('SIGTERM'));
 process.on('SIGINT', () => handleShutdown('SIGINT'));
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 8. LAUNCH APPLICATION
+// 10. LAUNCH APPLICATION
 //
 // 1. Start Next.js standalone process internally on FRONTEND_PORT
 // 2. Start Express backend publicly on PUBLIC_PORT
 // ─────────────────────────────────────────────────────────────────────────────
 
-startFrontend();
-startBackend();
+async function main() {
+  await startFrontend();
+  startBackend();
+}
+
+main().catch((err) => {
+  console.error('[Startup] Fatal initialization error:', err);
+  handleShutdown('SIGTERM');
+});

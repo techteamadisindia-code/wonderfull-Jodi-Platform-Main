@@ -415,16 +415,17 @@ process.on('SIGINT', () => handleShutdown('SIGINT'));
 // ─────────────────────────────────────────────────────────────────────────────
 // 10. LAUNCH APPLICATION
 //
-// 1. Start Next.js standalone process internally on FRONTEND_PORT
-// 2. Start Express backend publicly on PUBLIC_PORT
+// 1. Start Express backend publicly on PUBLIC_PORT immediately (Hostinger requirement)
+// 2. Start Next.js standalone process internally on FRONTEND_PORT asynchronously
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function main() {
-  await startFrontend();
+function main() {
   startBackend();
+
+  startFrontend().catch((err) => {
+    console.error('[Startup] Fatal frontend initialization error:', err);
+    handleShutdown('SIGTERM');
+  });
 }
 
-main().catch((err) => {
-  console.error('[Startup] Fatal initialization error:', err);
-  handleShutdown('SIGTERM');
-});
+main();

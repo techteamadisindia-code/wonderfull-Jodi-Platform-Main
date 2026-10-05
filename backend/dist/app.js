@@ -63,6 +63,17 @@ dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '..', '..', '.
 const app = (0, express_1.default)();
 /*
 |--------------------------------------------------------------------------
+| TRUST PROXY (HOSTINGER REVERSE PROXY)
+|--------------------------------------------------------------------------
+|
+| In Hostinger production, traffic passes through a reverse proxy/load balancer
+| which sets the X-Forwarded-For header. Trusting the first proxy hop ensures
+| express-rate-limit and req.ip accurately reflect real client IP addresses.
+|--------------------------------------------------------------------------
+*/
+app.set('trust proxy', 1);
+/*
+|--------------------------------------------------------------------------
 | SECURITY HEADERS
 |--------------------------------------------------------------------------
 */
@@ -309,24 +320,25 @@ app.use('/api/admin/contact-inquiries', adminContactInquiryRoutes_1.default);
 app.use('/api/admin/awards', awardRoutes_1.adminAwardRouter);
 /*
 |--------------------------------------------------------------------------
-| NEXT.JS FRONTEND PROXY
+| NEXT.JS FRONTEND PROXY WITH STARTUP RETRY
 |--------------------------------------------------------------------------
 |
-| Express = public server
+| Express = public server (port 3000)
+| Next.js = internal standalone server (port 3001)
 |
-| Express PORT:
-|     3000
-|
-| Next.js:
-|     3001
-|
-| API requests remain inside Express.
-|
+| API, uploads, socket.io, and health check requests remain in Express.
 | Everything else is forwarded to Next.js.
+|
+| When Express starts immediately (to satisfy Hostinger's 3s listen limit),
+| Next.js standalone process takes ~0.5–2 seconds to become ready.
+| During this startup race, if Next.js returns ECONNREFUSED, the proxy
+| retries every 200ms up to 4000ms instead of immediately failing with 503.
 |--------------------------------------------------------------------------
 */
 const FRONTEND_PORT = Number(process.env.FRONTEND_PORT) || 3001;
-app.use((req, res, next) => {
+const PROXY_RETRY_INTERVAL_MS = 200;
+const PROXY_MAX_WAIT_MS = 4000;
+app.use(async (req, res, next) => {
     /*
      * Do NOT proxy API/upload/socket/health.
      */
@@ -336,159 +348,203 @@ app.use((req, res, next) => {
         req.path === '/health') {
         return next();
     }
-    const options = {
-        hostname: '127.0.0.1',
-        port: FRONTEND_PORT,
-        path: req.originalUrl ||
-            req.url,
-        method: req.method,
-        headers: {
+    // Extract or buffer request body if present (for POST/PUT requests)
+    let bodyBuffer = null;
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+        if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+            if (req.is('application/json')) {
+                bodyBuffer = Buffer.from(JSON.stringify(req.body));
+            }
+            else if (req.is('application/x-www-form-urlencoded')) {
+                bodyBuffer = Buffer.from(new URLSearchParams(req.body).toString());
+            }
+        }
+        // If body was not parsed by body-parser, buffer any unconsumed stream data with safety timeout
+        if (!bodyBuffer && req.readable && !req.readableEnded) {
+            bodyBuffer = await new Promise((resolve) => {
+                const chunks = [];
+                const timer = setTimeout(() => resolve(chunks.length > 0 ? Buffer.concat(chunks) : null), 2000);
+                req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+                req.once('end', () => {
+                    clearTimeout(timer);
+                    resolve(chunks.length > 0 ? Buffer.concat(chunks) : null);
+                });
+                req.once('error', () => {
+                    clearTimeout(timer);
+                    resolve(null);
+                });
+            });
+        }
+    }
+    const startTime = Date.now();
+    let retryTimer = null;
+    let activeProxyReq = null;
+    let isDone = false;
+    const cleanup = () => {
+        isDone = true;
+        if (retryTimer) {
+            clearTimeout(retryTimer);
+            retryTimer = null;
+        }
+        if (activeProxyReq && !activeProxyReq.destroyed) {
+            try {
+                activeProxyReq.destroy();
+            }
+            catch (_) { }
+            activeProxyReq = null;
+        }
+    };
+    // Only cleanup if the client disconnected prematurely before response finished
+    res.once('close', () => {
+        if (!res.writableFinished) {
+            cleanup();
+        }
+    });
+    const send503Fallback = () => {
+        if (res.headersSent || isDone) {
+            return;
+        }
+        cleanup();
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        res.status(503).send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="refresh" content="2">
+  <title>Wonderful Jodi</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #fff5f7;
+      color: #333;
+    }
+    .card {
+      background: white;
+      padding: 40px 50px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+      text-align: center;
+      max-width: 480px;
+    }
+    h1 {
+      color: #e11d48;
+      margin-bottom: 12px;
+      font-size: 24px;
+      font-weight: 700;
+    }
+    p {
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 20px;
+      font-size: 15px;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 4px solid #fecdd3;
+      border-top-color: #e11d48;
+      border-radius: 50%;
+      animation: spin 1s infinite linear;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+  <script>
+    setTimeout(function() {
+      window.location.reload();
+    }, 2000);
+  </script>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner"></div>
+    <h1>Wonderful Jodi</h1>
+    <p>
+      The platform services are initializing.
+      Please try again in a few seconds.
+    </p>
+  </div>
+</body>
+</html>
+    `);
+    };
+    const attempt = () => {
+        if (isDone || res.writableEnded) {
+            return;
+        }
+        const headers = {
             ...req.headers,
             host: `127.0.0.1:${FRONTEND_PORT}`,
             'x-forwarded-for': req.headers['x-forwarded-for'] ||
                 req.ip ||
                 req.socket.remoteAddress ||
                 '',
-            'x-forwarded-proto': process.env.NODE_ENV ===
-                'production'
-                ? 'https'
-                : 'http',
-            'x-forwarded-host': req.headers.host ||
-                'wonderfuljodi.com',
-        },
-    };
-    const proxyReq = http_1.default.request(options, (proxyRes) => {
-        res.writeHead(proxyRes.statusCode ||
-            200, proxyRes.headers);
-        proxyRes.pipe(res, {
-            end: true,
-        });
-    });
-    proxyReq.on('error', (error) => {
-        console.error('[Next.js Proxy] Error:', error.message);
-        if (!res.headersSent) {
-            res
-                .status(503)
-                .send(`
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport"
-        content="width=device-width,initial-scale=1">
-  <title>Wonderful Jodi</title>
-
-  <style>
-    body {
-      font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        Roboto,
-        sans-serif;
-
-      display: flex;
-      align-items: center;
-      justify-content: center;
-
-      min-height: 100vh;
-
-      margin: 0;
-
-      background: #fff5f7;
-
-      color: #333;
-    }
-
-    .card {
-      background: white;
-
-      padding: 40px 50px;
-
-      border-radius: 16px;
-
-      box-shadow:
-        0 10px 30px
-        rgba(0,0,0,0.08);
-
-      text-align: center;
-
-      max-width: 480px;
-    }
-
-    h1 {
-      color: #e11d48;
-
-      margin-bottom: 12px;
-
-      font-size: 24px;
-
-      font-weight: 700;
-    }
-
-    p {
-      color: #666;
-
-      line-height: 1.6;
-
-      margin-bottom: 20px;
-
-      font-size: 15px;
-    }
-
-    .spinner {
-      width: 36px;
-      height: 36px;
-
-      border: 4px solid #fecdd3;
-
-      border-top-color: #e11d48;
-
-      border-radius: 50%;
-
-      animation:
-        spin 1s infinite linear;
-
-      margin:
-        0 auto 20px;
-    }
-
-    @keyframes spin {
-      0% {
-        transform: rotate(0deg);
-      }
-
-      100% {
-        transform: rotate(360deg);
-      }
-    }
-  </style>
-</head>
-
-<body>
-
-  <div class="card">
-
-    <div class="spinner"></div>
-
-    <h1>Wonderful Jodi</h1>
-
-    <p>
-      The platform services are
-      initializing.
-      Please try again in a few seconds.
-    </p>
-
-  </div>
-
-</body>
-</html>
-            `);
+            'x-forwarded-proto': process.env.NODE_ENV === 'production' ? 'https' : 'http',
+            'x-forwarded-host': req.headers.host || 'wonderfuljodi.com',
+        };
+        if (bodyBuffer) {
+            headers['content-length'] = Buffer.byteLength(bodyBuffer);
         }
-    });
-    req.pipe(proxyReq, {
-        end: true,
-    });
+        else if (req.method === 'GET' || req.method === 'HEAD') {
+            delete headers['content-length'];
+        }
+        const options = {
+            hostname: '127.0.0.1',
+            port: FRONTEND_PORT,
+            path: req.originalUrl || req.url,
+            method: req.method,
+            headers,
+        };
+        const proxyReq = http_1.default.request(options, (proxyRes) => {
+            isDone = true;
+            if (retryTimer) {
+                clearTimeout(retryTimer);
+                retryTimer = null;
+            }
+            res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+            proxyRes.pipe(res, { end: true });
+            proxyRes.once('end', () => {
+                activeProxyReq = null;
+            });
+        });
+        activeProxyReq = proxyReq;
+        proxyReq.on('error', (error) => {
+            if (isDone || res.writableEnded) {
+                return;
+            }
+            const isConnectionError = error.code === 'ECONNREFUSED' ||
+                error.code === 'ECONNRESET' ||
+                error.code === 'EHOSTUNREACH';
+            const elapsedTime = Date.now() - startTime;
+            if (isConnectionError && elapsedTime < PROXY_MAX_WAIT_MS) {
+                // Retry connection after interval
+                retryTimer = setTimeout(() => {
+                    attempt();
+                }, PROXY_RETRY_INTERVAL_MS);
+            }
+            else {
+                console.error(`[Next.js Proxy] Error after ${elapsedTime}ms:`, error.message);
+                send503Fallback();
+            }
+        });
+        if (bodyBuffer) {
+            proxyReq.write(bodyBuffer);
+        }
+        proxyReq.end();
+    };
+    attempt();
 });
 /*
 |--------------------------------------------------------------------------

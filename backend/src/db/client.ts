@@ -49,7 +49,7 @@ export function toClientArray<T extends { id?: string; _id?: string }>(records: 
  * Tests direct connection to Hostinger MySQL / MariaDB database.
  * Includes a 3-second timeout to ensure health checks never hang the process.
  */
-export async function testSqlConnection(timeoutMs: number = 3000): Promise<{ success: boolean; message: string; version?: string }> {
+export async function testSqlConnection(timeoutMs: number = Number(process.env.DB_CONNECT_TIMEOUT_MS) || 10000): Promise<{ success: boolean; message: string; version?: string }> {
   try {
     const queryPromise = prisma.$queryRaw`SELECT VERSION() as version, DATABASE() as dbName;`;
     const timeoutPromise = new Promise<never>((_, reject) =>

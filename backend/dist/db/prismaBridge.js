@@ -10,6 +10,46 @@ exports.runPrismaAggregate = runPrismaAggregate;
 exports.createPrismaModelAdapter = createPrismaModelAdapter;
 const client_1 = require("./client");
 /**
+ * Unescapes regex special characters for Prisma string queries.
+ */
+function unescapeRegexPattern(str) {
+    return str.replace(/\\([\\^$.*+?()[\]{}|/])/g, '$1');
+}
+/**
+ * Parses MongoDB regex pattern into database-compatible Prisma string filter.
+ * In MySQL / MariaDB, string collations (e.g. utf8mb4_unicode_ci) are case-insensitive by default.
+ * Prisma Client rejects the `mode` parameter on MySQL providers ("Unknown argument `mode`").
+ * This helper maps anchors (^...$) to equals / startsWith / endsWith / contains without the unsupported `mode` arg.
+ */
+function parseRegexToPrismaFilter(pattern) {
+    let p = pattern;
+    const startsWithAnchor = p.startsWith('^');
+    const endsWithAnchor = p.endsWith('$');
+    if (startsWithAnchor && endsWithAnchor) {
+        p = p.slice(1, -1);
+        p = unescapeRegexPattern(p);
+        return { equals: p };
+    }
+    else if (startsWithAnchor) {
+        p = p.slice(1);
+        p = unescapeRegexPattern(p);
+        return { startsWith: p };
+    }
+    else if (endsWithAnchor) {
+        p = p.slice(0, -1);
+        p = unescapeRegexPattern(p);
+        return { endsWith: p };
+    }
+    else {
+        if (p.startsWith('.*'))
+            p = p.slice(2);
+        if (p.endsWith('.*'))
+            p = p.slice(0, -2);
+        p = unescapeRegexPattern(p);
+        return { contains: p };
+    }
+}
+/**
  * Normalizes MongoDB filter syntax to Prisma `where` clause.
  */
 function normalizeFilter(filter = {}, fieldMap = {}) {
@@ -88,10 +128,7 @@ function normalizeFilter(filter = {}, fieldMap = {}) {
         }
         // Direct RegExp
         if (rawVal instanceof RegExp) {
-            where[key] = {
-                contains: rawVal.source,
-                mode: rawVal.flags.includes('i') ? 'insensitive' : 'default',
-            };
+            where[key] = parseRegexToPrismaFilter(rawVal.source);
             continue;
         }
         // Operators in nested objects
@@ -140,12 +177,9 @@ function normalizeFilter(filter = {}, fieldMap = {}) {
                 hasOp = true;
             }
             if ('$regex' in opObj) {
-                const flags = opObj.$options || '';
                 const pattern = typeof opObj.$regex === 'string' ? opObj.$regex : opObj.$regex.source;
-                parsedOps.contains = pattern;
-                if (flags.includes('i') || opObj.$regex?.flags?.includes('i')) {
-                    parsedOps.mode = 'insensitive';
-                }
+                const parsed = parseRegexToPrismaFilter(pattern);
+                Object.assign(parsedOps, parsed);
                 hasOp = true;
             }
             if (hasOp) {
@@ -160,30 +194,56 @@ function normalizeFilter(filter = {}, fieldMap = {}) {
 }
 /**
  * Normalizes MongoDB sort syntax to Prisma `orderBy` clause.
+ * Prisma Client requires an array of single-key objects when sorting by multiple fields
+ * (e.g. `[{ sortOrder: 'asc' }, { name: 'asc' }]`).
  */
 function normalizeSort(sort) {
     if (!sort)
         return undefined;
+    const result = [];
     if (typeof sort === 'string') {
-        const parts = sort.trim().split(/\s+/);
-        const orderObj = {};
+        const parts = sort.trim().split(/\s+/).filter(Boolean);
         for (const part of parts) {
             if (part.startsWith('-')) {
-                orderObj[part.slice(1)] = 'desc';
+                const field = part.slice(1);
+                result.push({ [field === '_id' ? 'id' : field]: 'desc' });
             }
             else {
-                orderObj[part] = 'asc';
+                const field = part.startsWith('+') ? part.slice(1) : part;
+                result.push({ [field === '_id' ? 'id' : field]: 'asc' });
             }
         }
-        return orderObj;
+        return result.length > 0 ? result : undefined;
     }
-    if (typeof sort === 'object' && !Array.isArray(sort)) {
-        const orderObj = {};
+    if (Array.isArray(sort)) {
+        for (const item of sort) {
+            if (Array.isArray(item) && item.length >= 2) {
+                const fieldKey = item[0] === '_id' ? 'id' : item[0];
+                const dir = item[1] === -1 || item[1] === 'desc' || item[1] === 'DESC' ? 'desc' : 'asc';
+                result.push({ [fieldKey]: dir });
+            }
+            else if (item && typeof item === 'object') {
+                for (const [k, v] of Object.entries(item)) {
+                    const fieldKey = k === '_id' ? 'id' : k;
+                    const dir = v === -1 || v === 'desc' || v === 'DESC' ? 'desc' : 'asc';
+                    result.push({ [fieldKey]: dir });
+                }
+            }
+            else if (typeof item === 'string') {
+                const sub = normalizeSort(item);
+                if (sub)
+                    result.push(...sub);
+            }
+        }
+        return result.length > 0 ? result : undefined;
+    }
+    if (typeof sort === 'object') {
         for (const [k, v] of Object.entries(sort)) {
             const fieldKey = k === '_id' ? 'id' : k;
-            orderObj[fieldKey] = v === -1 || v === 'desc' || v === 'DESC' ? 'desc' : 'asc';
+            const dir = v === -1 || v === 'desc' || v === 'DESC' ? 'desc' : 'asc';
+            result.push({ [fieldKey]: dir });
         }
-        return orderObj;
+        return result.length > 0 ? result : undefined;
     }
     return undefined;
 }
@@ -346,6 +406,7 @@ class PrismaQueryBuilder {
     constructor(prismaDelegate, filter = {}, isFindOne = false, fieldMap = {}, delegateName = '') {
         this.queryOptions = {};
         this.populateParticipants = false;
+        this.populatedRelations = [];
         this.prismaDelegate = prismaDelegate;
         this.fieldMap = fieldMap;
         this.where = normalizeFilter(filter, fieldMap);
@@ -406,15 +467,31 @@ class PrismaQueryBuilder {
             this.populateParticipants = true;
             return this;
         }
+        // Map Mongoose FK paths (e.g. districtId, stateId, religionId) to Prisma relation field names
+        const POPULATE_RELATION_MAP = {
+            districtId: 'district',
+            stateId: 'state',
+            subDistrictId: 'subDistrict',
+            religionId: 'religion',
+            casteId: 'caste',
+            subCasteId: 'subCaste',
+            countryId: 'country',
+            userId: 'user',
+            createdBy: 'createdBy',
+            updatedBy: 'updatedBy',
+            deletedBy: 'deletedBy',
+        };
+        const relationName = POPULATE_RELATION_MAP[targetPath] || (targetPath.endsWith('Id') ? targetPath.slice(0, -2) : targetPath);
+        this.populatedRelations.push({ path: targetPath, relationName });
         if (targetSelect && typeof targetSelect === 'string') {
             const selectFieldsObj = { id: true };
             targetSelect.split(/\s+/).filter(Boolean).forEach((f) => {
                 selectFieldsObj[f === '_id' ? 'id' : f] = true;
             });
-            this.queryOptions.include[targetPath] = { select: selectFieldsObj };
+            this.queryOptions.include[relationName] = { select: selectFieldsObj };
         }
         else {
-            this.queryOptions.include[targetPath] = true;
+            this.queryOptions.include[relationName] = true;
         }
         return this;
     }
@@ -438,7 +515,7 @@ class PrismaQueryBuilder {
             args.select = this.queryOptions.select;
         if (this.queryOptions.include)
             args.include = this.queryOptions.include;
-        const formatConversation = (rec) => {
+        const formatRecord = (rec) => {
             if (!rec)
                 return rec;
             if (this.delegateName === 'conversation' && Array.isArray(rec.participants)) {
@@ -449,16 +526,21 @@ class PrismaQueryBuilder {
                     rec.participants = rec.participants.map((cp) => cp.userId ? cp.userId : String(cp._id || cp.id || cp));
                 }
             }
+            for (const { path: pPath, relationName } of this.populatedRelations) {
+                if (rec[relationName] !== undefined && rec[relationName] !== null) {
+                    rec[pPath] = (0, client_1.toClient)(rec[relationName]);
+                }
+            }
             return rec;
         };
         if (this.isFindOne) {
             const record = await this.prismaDelegate.findFirst(args);
-            const clientRecord = formatConversation((0, client_1.toClient)(record));
+            const clientRecord = formatRecord((0, client_1.toClient)(record));
             return attachSave(clientRecord, this.prismaDelegate, this.fieldMap);
         }
         else {
             const records = await this.prismaDelegate.findMany(args);
-            const clientRecords = (0, client_1.toClientArray)(records).map((r) => attachSave(formatConversation(r), this.prismaDelegate, this.fieldMap));
+            const clientRecords = (0, client_1.toClientArray)(records).map((r) => attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap));
             return clientRecords;
         }
     }
@@ -661,9 +743,10 @@ async function runPrismaAggregate(delegate, pipeline = [], fieldMap = {}) {
             }
             case '$sort': {
                 const norm = normalizeSort(stageVal);
-                if (norm) {
+                if (norm && norm.length > 0) {
                     current = [...current].sort((a, b) => {
-                        for (const [field, dir] of Object.entries(norm)) {
+                        for (const sortItem of norm) {
+                            const [field, dir] = Object.entries(sortItem)[0];
                             const valA = a[field];
                             const valB = b[field];
                             if (valA < valB)

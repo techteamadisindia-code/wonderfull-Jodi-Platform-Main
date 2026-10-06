@@ -47,7 +47,7 @@ function toClientArray(records) {
  * Tests direct connection to Hostinger MySQL / MariaDB database.
  * Includes a 3-second timeout to ensure health checks never hang the process.
  */
-async function testSqlConnection(timeoutMs = 3000) {
+async function testSqlConnection(timeoutMs = Number(process.env.DB_CONNECT_TIMEOUT_MS) || 10000) {
     try {
         const queryPromise = exports.prisma.$queryRaw `SELECT VERSION() as version, DATABASE() as dbName;`;
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`Database connection check timed out after ${timeoutMs}ms`)), timeoutMs));

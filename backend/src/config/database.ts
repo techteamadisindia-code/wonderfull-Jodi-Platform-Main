@@ -10,13 +10,12 @@ import { testSqlConnection } from '../db/client';
  * Legacy MongoDB migration code can remain elsewhere.
  */
 
-const DATABASE_URL = process.env.DATABASE_URL;
-
 export async function connectDatabase(): Promise<boolean> {
   console.log('==================================================');
   console.log('[Database] Starting database connection...');
   console.log('==================================================');
 
+  const DATABASE_URL = process.env.DATABASE_URL;
   if (!DATABASE_URL) {
     const message = '[MySQL] DATABASE_URL is not configured.';
     console.error(message);

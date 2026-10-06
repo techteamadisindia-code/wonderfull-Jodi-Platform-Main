@@ -11,11 +11,11 @@ const client_1 = require("../db/client");
  * MongoDB is no longer required for application startup.
  * Legacy MongoDB migration code can remain elsewhere.
  */
-const DATABASE_URL = process.env.DATABASE_URL;
 async function connectDatabase() {
     console.log('==================================================');
     console.log('[Database] Starting database connection...');
     console.log('==================================================');
+    const DATABASE_URL = process.env.DATABASE_URL;
     if (!DATABASE_URL) {
         const message = '[MySQL] DATABASE_URL is not configured.';
         console.error(message);

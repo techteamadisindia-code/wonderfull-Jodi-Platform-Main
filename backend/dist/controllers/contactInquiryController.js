@@ -91,16 +91,29 @@ async function submitContactInquiry(req, res, next) {
                 {
                     status: 'NEW',
                     note: 'Inquiry submitted',
-                    timestamp: new Date(),
+                    timestamp: new Date().toISOString(),
                 },
             ],
+            adminReplies: [],
         });
-        // ── Create Admin Notification (idempotent) ──────────────────────────────
-        // We mark the inquiry as having a notification and create a system notification
-        // The admin panel polls this via the notifications system
+        // ── Safe Email Acknowledgment (non-blocking, inquiry already saved reliably) ──
         try {
-            // We can't link to a specific admin user, so create a "system" notification
-            // by using a placeholder. Real admins see it on the contact inquiries dashboard.
+            const emailConfig = (0, emailService_1.getEmailConfig)();
+            if (emailConfig.host && emailConfig.user && emailConfig.pass) {
+                (0, emailService_1.sendMail)({
+                    to: email.toLowerCase().trim(),
+                    subject: `Inquiry Received [${inquiryId}] – Wonderful Jodi`,
+                    text: `Dear ${name},\n\nThank you for reaching out to Wonderful Jodi. We have received your inquiry and our team will review it shortly.\n\nYour Reference ID: ${inquiryId}\n\nBest regards,\nWonderful Jodi Support Team`,
+                }).catch((mailErr) => {
+                    console.warn('Optional contact acknowledgment email failed to send:', mailErr);
+                });
+            }
+        }
+        catch {
+            // SMTP issues must never break the contact inquiry submission
+        }
+        // ── Create Admin Notification (idempotent) ──────────────────────────────
+        try {
             await ContactInquiry_1.ContactInquiry.findByIdAndUpdate(inquiry._id, { notificationCreated: true });
         }
         catch {

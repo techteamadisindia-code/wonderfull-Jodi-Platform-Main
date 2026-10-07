@@ -8,6 +8,7 @@ import { addShortlist, removeShortlist, getAuthToken } from '../lib/api';
 
 import { DoctorAvatar } from './DoctorAvatar';
 import { getProfileDisplayName, getCandidateId } from '../lib/profileUtils';
+import { isValidImageUrl } from '../lib/imageUtils';
 
 function getAge(dob?: string | Date) {
   if (!dob) return 28;
@@ -28,7 +29,7 @@ export function ProfileCard({
   const [shortlisted, setShortlisted] = useState(isShortlistedDefault);
   const [isUpdating, setIsUpdating] = useState(false);
   const age = profile.age || getAge(profile.dob);
-  const [imgError, setImgError] = useState(!profile.primaryPhoto);
+  const [imgError, setImgError] = useState(!isValidImageUrl(profile.primaryPhoto));
 
   const displayName = getProfileDisplayName(profile);
   const candidateId = getCandidateId(profile);
@@ -98,7 +99,7 @@ export function ProfileCard({
           title={`View full profile of ${displayName}`}
           aria-label={`View full profile of ${displayName}`}
         >
-          {profile.primaryPhoto && !imgError ? (
+          {profile.primaryPhoto && !imgError && isValidImageUrl(profile.primaryPhoto) ? (
             <img
               src={profile.primaryPhoto}
               alt={displayName}

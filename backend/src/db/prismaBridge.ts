@@ -471,6 +471,11 @@ function attachSave(record: any, delegate: any, fieldMap: Record<string, string>
         }
       }
 
+      if (String(delegate?.name || '').toLowerCase().includes('contactinquiry')) {
+        dataToSave.replies = dataToSave.replies ?? [];
+        dataToSave.statusHistory = dataToSave.statusHistory ?? [];
+      }
+
       const currentParticipants = self.participants;
 
       const saved = await delegate.upsert({
@@ -522,11 +527,13 @@ interface RelationMeta {
 }
 
 const prismaModelRelations: Record<string, Record<string, RelationMeta>> = {};
+const prismaModelAllFields: Record<string, Set<string>> = {};
 
 if (Prisma?.dmmf?.datamodel?.models) {
   for (const model of Prisma.dmmf.datamodel.models) {
     const mName = model.name.toLowerCase();
     prismaModelRelations[mName] = {};
+    prismaModelAllFields[mName] = new Set(model.fields.map((f: any) => f.name));
     for (const field of model.fields) {
       if (field.kind === 'object') {
         prismaModelRelations[mName][field.name] = {
@@ -1067,6 +1074,14 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
           args.select[k] = v;
         }
       }
+      const known = prismaModelAllFields[this.delegateName?.toLowerCase()];
+      if (known) {
+        for (const k of Object.keys(args.select)) {
+          if (!known.has(k)) {
+            delete args.select[k];
+          }
+        }
+      }
     } else if (cleanInclude) {
       args.include = cleanInclude;
     }
@@ -1467,6 +1482,11 @@ export function createPrismaModelAdapter<T = any>(
     }
 
     const cleanData = cleanPrismaData({ ...data, id }, fieldMap);
+    const mName = String(delegateName).toLowerCase();
+    if (mName === 'contactinquiry') {
+      cleanData.replies = cleanData.replies ?? [];
+      cleanData.statusHistory = cleanData.statusHistory ?? [];
+    }
     const created = await delegate.create({ data: cleanData });
     return attachSave(toClient(created), delegate, fieldMap);
   };

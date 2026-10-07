@@ -13,6 +13,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     '/awards',
     '/blog',
     '/stories',
+    '/success-stories',
     '/careers',
     '/contact',
     '/how-it-works',

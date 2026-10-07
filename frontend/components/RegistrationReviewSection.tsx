@@ -23,6 +23,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { SiblingItem, UgQualItem, PgQualItem, DoctorateQualItem } from '../app/register/page';
+import { isValidImageUrl } from '../lib/imageUtils';
 
 export interface MissingFieldItem {
   step: number;
@@ -522,7 +523,7 @@ export function RegistrationReviewSection({
         {/* Photo + Preferences Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-3.5 bg-slate-50/80 rounded-xl border border-slate-200">
           <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 shadow-2xs">
-            {displayPhoto ? (
+            {displayPhoto && isValidImageUrl(displayPhoto) ? (
               <img src={displayPhoto} alt="Candidate Profile" className="w-full h-full object-cover" />
             ) : (
               <div className="text-center p-1 text-slate-400">

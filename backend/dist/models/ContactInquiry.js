@@ -89,7 +89,7 @@ contactInquirySchema.index({ priority: 1, status: 1, createdAt: -1 });
 contactInquirySchema.index({ category: 1, createdAt: -1 });
 contactInquirySchema.index({ email: 1, createdAt: -1 });
 contactInquirySchema.index({ createdAt: -1 });
-exports.ContactInquiry = (0, prismaBridge_1.createPrismaModelAdapter)('contactInquiry', { "user": "userId", "assignedTo": "assignedToId" });
+exports.ContactInquiry = (0, prismaBridge_1.createPrismaModelAdapter)('contactInquiry', { "user": "userId", "assignedTo": "assignedToId", "adminReplies": "replies" });
 /**
  * Generate a unique contact inquiry ID in format WJ-CON-YYYY-XXXX
  */

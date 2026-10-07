@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowRight, RotateCcw, AlertCircle, Users } from 'lucide-react';
 import { ProfileCard, ProfileCardSkeleton } from './ProfileCard';
 import { searchProfiles, getShortlisted, getAuthToken } from '../lib/api';
+import { isValidImageUrl } from '../lib/imageUtils';
 import { ProfileCard as ProfileCardType } from '../types/profile';
 
 export function FeaturedProfilesSection() {
@@ -39,7 +40,10 @@ export function FeaturedProfilesSection() {
         degree: p.degree,
         profession: p.profession,
         specialization: p.specialization,
-        primaryPhoto: p.primaryPhoto || (p.photos && p.photos[0]) || '',
+        primaryPhoto: (() => {
+          const raw = p.primaryPhoto || (p.photos && p.photos[0]) || '';
+          return isValidImageUrl(raw) ? raw : '';
+        })(),
         verificationStatus: p.verificationStatus,
       }));
 

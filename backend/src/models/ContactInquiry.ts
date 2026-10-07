@@ -150,7 +150,7 @@ contactInquirySchema.index({ category: 1, createdAt: -1 });
 contactInquirySchema.index({ email: 1, createdAt: -1 });
 contactInquirySchema.index({ createdAt: -1 });
 
-export const ContactInquiry = createPrismaModelAdapter<IContactInquiry>('contactInquiry', {"user":"userId","assignedTo":"assignedToId"});
+export const ContactInquiry = createPrismaModelAdapter<IContactInquiry>('contactInquiry', {"user":"userId","assignedTo":"assignedToId","adminReplies":"replies"});
 
 /**
  * Generate a unique contact inquiry ID in format WJ-CON-YYYY-XXXX

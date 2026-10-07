@@ -862,18 +862,18 @@ function RegisterForm() {
           filename: file.name,
         });
 
-        const url = res.data?.data?.url || res.data?.url || base64;
-        setUploadedPhotoUrl(url);
-
-        if (registrationId) {
-          triggerAutoSave('photos', { primaryPhoto: url, photos: [url] });
+        const url = res.data?.data?.url || res.data?.url;
+        if (url) {
+          setUploadedPhotoUrl(url);
+          if (registrationId) {
+            triggerAutoSave('photos', { primaryPhoto: url, photos: [url] });
+          }
+        } else {
+          setPhotoError('Photo uploaded but server did not return a valid URL.');
         }
       } catch (err: any) {
-        console.warn('Upload API notice (fallback to preview base64):', err);
-        setUploadedPhotoUrl(base64);
-        if (registrationId) {
-          triggerAutoSave('photos', { primaryPhoto: base64, photos: [base64] });
-        }
+        console.warn('Photo upload failed:', err);
+        setPhotoError('Unable to upload photo to server. Please try again or continue.');
       } finally {
         setPhotoUploading(false);
       }

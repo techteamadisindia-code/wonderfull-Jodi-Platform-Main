@@ -432,6 +432,10 @@ function attachSave(record, delegate, fieldMap = {}) {
                     delete dataToSave[key];
                 }
             }
+            if (String(delegate?.name || '').toLowerCase().includes('contactinquiry')) {
+                dataToSave.replies = dataToSave.replies ?? [];
+                dataToSave.statusHistory = dataToSave.statusHistory ?? [];
+            }
             const currentParticipants = self.participants;
             const saved = await delegate.upsert({
                 where: { id },
@@ -472,10 +476,12 @@ function attachSave(record, delegate, fieldMap = {}) {
     return record;
 }
 const prismaModelRelations = {};
+const prismaModelAllFields = {};
 if (client_1.Prisma?.dmmf?.datamodel?.models) {
     for (const model of client_1.Prisma.dmmf.datamodel.models) {
         const mName = model.name.toLowerCase();
         prismaModelRelations[mName] = {};
+        prismaModelAllFields[mName] = new Set(model.fields.map((f) => f.name));
         for (const field of model.fields) {
             if (field.kind === 'object') {
                 prismaModelRelations[mName][field.name] = {
@@ -973,6 +979,14 @@ class PrismaQueryBuilder {
                     args.select[k] = v;
                 }
             }
+            const known = prismaModelAllFields[this.delegateName?.toLowerCase()];
+            if (known) {
+                for (const k of Object.keys(args.select)) {
+                    if (!known.has(k)) {
+                        delete args.select[k];
+                    }
+                }
+            }
         }
         else if (cleanInclude) {
             args.include = cleanInclude;
@@ -1324,6 +1338,11 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
             return attachSave(clientObj, delegate, fieldMap);
         }
         const cleanData = cleanPrismaData({ ...data, id }, fieldMap);
+        const mName = String(delegateName).toLowerCase();
+        if (mName === 'contactinquiry') {
+            cleanData.replies = cleanData.replies ?? [];
+            cleanData.statusHistory = cleanData.statusHistory ?? [];
+        }
         const created = await delegate.create({ data: cleanData });
         return attachSave((0, client_2.toClient)(created), delegate, fieldMap);
     };

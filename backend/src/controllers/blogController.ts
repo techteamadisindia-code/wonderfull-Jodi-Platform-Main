@@ -163,7 +163,7 @@ export async function getPublicBlogs(req: Request, res: Response, next: NextFunc
 
     const [posts, total, categoriesAggregation] = await Promise.all([
       BlogPost.find(query)
-        .select('title slug category excerpt featuredImageUrl authorName authorRole authorAvatarUrl readingTime publishedAt isFeatured tags viewCount')
+        .select('title slug category excerpt featuredImageUrl authorName authorRole readingTime publishedAt isFeatured tags viewCount')
         .sort(sortOption)
         .skip(skip)
         .limit(limit)
@@ -234,7 +234,7 @@ export async function getFeaturedBlogs(req: Request, res: Response, next: NextFu
       isDeleted: false,
       isFeatured: true,
     })
-      .select('title slug category excerpt featuredImageUrl authorName authorRole authorAvatarUrl readingTime publishedAt isFeatured tags viewCount')
+      .select('title slug category excerpt featuredImageUrl authorName authorRole readingTime publishedAt isFeatured tags viewCount')
       .sort({ publishedAt: -1 })
       .limit(4)
       .lean();
@@ -268,7 +268,7 @@ export async function getPublicBlogBySlug(req: Request, res: Response, next: Nex
       { $inc: { viewCount: 1 } },
       { new: true }
     )
-      .select('title slug category excerpt content featuredImageUrl authorName authorRole authorAvatarUrl readingTime publishedAt updatedAt tags viewCount')
+      .select('title slug category excerpt content featuredImageUrl authorName authorRole readingTime publishedAt updatedAt tags viewCount')
       .lean();
 
     if (!post) {
@@ -473,7 +473,6 @@ export async function createBlog(req: AuthRequest, res: Response, next: NextFunc
       featuredImageUrl: featuredImageUrl?.trim() || undefined,
       authorName: authorName?.trim() || 'Wonderful Jodi Editorial Team',
       authorRole: authorRole?.trim() || 'Medical Matrimony Consultant',
-      authorAvatarUrl: authorAvatarUrl?.trim() || undefined,
       readingTime: calculatedReadingTime,
       status: (['DRAFT', 'PUBLISHED', 'ARCHIVED'].includes(status) ? status : 'DRAFT') as BlogStatus,
       isFeatured: Boolean(isFeatured),
@@ -570,7 +569,6 @@ export async function updateBlog(req: AuthRequest, res: Response, next: NextFunc
 
     if (authorName !== undefined) existing.authorName = authorName.trim() || 'Wonderful Jodi Editorial Team';
     if (authorRole !== undefined) existing.authorRole = authorRole.trim() || 'Medical Matrimony Consultant';
-    if (authorAvatarUrl !== undefined) existing.authorAvatarUrl = authorAvatarUrl.trim();
 
     if (customReadingTime !== undefined && customReadingTime.trim()) {
       existing.readingTime = customReadingTime.trim();

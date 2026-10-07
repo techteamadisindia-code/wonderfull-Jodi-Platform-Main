@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { BiodataRecord, BiodataSectionVisibility } from '../../services/biodataApi';
 import { uploadProfileImage } from '../../lib/api';
+import { isValidImageUrl } from '../../lib/imageUtils';
 
 interface BiodataFormProps {
   biodata: Partial<BiodataRecord>;
@@ -94,11 +95,14 @@ export function BiodataForm({ biodata, onChange, availablePhotos = [] }: Biodata
       const base64 = event.target?.result as string;
       try {
         const res = await uploadProfileImage(base64, file.name);
-        const uploadedUrl = res.url || res.data?.url || base64;
-        onChange({ photoUrl: uploadedUrl });
+        const uploadedUrl = res.url || res.data?.url;
+        if (uploadedUrl) {
+          onChange({ photoUrl: uploadedUrl });
+        } else {
+          setUploadError('Failed to process image upload. Please try again.');
+        }
       } catch {
-        // Fallback to base64
-        onChange({ photoUrl: base64 });
+        setUploadError('Failed to upload image. Please try a different photo.');
       } finally {
         setUploadingPhoto(false);
       }
@@ -143,7 +147,7 @@ export function BiodataForm({ biodata, onChange, availablePhotos = [] }: Biodata
           <div className="p-4 pt-0 border-t border-slate-100 space-y-4">
             <div className="flex flex-col sm:flex-row items-center gap-4 pt-3">
               <div className="w-20 h-20 rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center">
-                {biodata.photoUrl ? (
+                {biodata.photoUrl && isValidImageUrl(biodata.photoUrl) ? (
                   <img
                     src={biodata.photoUrl}
                     alt="Selected"

@@ -189,9 +189,26 @@ export async function saveKundaliMatch(reportData: PublicKundaliMatchResult): Pr
 /**
  * Fetch authenticated user's birth & horoscope details
  */
-export async function getMyBirthDetails(): Promise<UserBirthDetails> {
-  const res = await apiClient.get('/kundali/my-birth-details');
-  return res.data.data;
+export async function getMyBirthDetails(): Promise<UserBirthDetails | null> {
+  if (typeof window !== 'undefined') {
+    const token =
+      localStorage.getItem('wonderfuljodi_token') ||
+      localStorage.getItem('token') ||
+      localStorage.getItem('accessToken');
+    if (!token) {
+      return null;
+    }
+  }
+
+  try {
+    const res = await apiClient.get('/kundali/my-birth-details');
+    return res.data?.data || null;
+  } catch (err: any) {
+    if (err?.response?.status === 401) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 /**

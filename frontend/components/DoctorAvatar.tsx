@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Stethoscope } from 'lucide-react';
+import { isValidImageUrl } from '../lib/imageUtils';
 
 interface DoctorAvatarProps {
   photoUrl?: string | null;
@@ -51,7 +52,7 @@ export function DoctorAvatar({
   }[size];
 
   // If a valid uploaded photo URL is provided and has not failed to load
-  if (photoUrl && !hasError && photoUrl.trim() !== '') {
+  if (photoUrl && !hasError && isValidImageUrl(photoUrl)) {
     return (
       <div
         className={`relative overflow-hidden rounded-[18px] bg-slate-100 shrink-0 select-none ${sizeClasses} ${className}`}

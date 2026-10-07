@@ -157,7 +157,7 @@ async function getPublicBlogs(req, res, next) {
         }
         const [posts, total, categoriesAggregation] = await Promise.all([
             BlogPost_1.BlogPost.find(query)
-                .select('title slug category excerpt featuredImageUrl authorName authorRole authorAvatarUrl readingTime publishedAt isFeatured tags viewCount')
+                .select('title slug category excerpt featuredImageUrl authorName authorRole readingTime publishedAt isFeatured tags viewCount')
                 .sort(sortOption)
                 .skip(skip)
                 .limit(limit)
@@ -224,7 +224,7 @@ async function getFeaturedBlogs(req, res, next) {
             isDeleted: false,
             isFeatured: true,
         })
-            .select('title slug category excerpt featuredImageUrl authorName authorRole authorAvatarUrl readingTime publishedAt isFeatured tags viewCount')
+            .select('title slug category excerpt featuredImageUrl authorName authorRole readingTime publishedAt isFeatured tags viewCount')
             .sort({ publishedAt: -1 })
             .limit(4)
             .lean();
@@ -251,7 +251,7 @@ async function getPublicBlogBySlug(req, res, next) {
             });
         }
         const post = await BlogPost_1.BlogPost.findOneAndUpdate({ slug, status: 'PUBLISHED', isDeleted: false }, { $inc: { viewCount: 1 } }, { new: true })
-            .select('title slug category excerpt content featuredImageUrl authorName authorRole authorAvatarUrl readingTime publishedAt updatedAt tags viewCount')
+            .select('title slug category excerpt content featuredImageUrl authorName authorRole readingTime publishedAt updatedAt tags viewCount')
             .lean();
         if (!post) {
             return res.status(404).json({
@@ -419,7 +419,6 @@ async function createBlog(req, res, next) {
             featuredImageUrl: featuredImageUrl?.trim() || undefined,
             authorName: authorName?.trim() || 'Wonderful Jodi Editorial Team',
             authorRole: authorRole?.trim() || 'Medical Matrimony Consultant',
-            authorAvatarUrl: authorAvatarUrl?.trim() || undefined,
             readingTime: calculatedReadingTime,
             status: (['DRAFT', 'PUBLISHED', 'ARCHIVED'].includes(status) ? status : 'DRAFT'),
             isFeatured: Boolean(isFeatured),
@@ -492,8 +491,6 @@ async function updateBlog(req, res, next) {
             existing.authorName = authorName.trim() || 'Wonderful Jodi Editorial Team';
         if (authorRole !== undefined)
             existing.authorRole = authorRole.trim() || 'Medical Matrimony Consultant';
-        if (authorAvatarUrl !== undefined)
-            existing.authorAvatarUrl = authorAvatarUrl.trim();
         if (customReadingTime !== undefined && customReadingTime.trim()) {
             existing.readingTime = customReadingTime.trim();
         }

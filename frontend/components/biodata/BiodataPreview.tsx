@@ -17,6 +17,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { BiodataRecord } from '../../services/biodataApi';
+import { isValidImageUrl } from '../../lib/imageUtils';
 
 interface BiodataPreviewProps {
   biodata: Partial<BiodataRecord>;
@@ -162,7 +163,7 @@ export function BiodataPreview({ biodata, className = '', printable = false }: B
           {/* Photo */}
           {visibility.photo && (
             <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-2xl overflow-hidden bg-white border-2 border-white shadow-md shrink-0 flex items-center justify-center">
-              {biodata.photoUrl ? (
+              {biodata.photoUrl && isValidImageUrl(biodata.photoUrl) ? (
                 <img
                   src={biodata.photoUrl}
                   alt={personal.fullName || 'Candidate'}

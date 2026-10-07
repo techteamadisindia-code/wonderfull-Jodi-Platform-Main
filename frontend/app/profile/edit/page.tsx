@@ -18,7 +18,8 @@ import {
   AlertCircle,
   Camera,
 } from 'lucide-react';
-import { getMyProfile, updateMyProfile, getAuthToken } from '../../../lib/api';
+import { getMyProfile, updateMyProfile, getAuthToken, uploadProfileImage } from '../../../lib/api';
+import { isValidImageUrl } from '../../../lib/imageUtils';
 import {
   DOCTOR_QUALIFICATIONS,
   DOCTOR_SPECIALIZATIONS,
@@ -199,7 +200,7 @@ export default function EditProfilePage() {
             otherPreferences: profile.partnerPreferences?.otherPreferences || '',
           });
 
-          if (profile.primaryPhoto) {
+          if (profile.primaryPhoto && isValidImageUrl(profile.primaryPhoto)) {
             setPhotoPreview(profile.primaryPhoto);
           }
         }
@@ -232,26 +233,17 @@ export default function EditProfilePage() {
       setPhotoPreview(base64);
 
       try {
-        const uploadRes = await fetch('/api/upload/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64, filename: file.name }),
-        });
-
-        if (uploadRes.ok) {
-          const resJson = await uploadRes.json();
-          const uploadedUrl = resJson.url || resJson.data?.url;
-          if (uploadedUrl) {
-            setFormData((prev) => ({ ...prev, primaryPhoto: uploadedUrl }));
-            setPhotoPreview(uploadedUrl);
-          }
+        const res = await uploadProfileImage(base64, file.name);
+        const uploadedUrl = res?.url || res?.data?.url;
+        if (uploadedUrl) {
+          setFormData((prev) => ({ ...prev, primaryPhoto: uploadedUrl }));
+          setPhotoPreview(uploadedUrl);
         } else {
-          // Keep base64 as fallback
-          setFormData((prev) => ({ ...prev, primaryPhoto: base64 }));
+          setErrorMsg('Failed to upload photo. Please try again.');
         }
       } catch (uploadErr) {
-        console.warn('Direct upload failed, using image data:', uploadErr);
-        setFormData((prev) => ({ ...prev, primaryPhoto: base64 }));
+        console.warn('Profile photo upload error:', uploadErr);
+        setErrorMsg('Failed to upload image to server. Please try a different photo.');
       }
     };
     reader.readAsDataURL(file);

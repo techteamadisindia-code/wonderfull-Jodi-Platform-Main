@@ -10,9 +10,34 @@ exports.toClientArray = toClientArray;
 exports.testSqlConnection = testSqlConnection;
 const client_1 = require("@prisma/client");
 const crypto_1 = __importDefault(require("crypto"));
+function getOptimizedDatabaseUrl() {
+    const rawUrl = process.env.DATABASE_URL;
+    if (!rawUrl)
+        return undefined;
+    try {
+        const url = new URL(rawUrl);
+        // Ensure connection_limit is at most 4 to respect Hostinger's concurrent connection cap
+        const currentLimit = parseInt(url.searchParams.get('connection_limit') || '10', 10);
+        if (isNaN(currentLimit) || currentLimit > 4) {
+            url.searchParams.set('connection_limit', '4');
+        }
+        if (!url.searchParams.has('connect_timeout')) {
+            url.searchParams.set('connect_timeout', '30');
+        }
+        if (!url.searchParams.has('pool_timeout')) {
+            url.searchParams.set('pool_timeout', '30');
+        }
+        return url.toString();
+    }
+    catch {
+        return rawUrl;
+    }
+}
+const dbUrl = getOptimizedDatabaseUrl();
 exports.prisma = globalThis.prisma ||
     new client_1.PrismaClient({
         log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
+        ...(dbUrl ? { datasources: { db: { url: dbUrl } } } : {}),
     });
 if (process.env.NODE_ENV !== 'production') {
     globalThis.prisma = exports.prisma;

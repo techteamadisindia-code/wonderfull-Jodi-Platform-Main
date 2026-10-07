@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma, toClient, toClientArray, generateObjectId } from './client';
 
 export interface QueryOptions {
@@ -438,6 +439,357 @@ function attachSave(record: any, delegate: any, fieldMap: Record<string, string>
   return record;
 }
 
+interface RelationMeta {
+  targetModel: string;
+  isList: boolean;
+}
+
+const prismaModelRelations: Record<string, Record<string, RelationMeta>> = {};
+
+if (Prisma?.dmmf?.datamodel?.models) {
+  for (const model of Prisma.dmmf.datamodel.models) {
+    const mName = model.name.toLowerCase();
+    prismaModelRelations[mName] = {};
+    for (const field of model.fields) {
+      if (field.kind === 'object') {
+        prismaModelRelations[mName][field.name] = {
+          targetModel: field.type.toLowerCase(),
+          isList: field.isList,
+        };
+      }
+    }
+  }
+}
+
+/**
+ * Checks whether a given path chain (e.g. ['participants', 'user']) consists entirely of valid Prisma relations.
+ */
+function resolvePrismaRelationPath(
+  startModel: string,
+  pathSegments: string[]
+): { isValid: boolean; leafModel?: string } {
+  if (!startModel || pathSegments.length === 0) return { isValid: false };
+  let currentModel = startModel.toLowerCase();
+  for (const segment of pathSegments) {
+    const rel = prismaModelRelations[currentModel]?.[segment];
+    if (!rel) return { isValid: false };
+    currentModel = rel.targetModel;
+  }
+  return { isValid: true, leafModel: currentModel };
+}
+
+/**
+ * Merges nested path segments into a valid nested Prisma include structure without duplicate keys or dotted strings.
+ * Example: ['a', 'b'] with leafValue = true -> { a: { include: { b: true } } }
+ */
+function addNestedInclude(
+  rootInclude: Record<string, any>,
+  segments: string[],
+  leafValue: any
+): void {
+  if (!segments || segments.length === 0) return;
+  if (segments.length === 1) {
+    const key = segments[0];
+    if (rootInclude[key] && typeof rootInclude[key] === 'object' && rootInclude[key].include) {
+      if (leafValue && typeof leafValue === 'object' && leafValue.select) {
+        rootInclude[key].select = { ...(rootInclude[key].select || {}), ...leafValue.select };
+      }
+    } else {
+      rootInclude[key] = leafValue;
+    }
+    return;
+  }
+
+  const [head, ...tail] = segments;
+  if (!rootInclude[head] || typeof rootInclude[head] !== 'object' || !rootInclude[head].include) {
+    rootInclude[head] = { include: {} };
+  }
+  addNestedInclude(rootInclude[head].include, tail, leafValue);
+}
+
+/**
+ * Parses whitespace-separated select field strings (e.g. 'name code' or '-password')
+ * into Prisma select dictionary with id/_id mapped to id.
+ */
+function parseSelectFields(selectStr?: string): Record<string, boolean> | undefined {
+  if (!selectStr || typeof selectStr !== 'string') return undefined;
+  const parts = selectStr.split(/\s+/).filter(Boolean);
+  if (parts.length === 0 || parts.some((p) => p.startsWith('-'))) return undefined;
+  const selectObj: Record<string, boolean> = { id: true };
+  for (const p of parts) {
+    selectObj[p === '_id' ? 'id' : p] = true;
+  }
+  return selectObj;
+}
+
+interface VirtualFieldMeta {
+  delegate: string;
+  idKey: string;
+  nameKey: string;
+  isList?: boolean;
+}
+
+const VIRTUAL_FIELD_TO_MODEL: Record<string, VirtualFieldMeta> = {
+  // Country
+  countryId: { delegate: 'country', idKey: 'countryId', nameKey: 'country' },
+  country: { delegate: 'country', idKey: 'countryId', nameKey: 'country' },
+  // State
+  stateId: { delegate: 'state', idKey: 'stateId', nameKey: 'state' },
+  state: { delegate: 'state', idKey: 'stateId', nameKey: 'state' },
+  // District
+  districtId: { delegate: 'district', idKey: 'districtId', nameKey: 'district' },
+  district: { delegate: 'district', idKey: 'districtId', nameKey: 'district' },
+  // SubDistrict
+  subDistrictId: { delegate: 'subDistrict', idKey: 'subDistrictId', nameKey: 'subDistrict' },
+  subDistrict: { delegate: 'subDistrict', idKey: 'subDistrictId', nameKey: 'subDistrict' },
+  // City
+  cityId: { delegate: 'city', idKey: 'cityId', nameKey: 'city' },
+  city: { delegate: 'city', idKey: 'cityId', nameKey: 'city' },
+  // Village
+  villageId: { delegate: 'village', idKey: 'villageId', nameKey: 'village' },
+  village: { delegate: 'village', idKey: 'villageId', nameKey: 'village' },
+
+  // Religion
+  religionId: { delegate: 'religion', idKey: 'religionId', nameKey: 'religion' },
+  religion: { delegate: 'religion', idKey: 'religionId', nameKey: 'religion' },
+  // Caste
+  casteId: { delegate: 'caste', idKey: 'casteId', nameKey: 'caste' },
+  caste: { delegate: 'caste', idKey: 'casteId', nameKey: 'caste' },
+  // SubCaste
+  subCasteId: { delegate: 'subCaste', idKey: 'subCasteId', nameKey: 'subCaste' },
+  subCaste: { delegate: 'subCaste', idKey: 'subCasteId', nameKey: 'subCaste' },
+
+  // Language
+  motherTongueId: { delegate: 'language', idKey: 'motherTongueId', nameKey: 'motherTongue' },
+  motherTongue: { delegate: 'language', idKey: 'motherTongueId', nameKey: 'motherTongue' },
+  otherLanguagesIds: { delegate: 'language', idKey: 'otherLanguagesIds', nameKey: 'otherLanguages', isList: true },
+  otherLanguages: { delegate: 'language', idKey: 'otherLanguagesIds', nameKey: 'otherLanguages', isList: true },
+};
+
+/**
+ * Resolves virtual and non-Prisma populates (such as Profile JSON subdocuments and Report.moderator)
+ * post-query by batching database queries.
+ */
+async function resolveVirtualPopulates(
+  records: any[],
+  populates: Array<{ path: string; select?: string }>,
+  delegateName: string
+): Promise<void> {
+  if (!records || records.length === 0 || !populates || populates.length === 0) return;
+
+  for (const pop of populates) {
+    const rawPath = typeof pop === 'string' ? pop : pop.path;
+    const selectStr = typeof pop === 'object' ? pop.select : undefined;
+    const selectObj = parseSelectFields(selectStr);
+
+    // 1. Report relations (reporter, reportedUser, reportedProfile, moderator, handledByAdminId)
+    // Handled virtually to safely tolerate orphaned foreign keys without Prisma Inconsistent query result crash
+    if (delegateName === 'report' && (rawPath === 'reporter' || rawPath === 'reportedUser')) {
+      const fieldId = rawPath === 'reporter' ? 'reporterId' : 'reportedUserId';
+      const userIds = new Set<string>();
+      for (const rec of records) {
+        if (!rec) continue;
+        const val =
+          rec[fieldId] ||
+          (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+        if (val && typeof val === 'string') userIds.add(val);
+      }
+      if (userIds.size > 0) {
+        const users = await (prisma as any).user.findMany({
+          where: { id: { in: Array.from(userIds) } },
+          select: selectObj ? { id: true, ...selectObj } : undefined,
+        });
+        const userMap = new Map(users.map((u: any) => [u.id, toClient(u)]));
+        for (const rec of records) {
+          if (!rec) continue;
+          const val =
+            rec[fieldId] ||
+            (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+          rec[rawPath] = (val && userMap.get(val)) || null;
+        }
+      } else {
+        for (const rec of records) {
+          if (!rec) continue;
+          rec[rawPath] = null;
+        }
+      }
+      continue;
+    }
+
+    if (delegateName === 'report' && rawPath === 'reportedProfile') {
+      const profileIds = new Set<string>();
+      for (const rec of records) {
+        if (!rec) continue;
+        const val =
+          rec.reportedProfileId ||
+          (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+        if (val && typeof val === 'string') profileIds.add(val);
+      }
+      if (profileIds.size > 0) {
+        const profiles = await (prisma as any).profile.findMany({
+          where: { id: { in: Array.from(profileIds) } },
+          select: selectObj ? { id: true, ...selectObj } : undefined,
+        });
+        const profMap = new Map(profiles.map((p: any) => [p.id, toClient(p)]));
+        for (const rec of records) {
+          if (!rec) continue;
+          const val =
+            rec.reportedProfileId ||
+            (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+          rec[rawPath] = (val && profMap.get(val)) || null;
+        }
+      } else {
+        for (const rec of records) {
+          if (!rec) continue;
+          rec[rawPath] = null;
+        }
+      }
+      continue;
+    }
+
+    // 2. Moderator / HandledByAdmin (Report or other admin models)
+    if (rawPath === 'moderator' || rawPath === 'handledByAdminId') {
+      const fieldId = rawPath === 'moderator' ? 'moderatorId' : 'handledByAdminId';
+      const userIds = new Set<string>();
+      for (const rec of records) {
+        if (!rec) continue;
+        const val =
+          rec[fieldId] ||
+          (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+        if (val && typeof val === 'string') userIds.add(val);
+      }
+
+      if (userIds.size > 0) {
+        const users = await (prisma as any).user.findMany({
+          where: { id: { in: Array.from(userIds) } },
+          select: selectObj ? { id: true, ...selectObj } : undefined,
+        });
+        const userMap = new Map(users.map((u: any) => [u.id, toClient(u)]));
+        for (const rec of records) {
+          if (!rec) continue;
+          const val =
+            rec[fieldId] ||
+            (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+          if (val && userMap.has(val)) {
+            rec[rawPath] = userMap.get(val);
+          } else {
+            rec[rawPath] = null;
+          }
+        }
+      } else {
+        for (const rec of records) {
+          if (!rec) continue;
+          if (!rec[rawPath] || typeof rec[rawPath] === 'string') {
+            rec[rawPath] = null;
+          }
+        }
+      }
+      continue;
+    }
+
+    // 2. Generic createdBy / updatedBy / deletedBy scalar user IDs
+    if (rawPath === 'createdBy' || rawPath === 'updatedBy' || rawPath === 'deletedBy') {
+      const fieldId = rawPath + 'Id';
+      const userIds = new Set<string>();
+      for (const rec of records) {
+        if (!rec) continue;
+        const val =
+          rec[fieldId] ||
+          (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+        if (val && typeof val === 'string') userIds.add(val);
+      }
+      if (userIds.size > 0) {
+        const users = await (prisma as any).user.findMany({
+          where: { id: { in: Array.from(userIds) } },
+          select: selectObj ? { id: true, ...selectObj } : undefined,
+        });
+        const userMap = new Map(users.map((u: any) => [u.id, toClient(u)]));
+        for (const rec of records) {
+          if (!rec) continue;
+          const val =
+            rec[fieldId] ||
+            (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+          if (val && userMap.has(val)) {
+            rec[rawPath] = userMap.get(val);
+          }
+        }
+      }
+      continue;
+    }
+
+    // 3. Dotted paths on JSON subdocuments (e.g. currentLocation.countryId, nativePlaceDetails.stateId, communityDetails.religionId, languageDetails.motherTongueId)
+    const parts = rawPath.split('.');
+    if (parts.length === 2) {
+      const [subDocKey, fieldKey] = parts;
+      const mapping = VIRTUAL_FIELD_TO_MODEL[fieldKey];
+      if (mapping && (prisma as any)[mapping.delegate]) {
+        const idSet = new Set<string>();
+        for (const rec of records) {
+          if (!rec) continue;
+          let subDoc = rec[subDocKey];
+          if (typeof subDoc === 'string') {
+            try {
+              subDoc = JSON.parse(subDoc);
+              rec[subDocKey] = subDoc;
+            } catch (_) {}
+          }
+          if (subDoc && typeof subDoc === 'object') {
+            const rawVal = subDoc[mapping.idKey] || subDoc[mapping.nameKey];
+            if (mapping.isList) {
+              const list = Array.isArray(rawVal) ? rawVal : rawVal ? [rawVal] : [];
+              for (const item of list) {
+                const id = typeof item === 'object' && item ? item.id || item._id : item;
+                if (id && typeof id === 'string') idSet.add(id);
+              }
+            } else {
+              const id = typeof rawVal === 'object' && rawVal ? rawVal.id || rawVal._id : rawVal;
+              if (id && typeof id === 'string') idSet.add(id);
+            }
+          }
+        }
+
+        if (idSet.size > 0) {
+          const entities = await (prisma as any)[mapping.delegate].findMany({
+            where: { id: { in: Array.from(idSet) } },
+            select: selectObj ? { id: true, ...selectObj } : undefined,
+          });
+          const entityMap = new Map(entities.map((e: any) => [e.id, toClient(e)]));
+
+          for (const rec of records) {
+            if (!rec) continue;
+            let subDoc = rec[subDocKey];
+            if (typeof subDoc === 'string') {
+              try {
+                subDoc = JSON.parse(subDoc);
+                rec[subDocKey] = subDoc;
+              } catch (_) {}
+            }
+            if (subDoc && typeof subDoc === 'object') {
+              const rawVal = subDoc[mapping.idKey] || subDoc[mapping.nameKey];
+              if (mapping.isList) {
+                const list = Array.isArray(rawVal) ? rawVal : rawVal ? [rawVal] : [];
+                const populated = list.map((item: any) => {
+                  const id = typeof item === 'object' && item ? item.id || item._id : item;
+                  return entityMap.get(id) || item;
+                });
+                subDoc[mapping.idKey] = populated;
+                subDoc[mapping.nameKey] = populated;
+              } else {
+                const id = typeof rawVal === 'object' && rawVal ? rawVal.id || rawVal._id : rawVal;
+                if (id && entityMap.has(id)) {
+                  const populated = entityMap.get(id);
+                  subDoc[mapping.idKey] = populated;
+                  subDoc[mapping.nameKey] = populated;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 /**
  * Chainable query builder simulating Mongoose Query API on top of Prisma.
  */
@@ -450,6 +802,7 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
   private queryOptions: QueryOptions = {};
   private populateParticipants = false;
   private populatedRelations: Array<{ path: string; relationName: string }> = [];
+  private virtualPopulates: Array<{ path: string; select?: string }> = [];
 
   constructor(
     prismaDelegate: any,
@@ -504,23 +857,12 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
     }
 
     if (this.delegateName === 'conversation' && targetPath === 'participants') {
-      const selectFieldsObj: any = { id: true };
-      if (targetSelect && typeof targetSelect === 'string') {
-        targetSelect.split(/\s+/).filter(Boolean).forEach((f) => {
-          selectFieldsObj[f === '_id' ? 'id' : f] = true;
-        });
-        this.queryOptions.include.participants = {
-          include: {
-            user: { select: selectFieldsObj },
-          },
-        };
-      } else {
-        this.queryOptions.include.participants = {
-          include: {
-            user: true,
-          },
-        };
-      }
+      const selectFieldsObj = parseSelectFields(targetSelect);
+      this.queryOptions.include.participants = {
+        include: {
+          user: selectFieldsObj ? { select: selectFieldsObj } : true,
+        },
+      };
       this.populateParticipants = true;
       return this;
     }
@@ -539,17 +881,51 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
       updatedBy: 'updatedBy',
       deletedBy: 'deletedBy',
     };
-    const relationName = POPULATE_RELATION_MAP[targetPath] || (targetPath.endsWith('Id') ? targetPath.slice(0, -2) : targetPath);
-    this.populatedRelations.push({ path: targetPath, relationName });
 
-    if (targetSelect && typeof targetSelect === 'string') {
-      const selectFieldsObj: any = { id: true };
-      targetSelect.split(/\s+/).filter(Boolean).forEach((f) => {
-        selectFieldsObj[f === '_id' ? 'id' : f] = true;
+    const isDotted = targetPath.includes('.');
+    const selectObj = parseSelectFields(targetSelect);
+    const leafValue = selectObj ? { select: selectObj } : true;
+
+    if (!isDotted) {
+      if (
+        this.delegateName === 'report' &&
+        ['reporter', 'reportedUser', 'reportedProfile', 'moderator', 'handledByAdminId'].includes(targetPath)
+      ) {
+        this.virtualPopulates.push({ path: targetPath, select: targetSelect });
+        return this;
+      }
+
+      const relationName =
+        POPULATE_RELATION_MAP[targetPath] ||
+        (targetPath.endsWith('Id') ? targetPath.slice(0, -2) : targetPath);
+      const isRealRelation = resolvePrismaRelationPath(this.delegateName, [relationName]).isValid;
+
+      if (isRealRelation) {
+        this.populatedRelations.push({ path: targetPath, relationName });
+        addNestedInclude(this.queryOptions.include, [relationName], leafValue);
+      } else {
+        // Scalar / virtual populate (e.g. moderator, createdBy, etc.)
+        this.virtualPopulates.push({ path: targetPath, select: targetSelect });
+      }
+      return this;
+    }
+
+    // Dotted path (e.g. currentLocation.countryId or nested relations)
+    const rawSegments = targetPath.split('.');
+    const normalizedSegments = rawSegments.map(
+      (seg) => POPULATE_RELATION_MAP[seg] || (seg.endsWith('Id') ? seg.slice(0, -2) : seg)
+    );
+
+    const isRealNestedRelation = resolvePrismaRelationPath(this.delegateName, normalizedSegments).isValid;
+    if (isRealNestedRelation) {
+      addNestedInclude(this.queryOptions.include, normalizedSegments, leafValue);
+      this.populatedRelations.push({
+        path: targetPath,
+        relationName: normalizedSegments[normalizedSegments.length - 1],
       });
-      this.queryOptions.include[relationName] = { select: selectFieldsObj };
     } else {
-      this.queryOptions.include[relationName] = true;
+      // JSON subdocument or virtual dotted populate
+      this.virtualPopulates.push({ path: targetPath, select: targetSelect });
     }
     return this;
   }
@@ -561,7 +937,11 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
   async exec(): Promise<T> {
     const args: any = { where: this.where };
 
-    if (this.delegateName === 'conversation' && !this.queryOptions.select && !this.queryOptions.include?.participants) {
+    if (
+      this.delegateName === 'conversation' &&
+      !this.queryOptions.select &&
+      !this.queryOptions.include?.participants
+    ) {
       if (!this.queryOptions.include) this.queryOptions.include = {};
       this.queryOptions.include.participants = true;
     }
@@ -569,8 +949,50 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
     if (this.queryOptions.sort) args.orderBy = this.queryOptions.sort;
     if (this.queryOptions.skip !== undefined) args.skip = this.queryOptions.skip;
     if (this.queryOptions.limit !== undefined) args.take = this.queryOptions.limit;
-    if (this.queryOptions.select) args.select = this.queryOptions.select;
-    if (this.queryOptions.include) args.include = this.queryOptions.include;
+
+    // Sanitize and normalize includes
+    let cleanInclude: any = undefined;
+    if (this.queryOptions.include && Object.keys(this.queryOptions.include).length > 0) {
+      cleanInclude = {};
+      for (const [k, v] of Object.entries(this.queryOptions.include)) {
+        if (
+          this.delegateName === 'report' &&
+          ['reporter', 'reportedUser', 'reportedProfile', 'moderator', 'handledByAdminId'].includes(k)
+        ) {
+          const selectStr = (v as any)?.select ? Object.keys((v as any).select).join(' ') : undefined;
+          this.virtualPopulates.push({ path: k, select: selectStr });
+          continue;
+        }
+
+        if (k.includes('.')) {
+          const segs = k.split('.');
+          if (resolvePrismaRelationPath(this.delegateName, segs).isValid) {
+            addNestedInclude(cleanInclude, segs, v);
+          } else {
+            this.virtualPopulates.push({ path: k });
+          }
+        } else if (resolvePrismaRelationPath(this.delegateName, [k]).isValid) {
+          cleanInclude[k] = v;
+        } else {
+          // Not a valid Prisma relation on this model -> route to virtual populate
+          this.virtualPopulates.push({ path: k });
+        }
+      }
+      if (Object.keys(cleanInclude).length === 0) {
+        cleanInclude = undefined;
+      }
+    }
+
+    if (this.queryOptions.select) {
+      args.select = { ...this.queryOptions.select };
+      if (cleanInclude) {
+        for (const [k, v] of Object.entries(cleanInclude)) {
+          args.select[k] = v;
+        }
+      }
+    } else if (cleanInclude) {
+      args.include = cleanInclude;
+    }
 
     const formatRecord = (rec: any) => {
       if (!rec) return rec;
@@ -595,10 +1017,17 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
 
     if (this.isFindOne) {
       const record = await this.prismaDelegate.findFirst(args);
+      if (!record) return null as unknown as T;
+      if (this.virtualPopulates.length > 0) {
+        await resolveVirtualPopulates([record], this.virtualPopulates, this.delegateName);
+      }
       const clientRecord = formatRecord(toClient(record));
       return attachSave(clientRecord, this.prismaDelegate, this.fieldMap) as unknown as T;
     } else {
       const records = await this.prismaDelegate.findMany(args);
+      if (records.length > 0 && this.virtualPopulates.length > 0) {
+        await resolveVirtualPopulates(records, this.virtualPopulates, this.delegateName);
+      }
       const clientRecords = toClientArray(records).map((r) =>
         attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap)
       );
@@ -1021,6 +1450,10 @@ export function createPrismaModelAdapter<T = any>(
           }
         }
 
+        if (opts?.populate && opts.populate.length > 0) {
+          await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
+        }
+
         return attachSave(clientObj, delegate, fieldMap);
       } catch (err: any) {
         if (err.code === 'P2025') {
@@ -1087,6 +1520,10 @@ export function createPrismaModelAdapter<T = any>(
         } else {
           clientObj.participants = pRows.map((cp: any) => cp.userId);
         }
+      }
+
+      if (opts?.populate && opts.populate.length > 0) {
+        await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
       }
 
       return attachSave(clientObj, delegate, fieldMap);

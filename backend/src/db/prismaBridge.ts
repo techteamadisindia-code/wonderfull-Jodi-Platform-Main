@@ -369,6 +369,83 @@ export function prepareSetOnInsertData(update: any, fieldMap: Record<string, str
 }
 
 /**
+ * Prepares fields for a create operation when an upsert-aware update (e.g. findOneAndUpdate with upsert: true)
+ * cannot find an existing record and must create a new one.
+ *
+ * Ensures:
+ * 1. Fields like `$inc: { visitCount: 1 }` (which Prisma converts to `{ increment: 1 }` for updates)
+ *    are converted into scalar numbers (e.g. `visitCount: 1`) so Prisma `create` does not fail with
+ *    "Argument visitCount: Invalid value provided. Expected Int, provided Object."
+ * 2. Values in `$setOnInsert` are merged.
+ * 3. Atomic operators like `{ increment: X }`, `{ decrement: X }`, `{ set: X }` are unwrapped into scalar primitives.
+ * 4. Filter values from `where` that are objects (like `{ equals: '...' }`) are unwrapped to primitive values.
+ */
+export function prepareCreateDataFromUpdate(
+  update: any,
+  where: any,
+  setOnInsertData: any,
+  updateData: any,
+  fieldMap: Record<string, string> = {}
+): any {
+  const createData: any = {};
+
+  // Extract scalar values from where
+  if (where && typeof where === 'object') {
+    for (const [k, v] of Object.entries(where)) {
+      if (k === 'OR' || k === 'AND' || k === 'NOT') continue;
+      if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {
+        if ('equals' in (v as any)) {
+          createData[k] = (v as any).equals;
+        } else if (!('contains' in (v as any) || 'startsWith' in (v as any) || 'endsWith' in (v as any) || 'in' in (v as any))) {
+          createData[k] = v;
+        }
+      } else {
+        createData[k] = v;
+      }
+    }
+  }
+
+  // Merge setOnInsertData
+  if (setOnInsertData && typeof setOnInsertData === 'object') {
+    Object.assign(createData, setOnInsertData);
+  }
+
+  // Merge updateData, unwrapping update operators to scalar values
+  if (updateData && typeof updateData === 'object') {
+    for (const [key, val] of Object.entries(updateData)) {
+      if (val && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date)) {
+        if ('increment' in (val as any)) {
+          createData[key] = Number((val as any).increment);
+        } else if ('decrement' in (val as any)) {
+          createData[key] = -Number((val as any).decrement);
+        } else if ('set' in (val as any)) {
+          createData[key] = (val as any).set;
+        } else {
+          createData[key] = val;
+        }
+      } else {
+        createData[key] = val;
+      }
+    }
+  }
+
+  // If $inc was present in the update object, ensure scalar numbers are initialized
+  if (update?.$inc) {
+    for (const [incKey, incVal] of Object.entries(update.$inc)) {
+      const targetKey = fieldMap[incKey] || incKey;
+      if (
+        createData[targetKey] === undefined ||
+        (typeof createData[targetKey] === 'object' && (createData[targetKey] as any)?.increment !== undefined)
+      ) {
+        createData[targetKey] = Number(incVal);
+      }
+    }
+  }
+
+  return cleanPrismaData(createData, fieldMap);
+}
+
+/**
  * Attaches a `.save()` method to a returned database record so it behaves like a Mongoose document.
  */
 function attachSave(record: any, delegate: any, fieldMap: Record<string, string> = {}) {
@@ -1459,14 +1536,18 @@ export function createPrismaModelAdapter<T = any>(
         if (err.code === 'P2025') {
           if (options?.upsert) {
             const setOnInsertData = prepareSetOnInsertData(update, fieldMap);
+            const createData = prepareCreateDataFromUpdate(update, { id: stringId }, setOnInsertData, updateData, fieldMap);
             const created = await delegate.create({
               data: {
                 id: stringId,
-                ...setOnInsertData,
-                ...updateData,
+                ...createData,
               },
             });
-            return attachSave(toClient(created), delegate, fieldMap);
+            const clientObj = toClient(created);
+            if (opts?.populate && opts.populate.length > 0) {
+              await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
+            }
+            return attachSave(clientObj, delegate, fieldMap);
           }
           return null;
         }
@@ -1486,15 +1567,37 @@ export function createPrismaModelAdapter<T = any>(
         if (options?.upsert) {
           const id = generateObjectId();
           const setOnInsertData = prepareSetOnInsertData(update, fieldMap);
-          const created = await delegate.create({
-            data: {
-              id,
-              ...where,
-              ...setOnInsertData,
-              ...updateData,
-            },
-          });
-          return attachSave(toClient(created), delegate, fieldMap);
+          const createData = prepareCreateDataFromUpdate(update, where, setOnInsertData, updateData, fieldMap);
+          try {
+            const created = await delegate.create({
+              data: {
+                id,
+                ...createData,
+              },
+            });
+            const clientObj = toClient(created);
+            if (opts?.populate && opts.populate.length > 0) {
+              await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
+            }
+            return attachSave(clientObj, delegate, fieldMap);
+          } catch (createErr: any) {
+            if (createErr.code === 'P2002') {
+              // Concurrency collision: another process created the record with unique constraints
+              const existingRecord = await delegate.findFirst({ where });
+              if (existingRecord) {
+                const updated = await delegate.update({
+                  where: { id: existingRecord.id },
+                  data: updateData,
+                });
+                const clientObj = toClient(updated);
+                if (opts?.populate && opts.populate.length > 0) {
+                  await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
+                }
+                return attachSave(clientObj, delegate, fieldMap);
+              }
+            }
+            throw createErr;
+          }
         }
         return null;
       }

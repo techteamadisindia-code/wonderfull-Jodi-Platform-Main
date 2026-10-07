@@ -57,6 +57,7 @@ export async function recordUserVisit(
           userId: uid,
           visitDate,
           firstVisitedAt: now,
+          visitCount: 1,
         },
         $set: {
           lastVisitedAt: now,

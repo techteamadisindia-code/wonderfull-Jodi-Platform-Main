@@ -6,6 +6,7 @@ exports.normalizeSort = normalizeSort;
 exports.cleanPrismaData = cleanPrismaData;
 exports.prepareUpdateData = prepareUpdateData;
 exports.prepareSetOnInsertData = prepareSetOnInsertData;
+exports.prepareCreateDataFromUpdate = prepareCreateDataFromUpdate;
 exports.runPrismaAggregate = runPrismaAggregate;
 exports.createPrismaModelAdapter = createPrismaModelAdapter;
 const client_1 = require("@prisma/client");
@@ -336,6 +337,76 @@ function prepareSetOnInsertData(update, fieldMap = {}) {
     delete data._id;
     delete data.id;
     return cleanPrismaData(data, fieldMap);
+}
+/**
+ * Prepares fields for a create operation when an upsert-aware update (e.g. findOneAndUpdate with upsert: true)
+ * cannot find an existing record and must create a new one.
+ *
+ * Ensures:
+ * 1. Fields like `$inc: { visitCount: 1 }` (which Prisma converts to `{ increment: 1 }` for updates)
+ *    are converted into scalar numbers (e.g. `visitCount: 1`) so Prisma `create` does not fail with
+ *    "Argument visitCount: Invalid value provided. Expected Int, provided Object."
+ * 2. Values in `$setOnInsert` are merged.
+ * 3. Atomic operators like `{ increment: X }`, `{ decrement: X }`, `{ set: X }` are unwrapped into scalar primitives.
+ * 4. Filter values from `where` that are objects (like `{ equals: '...' }`) are unwrapped to primitive values.
+ */
+function prepareCreateDataFromUpdate(update, where, setOnInsertData, updateData, fieldMap = {}) {
+    const createData = {};
+    // Extract scalar values from where
+    if (where && typeof where === 'object') {
+        for (const [k, v] of Object.entries(where)) {
+            if (k === 'OR' || k === 'AND' || k === 'NOT')
+                continue;
+            if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {
+                if ('equals' in v) {
+                    createData[k] = v.equals;
+                }
+                else if (!('contains' in v || 'startsWith' in v || 'endsWith' in v || 'in' in v)) {
+                    createData[k] = v;
+                }
+            }
+            else {
+                createData[k] = v;
+            }
+        }
+    }
+    // Merge setOnInsertData
+    if (setOnInsertData && typeof setOnInsertData === 'object') {
+        Object.assign(createData, setOnInsertData);
+    }
+    // Merge updateData, unwrapping update operators to scalar values
+    if (updateData && typeof updateData === 'object') {
+        for (const [key, val] of Object.entries(updateData)) {
+            if (val && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date)) {
+                if ('increment' in val) {
+                    createData[key] = Number(val.increment);
+                }
+                else if ('decrement' in val) {
+                    createData[key] = -Number(val.decrement);
+                }
+                else if ('set' in val) {
+                    createData[key] = val.set;
+                }
+                else {
+                    createData[key] = val;
+                }
+            }
+            else {
+                createData[key] = val;
+            }
+        }
+    }
+    // If $inc was present in the update object, ensure scalar numbers are initialized
+    if (update?.$inc) {
+        for (const [incKey, incVal] of Object.entries(update.$inc)) {
+            const targetKey = fieldMap[incKey] || incKey;
+            if (createData[targetKey] === undefined ||
+                (typeof createData[targetKey] === 'object' && createData[targetKey]?.increment !== undefined)) {
+                createData[targetKey] = Number(incVal);
+            }
+        }
+    }
+    return cleanPrismaData(createData, fieldMap);
 }
 /**
  * Attaches a `.save()` method to a returned database record so it behaves like a Mongoose document.
@@ -1310,14 +1381,18 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
                 if (err.code === 'P2025') {
                     if (options?.upsert) {
                         const setOnInsertData = prepareSetOnInsertData(update, fieldMap);
+                        const createData = prepareCreateDataFromUpdate(update, { id: stringId }, setOnInsertData, updateData, fieldMap);
                         const created = await delegate.create({
                             data: {
                                 id: stringId,
-                                ...setOnInsertData,
-                                ...updateData,
+                                ...createData,
                             },
                         });
-                        return attachSave((0, client_2.toClient)(created), delegate, fieldMap);
+                        const clientObj = (0, client_2.toClient)(created);
+                        if (opts?.populate && opts.populate.length > 0) {
+                            await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
+                        }
+                        return attachSave(clientObj, delegate, fieldMap);
                     }
                     return null;
                 }
@@ -1335,15 +1410,38 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
                 if (options?.upsert) {
                     const id = (0, client_2.generateObjectId)();
                     const setOnInsertData = prepareSetOnInsertData(update, fieldMap);
-                    const created = await delegate.create({
-                        data: {
-                            id,
-                            ...where,
-                            ...setOnInsertData,
-                            ...updateData,
-                        },
-                    });
-                    return attachSave((0, client_2.toClient)(created), delegate, fieldMap);
+                    const createData = prepareCreateDataFromUpdate(update, where, setOnInsertData, updateData, fieldMap);
+                    try {
+                        const created = await delegate.create({
+                            data: {
+                                id,
+                                ...createData,
+                            },
+                        });
+                        const clientObj = (0, client_2.toClient)(created);
+                        if (opts?.populate && opts.populate.length > 0) {
+                            await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
+                        }
+                        return attachSave(clientObj, delegate, fieldMap);
+                    }
+                    catch (createErr) {
+                        if (createErr.code === 'P2002') {
+                            // Concurrency collision: another process created the record with unique constraints
+                            const existingRecord = await delegate.findFirst({ where });
+                            if (existingRecord) {
+                                const updated = await delegate.update({
+                                    where: { id: existingRecord.id },
+                                    data: updateData,
+                                });
+                                const clientObj = (0, client_2.toClient)(updated);
+                                if (opts?.populate && opts.populate.length > 0) {
+                                    await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
+                                }
+                                return attachSave(clientObj, delegate, fieldMap);
+                            }
+                        }
+                        throw createErr;
+                    }
                 }
                 return null;
             }

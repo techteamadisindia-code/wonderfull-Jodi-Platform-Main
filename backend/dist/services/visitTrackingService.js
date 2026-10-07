@@ -51,6 +51,7 @@ async function recordUserVisit(userId, req) {
                 userId: uid,
                 visitDate,
                 firstVisitedAt: now,
+                visitCount: 1,
             },
             $set: {
                 lastVisitedAt: now,

@@ -136,5 +136,23 @@ const jobOpeningSchema = new prismaBridge_1.Schema({
 jobOpeningSchema.index({ isDeleted: 1, isPublished: 1, status: 1, displayOrder: 1, createdAt: -1 });
 jobOpeningSchema.index({ slug: 1, isDeleted: 1 });
 jobOpeningSchema.index({ department: 1, isDeleted: 1 });
-exports.JobOpening = (0, prismaBridge_1.createPrismaModelAdapter)('jobOpening');
+exports.JobOpening = (0, prismaBridge_1.createPrismaModelAdapter)('jobOpening', {
+    work_mode: 'workMode',
+    employment_type: 'employmentType',
+    salary_range: 'salaryRange',
+    short_description: 'shortDescription',
+    full_description: 'fullDescription',
+    application_email: 'applicationEmail',
+    application_url: 'applicationUrl',
+    application_deadline: 'applicationDeadline',
+    is_published: 'isPublished',
+    display_order: 'displayOrder',
+    created_by: 'createdBy',
+    updated_by: 'updatedBy',
+    is_deleted: 'isDeleted',
+    deleted_at: 'deletedAt',
+    deleted_by: 'deletedBy',
+    created_at: 'createdAt',
+    updated_at: 'updatedAt',
+});
 //# sourceMappingURL=JobOpening.js.map

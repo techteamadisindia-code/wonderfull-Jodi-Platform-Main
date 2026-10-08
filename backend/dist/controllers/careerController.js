@@ -1,5 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeJobOpening = normalizeJobOpening;
+exports.normalizeJobOpenings = normalizeJobOpenings;
+exports.ensureJobOpeningsTable = ensureJobOpeningsTable;
 exports.generateUniqueSlug = generateUniqueSlug;
 exports.seedDefaultCareersIfEmpty = seedDefaultCareersIfEmpty;
 exports.getPublicCareers = getPublicCareers;
@@ -18,6 +21,7 @@ const JobOpening_1 = require("../models/JobOpening");
 const JobApplication_1 = require("../models/JobApplication");
 const AuditLog_1 = require("../models/AuditLog");
 const securityUtils_1 = require("../utils/securityUtils");
+const client_1 = require("../db/client");
 /**
  * Helper to record actions in the centralized AuditLog collection
  */
@@ -49,6 +53,87 @@ async function logCareerAudit(req, action, details, targetId, extra = {}) {
 /**
  * Helper to convert title to slug and guarantee uniqueness
  */
+/**
+ * Normalizes JSON array fields on job openings so that responsibilities,
+ * requirements, qualifications, skills, and benefits are guaranteed to be
+ * clean string arrays (never null, undefined, or unparsed JSON strings).
+ */
+function normalizeJobOpening(job) {
+    if (!job)
+        return job;
+    const clone = typeof job.toObject === 'function' ? job.toObject() : { ...job };
+    const jsonArrayFields = ['responsibilities', 'requirements', 'qualifications', 'skills', 'benefits'];
+    for (const field of jsonArrayFields) {
+        if (clone[field] === undefined || clone[field] === null) {
+            clone[field] = [];
+        }
+        else if (typeof clone[field] === 'string') {
+            try {
+                const parsed = JSON.parse(clone[field]);
+                clone[field] = Array.isArray(parsed) ? parsed : [clone[field]];
+            }
+            catch {
+                clone[field] = [clone[field]];
+            }
+        }
+        else if (!Array.isArray(clone[field])) {
+            clone[field] = [];
+        }
+    }
+    return clone;
+}
+function normalizeJobOpenings(jobs) {
+    if (!Array.isArray(jobs))
+        return [];
+    return jobs.map(normalizeJobOpening);
+}
+const CREATE_JOB_OPENINGS_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS \`job_openings\` (
+  \`_id\` VARCHAR(36) NOT NULL,
+  \`title\` VARCHAR(150) NOT NULL,
+  \`slug\` VARCHAR(150) NOT NULL,
+  \`department\` VARCHAR(100) NOT NULL,
+  \`location\` VARCHAR(150) NOT NULL,
+  \`work_mode\` VARCHAR(50) NOT NULL DEFAULT 'On-site',
+  \`employment_type\` VARCHAR(50) NOT NULL DEFAULT 'Full-time',
+  \`experience\` VARCHAR(100) DEFAULT '',
+  \`salary_range\` VARCHAR(100) DEFAULT '',
+  \`short_description\` VARCHAR(300) NOT NULL,
+  \`full_description\` TEXT NOT NULL,
+  \`responsibilities\` JSON DEFAULT NULL,
+  \`requirements\` JSON DEFAULT NULL,
+  \`qualifications\` JSON DEFAULT NULL,
+  \`skills\` JSON DEFAULT NULL,
+  \`benefits\` JSON DEFAULT NULL,
+  \`application_email\` VARCHAR(191) DEFAULT 'careers@wonderfuljodi.com',
+  \`application_url\` VARCHAR(500) DEFAULT '',
+  \`application_deadline\` DATETIME DEFAULT NULL,
+  \`status\` VARCHAR(30) NOT NULL DEFAULT 'OPEN',
+  \`is_published\` TINYINT(1) NOT NULL DEFAULT 1,
+  \`display_order\` INT NOT NULL DEFAULT 0,
+  \`created_by\` VARCHAR(100) DEFAULT 'admin',
+  \`updated_by\` VARCHAR(100) DEFAULT 'admin',
+  \`is_deleted\` TINYINT(1) NOT NULL DEFAULT 0,
+  \`deleted_at\` DATETIME DEFAULT NULL,
+  \`deleted_by\` VARCHAR(100) DEFAULT NULL,
+  \`created_at\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  \`updated_at\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (\`_id\`),
+  UNIQUE KEY \`job_openings_slug_key\` (\`slug\`),
+  KEY \`job_openings_dept_idx\` (\`department\`, \`is_deleted\`),
+  KEY \`job_openings_status_idx\` (\`is_deleted\`, \`is_published\`, \`status\`, \`display_order\`, \`created_at\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+`;
+async function ensureJobOpeningsTable() {
+    try {
+        await client_1.prisma.$executeRawUnsafe(CREATE_JOB_OPENINGS_TABLE_SQL);
+        return true;
+    }
+    catch (err) {
+        console.warn('[Careers] Could not ensure job_openings table:', err?.message || err);
+        return false;
+    }
+}
 async function generateUniqueSlug(title, excludeId) {
     let baseSlug = title
         .toLowerCase()
@@ -330,19 +415,45 @@ async function getPublicCareers(req, res, next) {
                 { department: { $regex: sanitized, $options: 'i' } },
                 { location: { $regex: sanitized, $options: 'i' } },
                 { shortDescription: { $regex: sanitized, $options: 'i' } },
-                { skills: { $in: [new RegExp(sanitized, 'i')] } },
             ];
         }
-        const [total, jobs, departments] = await Promise.all([
-            JobOpening_1.JobOpening.countDocuments(query),
-            JobOpening_1.JobOpening.find(query)
-                .select('title slug department location workMode employmentType experience salaryRange shortDescription applicationDeadline status createdAt displayOrder')
-                .sort({ displayOrder: 1, createdAt: -1 })
-                .skip(skip)
-                .limit(limitNum)
-                .lean(),
-            JobOpening_1.JobOpening.distinct('department', { isDeleted: false, isPublished: true, status: 'OPEN' }),
-        ]);
+        let total = 0;
+        let rawJobs = [];
+        let departments = [];
+        try {
+            const [totalCount, jobsList, deptList] = await Promise.all([
+                JobOpening_1.JobOpening.countDocuments(query),
+                JobOpening_1.JobOpening.find(query)
+                    .select('title slug department location workMode employmentType experience salaryRange shortDescription fullDescription responsibilities requirements qualifications skills benefits applicationDeadline status createdAt displayOrder')
+                    .sort({ displayOrder: 1, createdAt: -1 })
+                    .skip(skip)
+                    .limit(limitNum)
+                    .lean(),
+                JobOpening_1.JobOpening.distinct('department', { isDeleted: false, isPublished: true, status: 'OPEN' }),
+            ]);
+            total = totalCount;
+            rawJobs = jobsList;
+            departments = deptList;
+        }
+        catch (dbErr) {
+            const msg = String(dbErr?.message || '');
+            if (msg.includes("job_openings' doesn't exist") || msg.includes('does not exist in the current database')) {
+                console.warn('[Careers] job_openings table missing during getPublicCareers query, returning empty set.');
+                return res.json({
+                    success: true,
+                    data: [],
+                    departments: [],
+                    pagination: {
+                        total: 0,
+                        page: pageNum,
+                        limit: limitNum,
+                        totalPages: 1,
+                    },
+                });
+            }
+            throw dbErr;
+        }
+        const jobs = normalizeJobOpenings(rawJobs);
         return res.json({
             success: true,
             data: jobs,
@@ -369,19 +480,33 @@ async function getPublicCareerBySlug(req, res, next) {
         if (!slug || typeof slug !== 'string') {
             return res.status(400).json({ success: false, message: 'Invalid job opening identifier' });
         }
-        const job = await JobOpening_1.JobOpening.findOne({
-            slug: slug.trim().toLowerCase(),
-            isDeleted: false,
-            isPublished: true,
-        })
-            .select('-isDeleted -deletedAt -deletedBy -__v')
-            .lean();
-        if (!job) {
+        let rawJob = null;
+        try {
+            rawJob = await JobOpening_1.JobOpening.findOne({
+                slug: slug.trim().toLowerCase(),
+                isDeleted: false,
+                isPublished: true,
+            })
+                .select('-isDeleted -deletedAt -deletedBy -__v')
+                .lean();
+        }
+        catch (dbErr) {
+            const msg = String(dbErr?.message || '');
+            if (msg.includes("job_openings' doesn't exist") || msg.includes('does not exist in the current database')) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Job opening not found or is no longer available.',
+                });
+            }
+            throw dbErr;
+        }
+        if (!rawJob) {
             return res.status(404).json({
                 success: false,
                 message: 'Job opening not found or is no longer available.',
             });
         }
+        const job = normalizeJobOpening(rawJob);
         return res.json({
             success: true,
             data: job,
@@ -495,29 +620,52 @@ async function getAdminCareers(req, res, next) {
             ];
         }
         // Run summary metrics and filtered queries concurrently
-        const [statsAggregate, total, jobs, departments] = await Promise.all([
-            JobOpening_1.JobOpening.aggregate([
-                { $match: { isDeleted: false } },
-                {
-                    $group: {
-                        _id: null,
-                        total: { $sum: 1 },
-                        published: { $sum: { $cond: [{ $eq: ['$isPublished', true] }, 1, 0] } },
-                        draft: { $sum: { $cond: [{ $eq: ['$status', 'DRAFT'] }, 1, 0] } },
-                        open: { $sum: { $cond: [{ $eq: ['$status', 'OPEN'] }, 1, 0] } },
-                        closed: { $sum: { $cond: [{ $eq: ['$status', 'CLOSED'] }, 1, 0] } },
-                        archived: { $sum: { $cond: [{ $eq: ['$status', 'ARCHIVED'] }, 1, 0] } },
+        let statsAggregate = [];
+        let total = 0;
+        let rawJobs = [];
+        let departments = [];
+        try {
+            const [statsResult, totalCount, jobsList, deptList] = await Promise.all([
+                JobOpening_1.JobOpening.aggregate([
+                    { $match: { isDeleted: false } },
+                    {
+                        $group: {
+                            _id: null,
+                            total: { $sum: 1 },
+                            published: { $sum: { $cond: [{ $eq: ['$isPublished', true] }, 1, 0] } },
+                            draft: { $sum: { $cond: [{ $eq: ['$status', 'DRAFT'] }, 1, 0] } },
+                            open: { $sum: { $cond: [{ $eq: ['$status', 'OPEN'] }, 1, 0] } },
+                            closed: { $sum: { $cond: [{ $eq: ['$status', 'CLOSED'] }, 1, 0] } },
+                            archived: { $sum: { $cond: [{ $eq: ['$status', 'ARCHIVED'] }, 1, 0] } },
+                        },
                     },
-                },
-            ]),
-            JobOpening_1.JobOpening.countDocuments(query),
-            JobOpening_1.JobOpening.find(query)
-                .sort({ displayOrder: 1, createdAt: -1 })
-                .skip(skip)
-                .limit(limitNum)
-                .lean(),
-            JobOpening_1.JobOpening.distinct('department', { isDeleted: false }),
-        ]);
+                ]),
+                JobOpening_1.JobOpening.countDocuments(query),
+                JobOpening_1.JobOpening.find(query)
+                    .sort({ displayOrder: 1, createdAt: -1 })
+                    .skip(skip)
+                    .limit(limitNum)
+                    .lean(),
+                JobOpening_1.JobOpening.distinct('department', { isDeleted: false }),
+            ]);
+            statsAggregate = statsResult;
+            total = totalCount;
+            rawJobs = jobsList;
+            departments = deptList;
+        }
+        catch (dbErr) {
+            const msg = String(dbErr?.message || '');
+            if (msg.includes("job_openings' doesn't exist") || msg.includes('does not exist in the current database')) {
+                return res.json({
+                    success: true,
+                    stats: { total: 0, published: 0, draft: 0, open: 0, closed: 0, archived: 0 },
+                    departments: [],
+                    data: [],
+                    pagination: { total: 0, page: pageNum, limit: limitNum, totalPages: 1 },
+                });
+            }
+            throw dbErr;
+        }
         const stats = statsAggregate[0] || {
             total: 0,
             published: 0,
@@ -526,12 +674,19 @@ async function getAdminCareers(req, res, next) {
             closed: 0,
             archived: 0,
         };
+        const jobs = normalizeJobOpenings(rawJobs);
         // Attach application counts to each job
         const jobIds = jobs.map((j) => j._id);
-        const applicationCounts = await JobApplication_1.JobApplication.aggregate([
-            { $match: { jobId: { $in: jobIds } } },
-            { $group: { _id: '$jobId', count: { $sum: 1 } } },
-        ]);
+        let applicationCounts = [];
+        try {
+            applicationCounts = await JobApplication_1.JobApplication.aggregate([
+                { $match: { jobId: { $in: jobIds } } },
+                { $group: { _id: '$jobId', count: { $sum: 1 } } },
+            ]);
+        }
+        catch {
+            applicationCounts = [];
+        }
         const countMap = new Map();
         applicationCounts.forEach((ac) => {
             countMap.set(String(ac._id), ac.count);
@@ -571,11 +726,18 @@ async function getAdminCareers(req, res, next) {
 async function getAdminCareerById(req, res, next) {
     try {
         const { id } = req.params;
-        const job = await JobOpening_1.JobOpening.findOne({ _id: id, isDeleted: false }).lean();
-        if (!job) {
+        const rawJob = await JobOpening_1.JobOpening.findOne({ _id: id, isDeleted: false }).lean();
+        if (!rawJob) {
             return res.status(404).json({ success: false, message: 'Job opening not found' });
         }
-        const applicationsCount = await JobApplication_1.JobApplication.countDocuments({ jobId: id });
+        const job = normalizeJobOpening(rawJob);
+        let applicationsCount = 0;
+        try {
+            applicationsCount = await JobApplication_1.JobApplication.countDocuments({ jobId: id });
+        }
+        catch {
+            applicationsCount = 0;
+        }
         return res.json({
             success: true,
             data: {
@@ -681,7 +843,7 @@ async function createJobOpening(req, res, next) {
         return res.status(201).json({
             success: true,
             message: 'Job opening created successfully',
-            data: newJob,
+            data: normalizeJobOpening(newJob),
         });
     }
     catch (error) {
@@ -734,7 +896,7 @@ async function updateJobOpening(req, res, next) {
         return res.json({
             success: true,
             message: 'Job opening updated successfully',
-            data: updatedJob,
+            data: normalizeJobOpening(updatedJob),
         });
     }
     catch (error) {
@@ -768,7 +930,7 @@ async function updateCareerStatus(req, res, next) {
         return res.json({
             success: true,
             message: `Status changed to ${status}`,
-            data: existingJob,
+            data: normalizeJobOpening(existingJob),
         });
     }
     catch (error) {

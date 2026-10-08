@@ -168,18 +168,18 @@ export function ProfileCard({
           </Link>
 
           {/* Age • Location */}
-          <div className="flex items-center gap-1.5 text-[11.5px] sm:text-[12px] leading-none text-slate-500 truncate whitespace-nowrap overflow-hidden text-ellipsis pt-0.5">
+          <div className="flex items-center gap-1.5 text-[12.5px] sm:text-[13px] leading-snug text-slate-500 truncate whitespace-nowrap overflow-hidden text-ellipsis pt-0.5">
             <span className="font-semibold text-slate-700">{age} Yrs</span>
             <span className="text-slate-300">•</span>
             <span className="inline-flex items-center gap-1 truncate whitespace-nowrap overflow-hidden text-ellipsis">
-              <MapPin className="w-3 h-3 text-[#E51F3E] shrink-0" />
+              <MapPin className="w-3.5 h-3.5 text-[#E51F3E] shrink-0" />
               <span className="truncate whitespace-nowrap overflow-hidden text-ellipsis">{candidateLocation}</span>
             </span>
           </div>
 
           {/* Profession */}
-          <div className="flex items-center gap-1.5 text-[11.5px] sm:text-[12px] leading-none text-slate-800 font-medium truncate whitespace-nowrap overflow-hidden text-ellipsis pt-0.5">
-            <Briefcase className="w-3 h-3 text-[#E51F3E] shrink-0" />
+          <div className="flex items-center gap-1.5 text-[12.5px] sm:text-[13px] leading-snug text-slate-800 font-medium truncate whitespace-nowrap overflow-hidden text-ellipsis pt-0.5">
+            <Briefcase className="w-3.5 h-3.5 text-[#E51F3E] shrink-0" />
             <span className="truncate whitespace-nowrap overflow-hidden text-ellipsis">
               {candidateProfession}
             </span>
@@ -190,7 +190,7 @@ export function ProfileCard({
         <div className="mt-auto pt-3">
           <Link
             href={profileUrl}
-            className="w-full h-[42px] px-3 rounded-xl bg-gradient-to-r from-[#E51F3E] via-[#E21838] to-[#CC1432] hover:bg-[#ce102f] text-white text-[12.5px] sm:text-[13px] font-bold shadow-2xs hover:shadow-xs hover:shadow-red-600/20 active:scale-[0.99] transition-all duration-200 inline-flex items-center justify-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/40 cursor-pointer"
+            className="w-full h-[42px] px-3 rounded-xl bg-gradient-to-r from-[#E51F3E] via-[#E21838] to-[#CC1432] hover:bg-[#ce102f] text-white text-[13px] sm:text-[13.5px] font-bold shadow-2xs hover:shadow-xs hover:shadow-red-600/20 active:scale-[0.99] transition-all duration-200 inline-flex items-center justify-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/40 cursor-pointer"
           >
             <span>View Full Profile</span>
             <ArrowRight className="w-3.5 h-3.5" />

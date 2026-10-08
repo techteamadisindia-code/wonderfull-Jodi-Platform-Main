@@ -425,7 +425,7 @@ export function Footer() {
                     <span className="w-7 h-7 rounded-full bg-rose-950/80 border border-rose-500/30 flex items-center justify-center text-[#E51F3E] shrink-0 mt-0.5 group-hover:scale-105 group-hover:bg-rose-900 transition-all duration-200">
                       <MapPin className="w-3.5 h-3.5" />
                     </span>
-                    <span className="leading-snug text-xs sm:text-[12.5px] text-slate-400 group-hover:text-slate-200 transition-colors">
+                    <span className="leading-snug text-[12.5px] sm:text-[13px] text-slate-400 group-hover:text-slate-200 transition-colors">
                       A303, Gera Imperium Gateway,<br />
                       Nashik Phata, PMC, Pune 411034
                     </span>
@@ -466,7 +466,7 @@ export function Footer() {
       {/* ── SECTION F: FOOTER TRUST FEATURES ROW ── */}
       <div className="border-t border-slate-800/80 bg-[#050D18]/90">
         <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:divide-x md:divide-slate-800/80 text-xs sm:text-[13px] text-slate-300">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:divide-x md:divide-slate-800/80 text-[13px] sm:text-[13.5px] text-slate-300">
             <div className="flex items-center justify-center gap-2.5 py-1 px-2">
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
               <span className="font-medium text-slate-200">Verified Profiles</span>
@@ -488,12 +488,12 @@ export function Footer() {
       </div>
 
       {/* ── SECTION G: COPYRIGHT SECTION (Clean, Centered, No Raw Links) ── */}
-      <div className="border-t border-slate-800/90 bg-[#030810] py-4 text-xs sm:text-[13px] text-center">
+      <div className="border-t border-slate-800/90 bg-[#030810] py-4 text-[13px] sm:text-[13.5px] text-center">
         <div className="w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 space-y-1">
           <p className="text-slate-200 font-medium tracking-wide">
             © 2026 Wonderful Jodi. All rights reserved.
           </p>
-          <p className="text-[12px] text-emerald-400/90 font-medium tracking-normal">
+          <p className="text-[12.5px] text-emerald-400/90 font-medium tracking-normal">
             Trusted connections. Healthier tomorrows.
           </p>
         </div>

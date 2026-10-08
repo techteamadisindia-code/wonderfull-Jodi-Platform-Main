@@ -10,6 +10,7 @@ exports.escapeRegex = escapeRegex;
 exports.isValidObjectId = isValidObjectId;
 exports.validateImageBuffer = validateImageBuffer;
 exports.validateDocumentBuffer = validateDocumentBuffer;
+exports.resolveProfilePhotoUrl = resolveProfilePhotoUrl;
 exports.getAccessTokenCookieOptions = getAccessTokenCookieOptions;
 exports.getRefreshTokenCookieOptions = getRefreshTokenCookieOptions;
 exports.extractCandidateNameParts = extractCandidateNameParts;
@@ -18,6 +19,8 @@ exports.serializePublicProfile = serializePublicProfile;
 exports.serializePrivateProfile = serializePrivateProfile;
 exports.recordSecurityEvent = recordSecurityEvent;
 const crypto_1 = __importDefault(require("crypto"));
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
 const SecurityLog_1 = require("../models/SecurityLog");
 /**
  * Generate cryptographically secure random token in hex format
@@ -103,6 +106,73 @@ function validateDocumentBuffer(buffer) {
         return { valid: true, detectedMime: imageCheck.detectedMime, extension: ext };
     }
     return { valid: false };
+}
+/**
+ * Safely resolves and materializes profile photos to disk.
+ * If photo data is an absolute URL or local path (/uploads/...), returns it directly.
+ * If photo data is base64, validates magic bytes and writes it to disk under uploads/profiles/
+ * to ensure fast static delivery and avoid multi-megabyte JSON API responses.
+ */
+function resolveProfilePhotoUrl(candidateId, primaryPhoto, photos) {
+    // 1. If primaryPhoto is already an upload or web URL
+    if (primaryPhoto && typeof primaryPhoto === 'string') {
+        const trimmed = primaryPhoto.trim();
+        if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+            return trimmed;
+        }
+    }
+    // 2. Gather candidates to inspect (excluding truncated 65535 strings)
+    const candidateStrings = [];
+    if (primaryPhoto &&
+        typeof primaryPhoto === 'string' &&
+        primaryPhoto.length !== 65535 &&
+        primaryPhoto.startsWith('data:image/')) {
+        candidateStrings.push(primaryPhoto);
+    }
+    if (Array.isArray(photos)) {
+        for (const p of photos) {
+            if (typeof p === 'string') {
+                const trimmed = p.trim();
+                if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+                    return trimmed;
+                }
+                if (trimmed.startsWith('data:image/')) {
+                    candidateStrings.push(trimmed);
+                }
+            }
+        }
+    }
+    // 3. Materialize first valid base64 data to static upload file
+    for (const rawData of candidateStrings) {
+        const match = rawData.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/);
+        if (!match)
+            continue;
+        try {
+            const buffer = Buffer.from(match[2], 'base64');
+            const check = validateImageBuffer(buffer);
+            if (!check.valid || !check.detectedMime)
+                continue;
+            let ext = 'jpg';
+            if (check.detectedMime === 'image/png')
+                ext = 'png';
+            else if (check.detectedMime === 'image/webp')
+                ext = 'webp';
+            const UPLOADS_DIR = path_1.default.join(process.cwd(), 'uploads', 'profiles');
+            if (!fs_1.default.existsSync(UPLOADS_DIR)) {
+                fs_1.default.mkdirSync(UPLOADS_DIR, { recursive: true });
+            }
+            const filename = `candidate-${candidateId}.${ext}`;
+            const filePath = path_1.default.join(UPLOADS_DIR, filename);
+            if (!fs_1.default.existsSync(filePath) || fs_1.default.statSync(filePath).size === 0) {
+                fs_1.default.writeFileSync(filePath, buffer);
+            }
+            return `/uploads/profiles/${filename}`;
+        }
+        catch {
+            continue;
+        }
+    }
+    return null;
 }
 /**
  * Get environment-aware secure cookie options
@@ -191,10 +261,20 @@ function serializePublicProfile(profile, options) {
     const isAuthenticatedViewer = Boolean(opts.isAuthenticatedViewer || opts.viewerUserId || opts.isSelf || opts.isAdmin);
     const canViewSensitive = Boolean(opts.isContactUnlocked || opts.isSelf || opts.isAdmin);
     const candidateId = p.candidateId || (p._id ? `WJ-${p._id.toString().slice(-6).toUpperCase()}` : 'WJ-100000');
-    // Enforce photo visibility privacy
+    // Enforce photo visibility privacy and clean URL resolution
     const photoVisibility = p.privacySettings?.photoVisibility || 'all';
-    let safePhotos = p.photos || [];
-    let safePrimaryPhoto = p.primaryPhoto || (p.photos && p.photos[0]) || null;
+    const resolvedPhoto = resolveProfilePhotoUrl(candidateId, p.primaryPhoto, p.photos);
+    let safePhotos = [];
+    if (Array.isArray(p.photos)) {
+        safePhotos = p.photos.filter((photoItem) => typeof photoItem === 'string' &&
+            (photoItem.startsWith('/') ||
+                photoItem.startsWith('http://') ||
+                photoItem.startsWith('https://')));
+    }
+    if (resolvedPhoto && !safePhotos.includes(resolvedPhoto)) {
+        safePhotos.unshift(resolvedPhoto);
+    }
+    let safePrimaryPhoto = resolvedPhoto || (safePhotos.length > 0 ? safePhotos[0] : null);
     if (photoVisibility === 'hidden') {
         safePhotos = [];
         safePrimaryPhoto = null;

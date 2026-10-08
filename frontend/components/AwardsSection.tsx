@@ -69,46 +69,55 @@ export function AwardsSection() {
 
         {/* Responsive Logo Grid */}
         {!loading && awards.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 max-w-5xl mx-auto">
+          <div className={`grid grid-cols-1 sm:grid-cols-2 ${awards.length === 3 ? 'md:grid-cols-3 max-w-4xl' : 'md:grid-cols-4 max-w-5xl'} gap-5 sm:gap-6 mx-auto`}>
             {awards.map((award) => (
               <Link
                 key={award._id}
                 href={`/awards/${award.slug}`}
-                className="group relative bg-white rounded-2xl border border-slate-100 hover:border-slate-300 p-6 sm:p-7 flex flex-col items-center justify-between text-center transition-all duration-300 hover:shadow-xl hover:shadow-slate-900/5 hover:-translate-y-1"
+                className="group relative bg-white rounded-2xl border border-slate-200/80 hover:border-slate-300 p-6 sm:p-7 flex flex-col items-center justify-between text-center transition-all duration-300 hover:shadow-xl hover:shadow-slate-900/5 hover:-translate-y-1"
               >
                 {/* Top Year Badge */}
-                <span className="text-[10px] font-mono font-semibold text-slate-400 group-hover:text-amber-600 transition-colors uppercase tracking-wider mb-2">
+                <span className="text-[11px] font-mono font-bold text-amber-600 bg-amber-50/80 px-2.5 py-0.5 rounded-full border border-amber-200/50 uppercase tracking-wider mb-2.5">
                   {award.awardYear}
                 </span>
 
                 {/* Award Logo / Image Container */}
-                <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center p-3 mb-4 overflow-hidden transition-transform duration-300 group-hover:scale-105">
+                <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl bg-gradient-to-br from-slate-50 to-slate-100/90 border border-slate-200/80 flex items-center justify-center p-2 mb-4 overflow-hidden transition-transform duration-300 group-hover:scale-105 shadow-2xs relative">
                   <img
-                    src={award.logo}
+                    src={award.logo || (award as any).image || (award.galleryImages && award.galleryImages[0])}
                     alt={award.name}
-                    className="w-full h-full object-contain filter contrast-105"
+                    className="w-full h-full object-cover rounded-xl"
                     loading="lazy"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src =
-                        'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=300&q=80';
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                      const fallback = target.parentElement?.querySelector('.award-fallback-icon');
+                      if (fallback) (fallback as HTMLElement).style.display = 'flex';
                     }}
                   />
+                  <div
+                    className="award-fallback-icon hidden w-full h-full flex-col items-center justify-center bg-gradient-to-br from-amber-50 to-rose-50 text-amber-600 rounded-xl"
+                    aria-hidden="true"
+                  >
+                    <Trophy className="w-9 h-9 text-amber-500 mb-0.5" />
+                    <span className="text-[9.5px] font-bold uppercase tracking-wider text-amber-700/80">Honor</span>
+                  </div>
                 </div>
 
                 {/* Award Name */}
-                <h3 className="font-serif text-xs sm:text-sm font-bold text-slate-900 leading-snug group-hover:text-[#E51F3E] transition-colors line-clamp-2">
+                <h3 className="font-serif text-sm sm:text-[15px] font-bold text-slate-900 leading-snug group-hover:text-[#E51F3E] transition-colors line-clamp-2">
                   {award.name}
                 </h3>
 
                 {/* Organization Subtitle */}
-                <p className="text-[11px] text-slate-500 line-clamp-1 mt-1 font-medium">
+                <p className="text-xs sm:text-[12.5px] text-slate-500 line-clamp-1 mt-1 font-medium">
                   {award.organization}
                 </p>
 
                 {/* Subtle Hover Action Hint */}
-                <div className="mt-3 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10.5px] font-bold text-[#E51F3E]">
+                <div className="mt-3.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[11.5px] font-bold text-[#E51F3E]">
                   <span>View Details</span>
-                  <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                 </div>
               </Link>
             ))}

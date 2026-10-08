@@ -41,8 +41,13 @@ export function FeaturedProfilesSection() {
         profession: p.profession,
         specialization: p.specialization,
         primaryPhoto: (() => {
-          const raw = p.primaryPhoto || (p.photos && p.photos[0]) || '';
-          return isValidImageUrl(raw) ? raw : '';
+          if (p.primaryPhoto && isValidImageUrl(p.primaryPhoto)) {
+            return p.primaryPhoto;
+          }
+          if (Array.isArray(p.photos) && p.photos.length > 0 && isValidImageUrl(p.photos[0])) {
+            return p.photos[0];
+          }
+          return '';
         })(),
         verificationStatus: p.verificationStatus,
       }));

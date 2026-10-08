@@ -539,7 +539,44 @@ export async function getFeaturedProfiles(req: Request, res: Response, next: Nex
         continue;
       }
 
-      validProfiles.push(serialized);
+      // Lightweight card projection tailored specifically for homepage cards
+      const featuredCard = {
+        _id: serialized._id,
+        id: serialized.id || serialized._id,
+        candidateId: serialized.candidateId,
+        profileId: serialized.profileId || serialized.candidateId,
+        isAuthenticatedViewer: serialized.isAuthenticatedViewer,
+        displayName: serialized.displayName,
+        name: serialized.name,
+        publicName: serialized.publicName,
+        firstName: serialized.firstName,
+        lastName: serialized.lastName,
+        fullName: serialized.fullName,
+        age: serialized.age,
+        gender: serialized.gender,
+        dob: serialized.dob,
+        city: serialized.city,
+        state: serialized.state,
+        country: serialized.country,
+        currentLocation: serialized.currentLocation,
+        education: serialized.education,
+        degree: serialized.degree,
+        qualification: serialized.qualification,
+        profession: serialized.profession,
+        specialization: serialized.specialization,
+        primaryPhoto: serialized.primaryPhoto || null,
+        photo: serialized.photo || serialized.primaryPhoto || null,
+        photos: serialized.photos || (serialized.primaryPhoto ? [serialized.primaryPhoto] : []),
+        verificationStatus: serialized.verificationStatus,
+        maritalStatus: serialized.maritalStatus,
+        motherTongue: serialized.motherTongue,
+        religion: serialized.religion,
+        caste: serialized.caste,
+        lastActiveAt: serialized.lastActiveAt,
+        createdAt: serialized.createdAt,
+      };
+
+      validProfiles.push(featuredCard);
     }
 
     res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');

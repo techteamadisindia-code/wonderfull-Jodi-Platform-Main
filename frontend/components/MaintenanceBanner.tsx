@@ -9,10 +9,9 @@ export function MaintenanceBanner() {
   const { maintenance, isBannerDismissed, dismissBanner } = useMaintenance();
   const pathname = usePathname();
 
-  // Do not show banner on admin pages or if banner is disabled/dismissed or if full maintenance is active
+  // Show banner only if maintenance mode is enabled by admin/settings configuration, and not dismissed or admin
   if (
-    !maintenance?.banner ||
-    maintenance?.enabled ||
+    !maintenance?.enabled ||
     isBannerDismissed ||
     pathname?.startsWith('/admin')
   ) {

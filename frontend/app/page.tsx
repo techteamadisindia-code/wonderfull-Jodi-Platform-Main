@@ -259,11 +259,11 @@ export default function HomePage() {
                             <div className="w-7 h-7 rounded-lg bg-rose-50 border border-rose-100 text-[#E51F3E] group-hover:bg-[#E51F3E] group-hover:text-white group-hover:border-transparent flex items-center justify-center transition-all duration-300 shrink-0 shadow-2xs">
                               <Icon className="w-3.5 h-3.5" />
                             </div>
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-[#D99A28]">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-[#D99A28]">
                               {item.category}
                             </span>
                           </div>
-                          <span className="rounded-full px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider text-rose-500 bg-rose-50 border border-rose-100 group-hover:bg-[#E51F3E] group-hover:text-white group-hover:border-transparent transition-all duration-300 shadow-2xs">
+                          <span className="rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-rose-500 bg-rose-50 border border-rose-100 group-hover:bg-[#E51F3E] group-hover:text-white group-hover:border-transparent transition-all duration-300 shadow-2xs">
                             {item.step}
                           </span>
                         </div>
@@ -274,7 +274,7 @@ export default function HomePage() {
                         </h3>
 
                         {/* Feature Description */}
-                        <p className="text-slate-600 text-[12px] sm:text-[12.5px] leading-relaxed">
+                        <p className="text-slate-600 text-[13px] sm:text-[13.5px] leading-relaxed">
                           {item.description}
                         </p>
                       </div>

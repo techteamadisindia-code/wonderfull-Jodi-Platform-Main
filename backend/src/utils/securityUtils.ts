@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { CookieOptions, Request } from 'express';
 import { SecurityLog, ISecurityLog } from '../models/SecurityLog';
 
@@ -99,6 +101,85 @@ export function validateDocumentBuffer(buffer: Buffer): { valid: boolean; detect
   }
 
   return { valid: false };
+}
+
+/**
+ * Safely resolves and materializes profile photos to disk.
+ * If photo data is an absolute URL or local path (/uploads/...), returns it directly.
+ * If photo data is base64, validates magic bytes and writes it to disk under uploads/profiles/
+ * to ensure fast static delivery and avoid multi-megabyte JSON API responses.
+ */
+export function resolveProfilePhotoUrl(
+  candidateId: string,
+  primaryPhoto?: string | null,
+  photos?: string[] | null
+): string | null {
+  // 1. If primaryPhoto is already an upload or web URL
+  if (primaryPhoto && typeof primaryPhoto === 'string') {
+    const trimmed = primaryPhoto.trim();
+    if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed;
+    }
+  }
+
+  // 2. Gather candidates to inspect (excluding truncated 65535 strings)
+  const candidateStrings: string[] = [];
+  if (
+    primaryPhoto &&
+    typeof primaryPhoto === 'string' &&
+    primaryPhoto.length !== 65535 &&
+    primaryPhoto.startsWith('data:image/')
+  ) {
+    candidateStrings.push(primaryPhoto);
+  }
+
+  if (Array.isArray(photos)) {
+    for (const p of photos) {
+      if (typeof p === 'string') {
+        const trimmed = p.trim();
+        if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+          return trimmed;
+        }
+        if (trimmed.startsWith('data:image/')) {
+          candidateStrings.push(trimmed);
+        }
+      }
+    }
+  }
+
+  // 3. Materialize first valid base64 data to static upload file
+  for (const rawData of candidateStrings) {
+    const match = rawData.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/);
+    if (!match) continue;
+
+    try {
+      const buffer = Buffer.from(match[2], 'base64');
+      const check = validateImageBuffer(buffer);
+      if (!check.valid || !check.detectedMime) continue;
+
+      let ext = 'jpg';
+      if (check.detectedMime === 'image/png') ext = 'png';
+      else if (check.detectedMime === 'image/webp') ext = 'webp';
+
+      const UPLOADS_DIR = path.join(process.cwd(), 'uploads', 'profiles');
+      if (!fs.existsSync(UPLOADS_DIR)) {
+        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      }
+
+      const filename = `candidate-${candidateId}.${ext}`;
+      const filePath = path.join(UPLOADS_DIR, filename);
+
+      if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
+        fs.writeFileSync(filePath, buffer);
+      }
+
+      return `/uploads/profiles/${filename}`;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -219,10 +300,25 @@ export function serializePublicProfile(
   const candidateId =
     p.candidateId || (p._id ? `WJ-${p._id.toString().slice(-6).toUpperCase()}` : 'WJ-100000');
 
-  // Enforce photo visibility privacy
+  // Enforce photo visibility privacy and clean URL resolution
   const photoVisibility = p.privacySettings?.photoVisibility || 'all';
-  let safePhotos = p.photos || [];
-  let safePrimaryPhoto = p.primaryPhoto || (p.photos && p.photos[0]) || null;
+  const resolvedPhoto = resolveProfilePhotoUrl(candidateId, p.primaryPhoto, p.photos);
+
+  let safePhotos: string[] = [];
+  if (Array.isArray(p.photos)) {
+    safePhotos = p.photos.filter(
+      (photoItem: any) =>
+        typeof photoItem === 'string' &&
+        (photoItem.startsWith('/') ||
+          photoItem.startsWith('http://') ||
+          photoItem.startsWith('https://'))
+    );
+  }
+  if (resolvedPhoto && !safePhotos.includes(resolvedPhoto)) {
+    safePhotos.unshift(resolvedPhoto);
+  }
+
+  let safePrimaryPhoto = resolvedPhoto || (safePhotos.length > 0 ? safePhotos[0] : null);
 
   if (photoVisibility === 'hidden') {
     safePhotos = [];

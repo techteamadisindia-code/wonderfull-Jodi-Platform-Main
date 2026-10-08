@@ -51,6 +51,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const zod_1 = require("zod");
 const User_1 = require("../models/User");
 const Profile_1 = require("../models/Profile");
+const Counter_1 = require("../models/Counter");
 const RefreshToken_1 = require("../models/RefreshToken");
 const PasswordResetToken_1 = require("../models/PasswordResetToken");
 const emailService_1 = require("../services/emailService");
@@ -189,8 +190,10 @@ async function registerUser(req, res, next) {
                 userDob = v.parsedDate;
             }
         }
+        const candidateId = await (0, Counter_1.getNextCandidateId)();
         await Profile_1.Profile.create({
             user: user._id,
+            candidateId,
             displayName: user.fullName,
             gender: data.gender || 'Male',
             dob: userDob,

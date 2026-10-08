@@ -18,10 +18,32 @@ class ProfileRepository {
         return (0, client_1.toClient)(profile);
     }
     static async findByCandidateId(candidateId) {
-        const profile = await client_1.prisma.profile.findUnique({
-            where: { candidateId: candidateId.trim() },
+        if (!candidateId)
+            return null;
+        const clean = candidateId.trim();
+        let profile = await client_1.prisma.profile.findFirst({
+            where: { candidateId: clean },
             include: { user: true },
         });
+        if (!profile && clean.toUpperCase() !== clean) {
+            profile = await client_1.prisma.profile.findFirst({
+                where: { candidateId: clean.toUpperCase() },
+                include: { user: true },
+            });
+        }
+        if (!profile) {
+            profile = await client_1.prisma.profile.findFirst({
+                where: { id: clean },
+                include: { user: true },
+            });
+        }
+        const legacyMatch = clean.match(/^WJ-([0-9A-Fa-f]{6})$/i);
+        if (!profile && legacyMatch) {
+            profile = await client_1.prisma.profile.findFirst({
+                where: { id: { endsWith: legacyMatch[1].toLowerCase() } },
+                include: { user: true },
+            });
+        }
         return (0, client_1.toClient)(profile);
     }
     static async create(data) {

@@ -13,6 +13,7 @@ router.put('/my-profile', authMiddleware_1.requireAuth, profileController_1.upda
 router.get('/blocked', authMiddleware_1.requireAuth, blockController_1.getBlockedProfiles);
 router.post('/:id/block', authMiddleware_1.requireAuth, (0, validationMiddleware_1.validateObjectIdParam)('id'), blockController_1.blockProfileById);
 router.delete('/:id/block', authMiddleware_1.requireAuth, (0, validationMiddleware_1.validateObjectIdParam)('id'), blockController_1.unblockProfileById);
+router.get('/featured', profileController_1.getFeaturedProfiles);
 router.get('/:id', authMiddleware_1.optionalAuth, profileController_1.getProfile);
 router.post('/', authMiddleware_1.requireAuth, profileController_1.createProfile);
 router.put('/:id', authMiddleware_1.requireAuth, (0, validationMiddleware_1.validateObjectIdParam)('id'), profileController_1.updateProfile);

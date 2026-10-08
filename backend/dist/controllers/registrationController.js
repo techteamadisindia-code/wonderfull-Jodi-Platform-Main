@@ -53,6 +53,7 @@ const Registration_1 = require("../models/Registration");
 const User_1 = require("../models/User");
 const Profile_1 = require("../models/Profile");
 const Location_1 = require("../models/Location");
+const Counter_1 = require("../models/Counter");
 const securityUtils_1 = require("../utils/securityUtils");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const doctorValidation_1 = require("../utils/doctorValidation");
@@ -1178,8 +1179,10 @@ async function completeRegistration(req, res, next) {
         const siblingsData = registration.stepData?.siblings || {};
         const medQuals = registration.stepData?.medicalQualifications || {};
         const partnerExp = registration.stepData?.partnerExpectations || {};
+        const candidateId = await (0, Counter_1.getNextCandidateId)();
         const newProfile = await Profile_1.Profile.create({
             user: newUser._id,
+            candidateId,
             displayName: candidateFullName,
             gender: candidateGender === 'Male' ? 'Male' : 'Female',
             dob: validDobDate,

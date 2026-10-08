@@ -18,10 +18,31 @@ export class ProfileRepository {
   }
 
   static async findByCandidateId(candidateId: string) {
-    const profile = await prisma.profile.findUnique({
-      where: { candidateId: candidateId.trim() },
+    if (!candidateId) return null;
+    const clean = candidateId.trim();
+    let profile = await prisma.profile.findFirst({
+      where: { candidateId: clean },
       include: { user: true },
     });
+    if (!profile && clean.toUpperCase() !== clean) {
+      profile = await prisma.profile.findFirst({
+        where: { candidateId: clean.toUpperCase() },
+        include: { user: true },
+      });
+    }
+    if (!profile) {
+      profile = await prisma.profile.findFirst({
+        where: { id: clean },
+        include: { user: true },
+      });
+    }
+    const legacyMatch = clean.match(/^WJ-([0-9A-Fa-f]{6})$/i);
+    if (!profile && legacyMatch) {
+      profile = await prisma.profile.findFirst({
+        where: { id: { endsWith: legacyMatch[1].toLowerCase() } },
+        include: { user: true },
+      });
+    }
     return toClient(profile);
   }
 

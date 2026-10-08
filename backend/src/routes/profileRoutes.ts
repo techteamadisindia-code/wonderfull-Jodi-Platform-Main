@@ -4,6 +4,7 @@ import { validateObjectIdParam } from '../middleware/validationMiddleware';
 import {
   createProfile,
   getProfile,
+  getFeaturedProfiles,
   updateProfile,
   deleteProfile,
   getMyProfile,
@@ -24,6 +25,7 @@ router.put('/my-profile', requireAuth, updateMyProfile);
 router.get('/blocked', requireAuth, getBlockedProfiles);
 router.post('/:id/block', requireAuth, validateObjectIdParam('id'), blockProfileById);
 router.delete('/:id/block', requireAuth, validateObjectIdParam('id'), unblockProfileById);
+router.get('/featured', getFeaturedProfiles);
 router.get('/:id', optionalAuth, getProfile);
 router.post('/', requireAuth, createProfile);
 router.put('/:id', requireAuth, validateObjectIdParam('id'), updateProfile);

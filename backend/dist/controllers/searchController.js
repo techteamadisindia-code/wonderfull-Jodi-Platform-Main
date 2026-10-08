@@ -10,6 +10,7 @@ const Profile_1 = require("../models/Profile");
 const User_1 = require("../models/User");
 const Block_1 = require("../models/Block");
 const securityUtils_1 = require("../utils/securityUtils");
+const profileController_1 = require("./profileController");
 async function searchProfiles(req, res, next) {
     try {
         const { gender, lookingFor, religion, religionId, caste, casteId, city, cityId, location, state, stateId, districtId, country, countryId, education, profession, specialization, maritalStatus, motherTongue, motherTongueId, ageFrom, ageTo, ageMin, ageMax, minAge, maxAge, verified, hasPhoto, foodPreference, diet, smoking, drinking, page = '1', limit = '12', sort = 'bestMatch', order = 'desc', } = req.query;
@@ -214,7 +215,20 @@ async function searchProfiles(req, res, next) {
                 .populate('user', 'fullName role verificationStatus verified'),
         ]);
         // Serialize profiles securely (strips candidate identity if not authenticated)
-        const sanitizedProfiles = rawProfiles.map((p) => (0, securityUtils_1.serializePublicProfile)(p, { viewerUserId: currentUserId || undefined }));
+        const sanitizedProfiles = [];
+        for (const p of rawProfiles) {
+            const serialized = (0, securityUtils_1.serializePublicProfile)(p, { viewerUserId: currentUserId || undefined });
+            if (serialized) {
+                if (sort === 'bestMatch' && serialized.candidateId) {
+                    const resolved = await (0, profileController_1.findCanonicalProfile)(serialized.candidateId);
+                    if (!resolved) {
+                        console.warn(`[Search/Featured] Profile candidateId could not resolve: candidateId=${serialized.candidateId}, recordId=${p._id || p.id}`);
+                        continue;
+                    }
+                }
+                sanitizedProfiles.push(serialized);
+            }
+        }
         res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
         res.json({
             success: true,

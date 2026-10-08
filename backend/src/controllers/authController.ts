@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { User } from '../models/User';
 import { Profile } from '../models/Profile';
+import { getNextCandidateId } from '../models/Counter';
 import { RefreshToken } from '../models/RefreshToken';
 import { PasswordResetToken } from '../models/PasswordResetToken';
 import { sendMail, sendPasswordResetEmail } from '../services/emailService';
@@ -188,8 +189,11 @@ export async function registerUser(req: Request, res: Response, next: NextFuncti
       }
     }
 
+    const candidateId = await getNextCandidateId();
+
     await Profile.create({
       user: user._id,
+      candidateId,
       displayName: user.fullName,
       gender: data.gender || 'Male',
       dob: userDob,

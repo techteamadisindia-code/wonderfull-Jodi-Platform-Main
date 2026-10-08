@@ -121,6 +121,17 @@ export function clearAuthToken() {
   }
 }
 
+export async function getFeaturedProfiles(): Promise<{ profiles: any[] }> {
+  try {
+    const response = await api.get<{ success: boolean; data?: { profiles: any[] }; profiles?: any[] }>('/profiles/featured');
+    const profiles = response.data?.data?.profiles || response.data?.profiles || [];
+    return { profiles };
+  } catch {
+    const result = await searchProfiles('limit=4&sort=bestMatch');
+    return { profiles: result?.profiles || [] };
+  }
+}
+
 export async function searchProfiles(query: string = '') {
   const cleanQuery = query.startsWith('?') ? query.slice(1) : query;
   const endpoint = cleanQuery ? `/search?${cleanQuery}` : '/search';

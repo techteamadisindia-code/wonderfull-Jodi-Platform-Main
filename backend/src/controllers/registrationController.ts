@@ -5,6 +5,7 @@ import { Registration, RegistrationStatus } from '../models/Registration';
 import { User } from '../models/User';
 import { Profile } from '../models/Profile';
 import { State, City } from '../models/Location';
+import { getNextCandidateId } from '../models/Counter';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { escapeRegex, isValidObjectId } from '../utils/securityUtils';
 import jwt from 'jsonwebtoken';
@@ -1234,8 +1235,11 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
     const medQuals = registration.stepData?.medicalQualifications || {};
     const partnerExp = registration.stepData?.partnerExpectations || {};
 
+    const candidateId = await getNextCandidateId();
+
     const newProfile = await Profile.create({
       user: newUser._id,
+      candidateId,
       displayName: candidateFullName,
       gender: candidateGender === 'Male' ? 'Male' : 'Female',
       dob: validDobDate,

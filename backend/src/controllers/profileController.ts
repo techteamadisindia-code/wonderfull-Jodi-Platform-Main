@@ -15,6 +15,7 @@ import { validateDateOfBirth, validateMedicalQualification } from '../utils/doct
 import { validateLocationHierarchy } from './locationController';
 import { validateCommunityHierarchy } from './communityMasterController';
 import { Language } from '../models/CommunityMaster';
+import { getNextCandidateId } from '../models/Counter';
 
 const profileSchema = z.object({
   displayName: z.string().trim().min(2, 'Display name must be at least 2 characters').max(100),
@@ -437,28 +438,140 @@ export async function updateMyProfile(req: AuthRequest, res: Response, next: Nex
 }
 
 /**
+ * Canonical profile lookup helper.
+ * Resolves profile across candidateId, _id/id, and legacy WJ-[hex-suffix].
+ * Reused across profile-detail, featured-profiles, and verification flows.
+ */
+export async function findCanonicalProfile(
+  rawIdentifier: string,
+  options?: { populateUser?: boolean }
+) {
+  if (!rawIdentifier || typeof rawIdentifier !== 'string') return null;
+  const id = rawIdentifier.trim();
+  if (id.length < 3 || id.length > 50) return null;
+
+  const populateQuery = (q: any) => {
+    if (options?.populateUser) {
+      return q.populate('user', 'fullName verificationStatus verified role mobile email');
+    }
+    return q;
+  };
+
+  // 1. Direct candidateId lookup (case-insensitive / uppercase)
+  let profile = await populateQuery(
+    Profile.findOne({ candidateId: id.toUpperCase(), isDeleted: { $ne: true } })
+  );
+  if (profile) return profile;
+
+  // 2. Direct _id / id lookup (if valid ObjectId format or exact id string)
+  if (isValidObjectId(id) || /^[0-9a-fA-F]{24}$/.test(id) || /^[A-Za-z0-9_-]{20,36}$/.test(id)) {
+    profile = await populateQuery(
+      Profile.findOne({ _id: id, isDeleted: { $ne: true } })
+    );
+    if (profile) return profile;
+  }
+
+  // 3. Legacy hex-suffix lookup: WJ-[6 hex chars] (e.g. WJ-CCE711 matches _id ending with cce711)
+  const legacyMatch = id.match(/^WJ-([0-9A-Fa-f]{6})$/i);
+  if (legacyMatch) {
+    const hexSuffix = legacyMatch[1].toLowerCase();
+    profile = await populateQuery(
+      Profile.findOne({
+        id: { endsWith: hexSuffix },
+        isDeleted: { $ne: true },
+      })
+    );
+    if (profile) return profile;
+  }
+
+  return null;
+}
+
+/**
+ * Get featured verified profiles for homepage.
+ * Defensively ensures every profile returned has a resolvable Candidate ID.
+ */
+export async function getFeaturedProfiles(req: Request, res: Response, next: NextFunction) {
+  try {
+    const callerUserId = (req as any).user?.userId;
+
+    // Active users filter
+    const activeUsers = await User.find({
+      isActive: true,
+      isDeleted: { $ne: true },
+      status: { $nin: ['Suspended', 'Blocked', 'Deleted'] },
+      ...(callerUserId ? { _id: { $ne: callerUserId } } : {}),
+    }).select('_id');
+
+    const activeUserIds = activeUsers.map((u: any) => u._id);
+
+    const candidates = await Profile.find({
+      user: { $in: activeUserIds },
+      isDeleted: { $ne: true },
+      status: 'Active',
+    })
+      .sort({ verificationStatus: 1, lastActiveAt: -1 })
+      .limit(10)
+      .populate('user', 'fullName role verificationStatus verified');
+
+    const validProfiles: any[] = [];
+
+    for (const rawProfile of candidates) {
+      if (validProfiles.length >= 4) break;
+
+      const serialized = serializePublicProfile(rawProfile, {
+        viewerUserId: callerUserId,
+      });
+
+      if (!serialized || !serialized.candidateId) {
+        console.warn(
+          `[Featured Profiles] Featured profile missing candidateId: recordId=${rawProfile._id || rawProfile.id}`
+        );
+        continue;
+      }
+
+      // Defensive validation: ensure Candidate ID resolves through canonical lookup
+      const resolved = await findCanonicalProfile(serialized.candidateId);
+      if (!resolved) {
+        console.warn(
+          `[Featured Profiles] Featured profile candidateId could not resolve: candidateId=${serialized.candidateId}, recordId=${rawProfile._id || rawProfile.id}`
+        );
+        continue;
+      }
+
+      validProfiles.push(serialized);
+    }
+
+    res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+
+    res.json({
+      success: true,
+      count: validProfiles.length,
+      data: {
+        profiles: validProfiles,
+        total: validProfiles.length,
+      },
+      profiles: validProfiles,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * Get public profile by ID (strips sensitive contact details like email/phone unless mutual contact access granted)
  */
 export async function getProfile(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
-    let profileQuery: any = null;
-
-    if (isValidObjectId(id)) {
-      profileQuery = { _id: id };
-    } else if (typeof id === 'string' && /^[A-Za-z0-9_-]{3,32}$/.test(id)) {
-      profileQuery = { candidateId: id.toUpperCase() };
-    } else {
+    if (!id || typeof id !== 'string') {
       return res.status(400).json({ success: false, message: 'Invalid profile ID' });
     }
 
     const callerUserId = (req as any).user?.userId;
     const isCallerAdmin = (req as any).user?.role === 'admin';
 
-    const profile = await Profile.findOne(profileQuery).populate(
-      'user',
-      'fullName verificationStatus verified role mobile email'
-    );
+    const profile = await findCanonicalProfile(id, { populateUser: true });
     if (!profile) {
       return res.status(404).json({ success: false, message: 'Profile not found' });
     }
@@ -512,8 +625,11 @@ export async function createProfile(req: AuthRequest, res: Response, next: NextF
       return res.status(400).json({ success: false, message: 'Profile already exists' });
     }
 
+    const candidateId = await getNextCandidateId();
+
     const profile = await Profile.create({
       ...data,
+      candidateId,
       dob: new Date(data.dob),
       user: userId,
       photos: data.photos ?? [],

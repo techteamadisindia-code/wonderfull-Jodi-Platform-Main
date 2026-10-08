@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { ArrowRight, RotateCcw, AlertCircle, Users } from 'lucide-react';
 import { ProfileCard, ProfileCardSkeleton } from './ProfileCard';
-import { searchProfiles, getShortlisted, getAuthToken } from '../lib/api';
+import { getFeaturedProfiles, searchProfiles, getShortlisted, getAuthToken } from '../lib/api';
 import { isValidImageUrl } from '../lib/imageUtils';
 import { ProfileCard as ProfileCardType } from '../types/profile';
 
@@ -20,7 +20,7 @@ export function FeaturedProfilesSection() {
 
     try {
       // 1. Fetch top verified & active profiles from backend API (limited to 4)
-      const result = await searchProfiles('limit=4&sort=bestMatch');
+      const result = await getFeaturedProfiles();
       const fetchedProfiles: ProfileCardType[] = (result?.profiles || []).map((p: any) => ({
         _id: p._id,
         id: p._id,

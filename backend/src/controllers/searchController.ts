@@ -5,6 +5,7 @@ import { Profile } from '../models/Profile';
 import { User } from '../models/User';
 import { Block } from '../models/Block';
 import { escapeRegex, serializePublicProfile } from '../utils/securityUtils';
+import { findCanonicalProfile } from './profileController';
 
 export async function searchProfiles(req: Request, res: Response, next: NextFunction) {
   try {
@@ -265,9 +266,22 @@ export async function searchProfiles(req: Request, res: Response, next: NextFunc
     ]);
 
     // Serialize profiles securely (strips candidate identity if not authenticated)
-    const sanitizedProfiles = rawProfiles.map((p) =>
-      serializePublicProfile(p, { viewerUserId: currentUserId || undefined })
-    );
+    const sanitizedProfiles: any[] = [];
+    for (const p of rawProfiles) {
+      const serialized = serializePublicProfile(p, { viewerUserId: currentUserId || undefined });
+      if (serialized) {
+        if (sort === 'bestMatch' && serialized.candidateId) {
+          const resolved = await findCanonicalProfile(serialized.candidateId);
+          if (!resolved) {
+            console.warn(
+              `[Search/Featured] Profile candidateId could not resolve: candidateId=${serialized.candidateId}, recordId=${p._id || p.id}`
+            );
+            continue;
+          }
+        }
+        sanitizedProfiles.push(serialized);
+      }
+    }
 
     res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
 

@@ -40,7 +40,10 @@ export const metadata: Metadata = {
     images: ['/images/wonderful-jodi-logo.png'],
   },
   icons: {
-    icon: '/images/wonderful-jodi-logo.png',
+    icon: [
+      { url: '/favicon.ico' },
+      { url: '/images/wonderful-jodi-logo.png', type: 'image/png' },
+    ],
     apple: '/images/wonderful-jodi-logo.png',
   },
 };

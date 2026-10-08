@@ -78,7 +78,71 @@ app.set('trust proxy', 1);
 | SECURITY HEADERS
 |--------------------------------------------------------------------------
 */
+const isProduction = process.env.NODE_ENV === 'production';
 app.use((0, helmet_1.default)({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            baseUri: ["'self'"],
+            formAction: ["'self'"],
+            frameAncestors: ["'self'"],
+            objectSrc: ["'none'"],
+            scriptSrc: [
+                "'self'",
+                // Next.js App Router inline script execution for React Server Components flight stream & hydration
+                "'unsafe-inline'",
+                // In development only, allow unsafe-eval for hot module reloading and source maps
+                ...(isProduction ? [] : ["'unsafe-eval'"]),
+                // Razorpay payment gateway
+                'https://checkout.razorpay.com',
+            ],
+            scriptSrcAttr: ["'none'"],
+            styleSrc: [
+                "'self'",
+                "'unsafe-inline'",
+                'https://fonts.googleapis.com',
+            ],
+            fontSrc: [
+                "'self'",
+                'https://fonts.gstatic.com',
+                'data:',
+            ],
+            imgSrc: [
+                "'self'",
+                'data:',
+                'blob:',
+                'https://images.unsplash.com',
+            ],
+            connectSrc: [
+                "'self'",
+                'https://wonderfuljodi.com',
+                'https://www.wonderfuljodi.com',
+                'wss://wonderfuljodi.com',
+                'ws://wonderfuljodi.com',
+                'wss:',
+                'ws:',
+                'https://api.razorpay.com',
+                'https://lumberjack.razorpay.com',
+                ...(isProduction
+                    ? []
+                    : [
+                        'http://localhost:3000',
+                        'http://127.0.0.1:3000',
+                        'http://localhost:5000',
+                        'http://127.0.0.1:5000',
+                        'ws://localhost:3000',
+                        'ws://127.0.0.1:3000',
+                    ]),
+            ],
+            frameSrc: [
+                "'self'",
+                'https://api.razorpay.com',
+                'https://checkout.razorpay.com',
+            ],
+            mediaSrc: ["'self'", 'data:', 'blob:'],
+            upgradeInsecureRequests: isProduction ? [] : null,
+        },
+    },
     crossOriginResourcePolicy: {
         policy: 'cross-origin',
     },
@@ -321,10 +385,19 @@ let nextHandler = null;
 function registerNextHandler(handler) {
     nextHandler = handler;
 }
-// Serve precompiled Next.js static chunks directly with immutable cache
 const resolvedFrontendDir = fs_1.default.existsSync(path_1.default.resolve(__dirname, '../../frontend'))
     ? path_1.default.resolve(__dirname, '../../frontend')
     : path_1.default.resolve(process.cwd(), 'frontend');
+// Serve favicon.ico directly
+const faviconPath = path_1.default.join(resolvedFrontendDir, 'public', 'favicon.ico');
+if (fs_1.default.existsSync(faviconPath)) {
+    app.get('/favicon.ico', (_req, res) => {
+        res.setHeader('Content-Type', 'image/x-icon');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.sendFile(faviconPath);
+    });
+}
+// Serve precompiled Next.js static chunks directly with immutable cache
 const nextStaticDir = path_1.default.join(resolvedFrontendDir, '.next', 'static');
 if (fs_1.default.existsSync(nextStaticDir)) {
     app.use('/_next/static', express_1.default.static(nextStaticDir, { maxAge: '365d', immutable: true }));

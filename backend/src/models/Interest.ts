@@ -30,4 +30,10 @@ interestSchema.index({ sender: 1, receiver: 1 }, { unique: true });
 interestSchema.index({ createdAt: -1 });
 interestSchema.index({ status: 1, createdAt: -1 });
 
-export const Interest = createPrismaModelAdapter<IInterest>('interest', {"sender":"senderId","receiver":"receiverId","senderProfile":"senderProfileId","receiverProfile":"receiverProfileId"});
+export const Interest = createPrismaModelAdapter<IInterest>('interest', {
+  sender: 'senderId',
+  receiver: 'receiverId',
+  recipient: 'receiverId',
+  senderProfile: 'senderProfileId',
+  receiverProfile: 'receiverProfileId',
+});

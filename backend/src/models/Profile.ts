@@ -549,4 +549,4 @@ const profileSchema = new Schema<IProfile>(
 
 profileSchema.index({ gender: 1, city: 1, religion: 1, caste: 1, education: 1, profession: 1 });
 
-export const Profile = createPrismaModelAdapter<IProfile>('profile', {"user":"userId","statusChangedBy":"statusChangedById","deletedBy":"deletedById"});
+export const Profile = createPrismaModelAdapter<IProfile>('profile', { user: 'userId' });

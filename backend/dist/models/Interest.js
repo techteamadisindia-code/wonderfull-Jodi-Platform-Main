@@ -17,5 +17,11 @@ const interestSchema = new prismaBridge_1.Schema({
 interestSchema.index({ sender: 1, receiver: 1 }, { unique: true });
 interestSchema.index({ createdAt: -1 });
 interestSchema.index({ status: 1, createdAt: -1 });
-exports.Interest = (0, prismaBridge_1.createPrismaModelAdapter)('interest', { "sender": "senderId", "receiver": "receiverId", "senderProfile": "senderProfileId", "receiverProfile": "receiverProfileId" });
+exports.Interest = (0, prismaBridge_1.createPrismaModelAdapter)('interest', {
+    sender: 'senderId',
+    receiver: 'receiverId',
+    recipient: 'receiverId',
+    senderProfile: 'senderProfileId',
+    receiverProfile: 'receiverProfileId',
+});
 //# sourceMappingURL=Interest.js.map

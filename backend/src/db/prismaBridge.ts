@@ -271,6 +271,34 @@ export function normalizeSort(sort: any): Array<Record<string, 'asc' | 'desc'>> 
 /**
  * Clean data to conform to Prisma expectations
  */
+
+/**
+ * Safely strips legacy Mongoose schema fields for Profile and User before Prisma calls.
+ * Explicitly and narrowly scoped to avoid altering other models (e.g. Award, BlogPost, JobOpening).
+ */
+export function cleanUnsupportedModelFields(data: any, modelName?: string): any {
+  if (!data || typeof data !== 'object') return data;
+  const mName = String(modelName || '').toLowerCase();
+  if (mName === 'profile') {
+    delete data.deletedAt;
+    delete data.deletedBy;
+    delete data.deletedById;
+    delete data.deletionReason;
+    delete data.statusReason;
+    delete data.statusChangedAt;
+    delete data.statusChangedBy;
+    delete data.statusChangedById;
+  } else if (mName === 'user') {
+    delete data.deletedAt;
+    delete data.deletedBy;
+    delete data.deletionReason;
+    delete data.suspendedAt;
+    delete data.suspendedBy;
+    delete data.suspensionReason;
+  }
+  return data;
+}
+
 export function cleanPrismaData(data: any, fieldMap: Record<string, string> = {}): any {
   if (!data || typeof data !== 'object') return data;
   const clean: any = { ...data };
@@ -448,7 +476,7 @@ export function prepareCreateDataFromUpdate(
 /**
  * Attaches a `.save()` method to a returned database record so it behaves like a Mongoose document.
  */
-function attachSave(record: any, delegate: any, fieldMap: Record<string, string> = {}) {
+function attachSave(record: any, delegate: any, fieldMap: Record<string, string> = {}, delegateName = '') {
   if (!record || typeof record !== 'object') return record;
 
   Object.defineProperty(record, 'save', {
@@ -471,10 +499,13 @@ function attachSave(record: any, delegate: any, fieldMap: Record<string, string>
         }
       }
 
-      if (String(delegate?.name || '').toLowerCase().includes('contactinquiry')) {
+      const mName = String(delegateName || delegate?.name || '').toLowerCase();
+      if (mName.includes('contactinquiry')) {
         dataToSave.replies = dataToSave.replies ?? [];
         dataToSave.statusHistory = dataToSave.statusHistory ?? [];
       }
+
+      cleanUnsupportedModelFields(dataToSave, mName);
 
       const currentParticipants = self.participants;
 
@@ -1114,14 +1145,14 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
         await resolveVirtualPopulates([record], this.virtualPopulates, this.delegateName);
       }
       const clientRecord = formatRecord(toClient(record));
-      return attachSave(clientRecord, this.prismaDelegate, this.fieldMap) as unknown as T;
+      return attachSave(clientRecord, this.prismaDelegate, this.fieldMap, this.delegateName) as unknown as T;
     } else {
       const records = await this.prismaDelegate.findMany(args);
       if (records.length > 0 && this.virtualPopulates.length > 0) {
         await resolveVirtualPopulates(records, this.virtualPopulates, this.delegateName);
       }
       const clientRecords = toClientArray(records).map((r) =>
-        attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap)
+        attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap, this.delegateName)
       );
       return clientRecords as unknown as T;
     }
@@ -1416,7 +1447,7 @@ export function createPrismaModelAdapter<T = any>(
     } else if (self._id && !self.id) {
       self.id = self._id;
     }
-    attachSave(this, getDelegate(), fieldMap);
+    attachSave(this, getDelegate(), fieldMap, String(delegateName));
   }
 
   ModelConstructor.prototype.toObject = function () {
@@ -1461,7 +1492,7 @@ export function createPrismaModelAdapter<T = any>(
       const participantIds = data.participants.map((p: any) =>
         p && typeof p === 'object' ? String(p._id || p.id) : String(p)
       );
-      const cleanData = cleanPrismaData({ ...data, id }, fieldMap);
+      const cleanData = cleanUnsupportedModelFields(cleanPrismaData({ ...data, id }, fieldMap), String(delegateName));
       delete cleanData.participants;
 
       const created = await delegate.create({
@@ -1478,7 +1509,7 @@ export function createPrismaModelAdapter<T = any>(
 
       const clientObj = toClient(created);
       clientObj.participants = participantIds;
-      return attachSave(clientObj, delegate, fieldMap);
+      return attachSave(clientObj, delegate, fieldMap, String(delegateName));
     }
 
     const cleanData = cleanPrismaData({ ...data, id }, fieldMap);
@@ -1488,7 +1519,7 @@ export function createPrismaModelAdapter<T = any>(
       cleanData.statusHistory = cleanData.statusHistory ?? [];
     }
     const created = await delegate.create({ data: cleanData });
-    return attachSave(toClient(created), delegate, fieldMap);
+    return attachSave(toClient(created), delegate, fieldMap, String(delegateName));
   };
 
   ModelConstructor.insertMany = async function (data: any[], options?: any) {
@@ -1498,7 +1529,7 @@ export function createPrismaModelAdapter<T = any>(
   ModelConstructor.updateOne = async function (filter: any, update: any, options: any = {}) {
     const delegate = getDelegate();
     const where = normalizeFilter(filter, fieldMap);
-    const updateData = prepareUpdateData(update, fieldMap);
+    const updateData = cleanUnsupportedModelFields(prepareUpdateData(update, fieldMap), String(delegateName));
 
     const result = await delegate.updateMany({
       where,
@@ -1521,7 +1552,7 @@ export function createPrismaModelAdapter<T = any>(
     return new PrismaUpdateQuery(async (opts?: any) => {
       const delegate = getDelegate();
       const stringId = id?._id ? String(id._id) : id?.id ? String(id.id) : String(id);
-      const updateData = prepareUpdateData(update, fieldMap);
+      const updateData = cleanUnsupportedModelFields(prepareUpdateData(update, fieldMap), String(delegateName));
 
       try {
         const updated = await delegate.update({
@@ -1551,7 +1582,7 @@ export function createPrismaModelAdapter<T = any>(
           await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
         }
 
-        return attachSave(clientObj, delegate, fieldMap);
+        return attachSave(clientObj, delegate, fieldMap, String(delegateName));
       } catch (err: any) {
         if (err.code === 'P2025') {
           if (options?.upsert) {
@@ -1567,7 +1598,7 @@ export function createPrismaModelAdapter<T = any>(
             if (opts?.populate && opts.populate.length > 0) {
               await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
             }
-            return attachSave(clientObj, delegate, fieldMap);
+            return attachSave(clientObj, delegate, fieldMap, String(delegateName));
           }
           return null;
         }
@@ -1580,7 +1611,7 @@ export function createPrismaModelAdapter<T = any>(
     return new PrismaUpdateQuery(async (opts?: any) => {
       const delegate = getDelegate();
       const where = normalizeFilter(filter, fieldMap);
-      const updateData = prepareUpdateData(update, fieldMap);
+      const updateData = cleanUnsupportedModelFields(prepareUpdateData(update, fieldMap), String(delegateName));
 
       const existing = await delegate.findFirst({ where });
       if (!existing) {
@@ -1599,7 +1630,7 @@ export function createPrismaModelAdapter<T = any>(
             if (opts?.populate && opts.populate.length > 0) {
               await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
             }
-            return attachSave(clientObj, delegate, fieldMap);
+            return attachSave(clientObj, delegate, fieldMap, String(delegateName));
           } catch (createErr: any) {
             if (createErr.code === 'P2002') {
               // Concurrency collision: another process created the record with unique constraints

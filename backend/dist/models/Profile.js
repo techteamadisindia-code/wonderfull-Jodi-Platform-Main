@@ -304,5 +304,5 @@ const profileSchema = new prismaBridge_1.Schema({
     ],
 }, { timestamps: true });
 profileSchema.index({ gender: 1, city: 1, religion: 1, caste: 1, education: 1, profession: 1 });
-exports.Profile = (0, prismaBridge_1.createPrismaModelAdapter)('profile', { "user": "userId", "statusChangedBy": "statusChangedById", "deletedBy": "deletedById" });
+exports.Profile = (0, prismaBridge_1.createPrismaModelAdapter)('profile', { user: 'userId' });
 //# sourceMappingURL=Profile.js.map

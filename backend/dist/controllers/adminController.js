@@ -657,7 +657,7 @@ async function deleteUser(req, res, next) {
         await Verification_1.Verification.deleteMany({ user: user._id });
         await Subscription_1.Subscription.deleteMany({ user: user._id });
         await Payment_1.Payment.deleteMany({ user: user._id });
-        await Interest_1.Interest.deleteMany({ $or: [{ sender: user._id }, { recipient: user._id }] });
+        await Interest_1.Interest.deleteMany({ $or: [{ sender: user._id }, { receiver: user._id }] });
         await Shortlist_1.Shortlist.deleteMany({ user: user._id });
         await User_1.User.findByIdAndDelete(user._id);
         await logAdminAction(req.user?.role || 'admin', 'USER_DELETED', `Deleted user account ${user.email}`, 'User', String(user._id));
@@ -1036,14 +1036,10 @@ async function updateProfile(req, res, next) {
                 }
                 else if (requestedAccountStatus === 'Suspended' || requestedAccountStatus === 'Blocked') {
                     user.isActive = false;
-                    user.suspendedAt = new Date();
-                    user.suspendedBy = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
                 }
                 else if (requestedAccountStatus === 'Deleted') {
                     user.isDeleted = true;
                     user.isActive = false;
-                    user.deletedAt = new Date();
-                    user.deletedBy = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
                 }
                 userChanged = true;
             }
@@ -1114,10 +1110,6 @@ async function updateProfile(req, res, next) {
         }
         // 8. Persist changes
         Object.assign(profile, updateData);
-        if (updateData.status && updateData.status !== profile.status) {
-            profile.statusChangedAt = new Date();
-            profile.statusChangedBy = req.user?.userId ? new prismaBridge_1.default.Types.ObjectId(req.user.userId) : undefined;
-        }
         await profile.save();
         if (userChanged && user) {
             await user.save();
@@ -2907,7 +2899,19 @@ async function blockUserFromReport(req, res, next) {
         const targetProfile = await Profile_1.Profile.findOne({ user: report.reportedUser });
         if (targetProfile) {
             targetProfile.status = 'Blocked';
-            targetProfile.statusReason = reason || 'Blocked following member reports';
+            const blockNote = {
+                note: `Profile blocked following report: ${reason || 'Member report'}`,
+                adminId: (req.user?.userId || req.user?._id),
+                adminEmail: req.user?.email || 'admin@wonderfuljodi.com',
+                adminName: req.user?.fullName || req.user?.email || 'Admin',
+                createdAt: new Date(),
+            };
+            if (Array.isArray(targetProfile.adminNotes)) {
+                targetProfile.adminNotes.push(blockNote);
+            }
+            else {
+                targetProfile.adminNotes = [blockNote];
+            }
             await targetProfile.save();
         }
         report.status = 'RESOLVED';
@@ -2971,17 +2975,26 @@ async function updateProfileSafetyStatus(req, res, next) {
         const adminName = req.user?.fullName || adminEmail;
         if (profile) {
             profile.status = newStatus;
-            profile.statusReason = (reason || notes || '').trim();
-            profile.statusChangedAt = new Date();
-            profile.statusChangedBy = adminId;
             if (newStatus === 'Deleted') {
                 profile.isDeleted = true;
-                profile.deletedAt = new Date();
-                profile.deletedBy = adminId;
-                profile.deletionReason = (reason || notes || '').trim();
             }
             else if (profile.isDeleted && newStatus === 'Active') {
                 profile.isDeleted = false;
+            }
+            if (reason || notes) {
+                const noteEntry = {
+                    note: `Status changed to ${newStatus}: ${(reason || notes || '').trim()}`,
+                    adminId: adminId,
+                    adminEmail,
+                    adminName,
+                    createdAt: new Date(),
+                };
+                if (Array.isArray(profile.adminNotes)) {
+                    profile.adminNotes.push(noteEntry);
+                }
+                else {
+                    profile.adminNotes = [noteEntry];
+                }
             }
             await profile.save();
         }
@@ -2995,9 +3008,6 @@ async function updateProfileSafetyStatus(req, res, next) {
             }
             if (newStatus === 'Deleted') {
                 user.isDeleted = true;
-                user.deletedAt = new Date();
-                user.deletedBy = adminId;
-                user.deletionReason = (reason || notes || '').trim();
             }
             else if (user.isDeleted && newStatus === 'Active') {
                 user.isDeleted = false;
@@ -3105,17 +3115,26 @@ async function suspendProfile(req, res, next) {
         const previousStatus = profile?.status || 'Active';
         if (profile) {
             profile.status = 'Suspended';
-            profile.statusReason = reason;
-            profile.statusChangedAt = new Date();
-            profile.statusChangedBy = req.user?.userId;
+            if (reason) {
+                const suspendNote = {
+                    note: `Profile suspended: ${reason}`,
+                    adminId: req.user?.userId,
+                    adminEmail: req.user?.email || 'admin@wonderfuljodi.com',
+                    adminName: req.user?.fullName || req.user?.email || 'Admin',
+                    createdAt: new Date(),
+                };
+                if (Array.isArray(profile.adminNotes)) {
+                    profile.adminNotes.push(suspendNote);
+                }
+                else {
+                    profile.adminNotes = [suspendNote];
+                }
+            }
             await profile.save();
         }
         if (user) {
             user.status = 'Suspended';
             user.isActive = false;
-            user.suspensionReason = reason;
-            user.suspendedAt = new Date();
-            user.suspendedBy = req.user?.userId;
             await user.save();
         }
         await logAdminAction(req.user?.email || 'admin@wonderfuljodi.com', 'PROFILE_SUSPENDED', `Suspended profile ${profile?._id || user?._id}. Reason: ${reason}`, 'Profile', String(profile?._id || user?._id), {
@@ -3160,9 +3179,21 @@ async function blockProfileAdmin(req, res, next) {
         const previousStatus = profile?.status || 'Active';
         if (profile) {
             profile.status = 'Blocked';
-            profile.statusReason = reason;
-            profile.statusChangedAt = new Date();
-            profile.statusChangedBy = req.user?.userId;
+            if (reason) {
+                const blockNote = {
+                    note: `Profile blocked: ${reason}`,
+                    adminId: req.user?.userId,
+                    adminEmail: req.user?.email || 'admin@wonderfuljodi.com',
+                    adminName: req.user?.fullName || req.user?.email || 'Admin',
+                    createdAt: new Date(),
+                };
+                if (Array.isArray(profile.adminNotes)) {
+                    profile.adminNotes.push(blockNote);
+                }
+                else {
+                    profile.adminNotes = [blockNote];
+                }
+            }
             await profile.save();
         }
         if (user) {
@@ -3215,9 +3246,19 @@ async function deleteProfileAdmin(req, res, next) {
         if (profile) {
             profile.status = 'Deleted';
             profile.isDeleted = true;
-            profile.deletedAt = new Date();
-            profile.deletedBy = adminId;
-            profile.deletionReason = reason;
+            const deletionNote = {
+                note: `Profile deleted: ${reason}`,
+                adminId: adminId,
+                adminEmail: req.user?.email || 'admin@wonderfuljodi.com',
+                adminName: req.user?.fullName || req.user?.email || 'Admin',
+                createdAt: new Date(),
+            };
+            if (Array.isArray(profile.adminNotes)) {
+                profile.adminNotes.push(deletionNote);
+            }
+            else {
+                profile.adminNotes = [deletionNote];
+            }
             await profile.save();
         }
         // Soft delete user
@@ -3225,9 +3266,6 @@ async function deleteProfileAdmin(req, res, next) {
             user.status = 'Deleted';
             user.isDeleted = true;
             user.isActive = false;
-            user.deletedAt = new Date();
-            user.deletedBy = adminId;
-            user.deletionReason = reason;
             await user.save();
         }
         await logAdminAction(req.user?.email || 'admin@wonderfuljodi.com', 'PROFILE_DELETED', `Soft-deleted profile ${profile?._id || user?._id}. Reason: ${reason}`, 'Profile', String(profile?._id || user?._id), {

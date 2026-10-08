@@ -663,7 +663,7 @@ export async function deleteUser(req: AuthRequest, res: Response, next: NextFunc
     await Verification.deleteMany({ user: user._id });
     await Subscription.deleteMany({ user: user._id });
     await Payment.deleteMany({ user: user._id });
-    await Interest.deleteMany({ $or: [{ sender: user._id }, { recipient: user._id }] });
+    await Interest.deleteMany({ $or: [{ sender: user._id }, { receiver: user._id }] });
     await Shortlist.deleteMany({ user: user._id });
     await User.findByIdAndDelete(user._id);
 
@@ -1042,13 +1042,9 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
           user.isDeleted = false;
         } else if (requestedAccountStatus === 'Suspended' || requestedAccountStatus === 'Blocked') {
           user.isActive = false;
-          user.suspendedAt = new Date();
-          user.suspendedBy = req.user?.userId ? new mongoose.Types.ObjectId(req.user.userId) : undefined;
         } else if (requestedAccountStatus === 'Deleted') {
           user.isDeleted = true;
           user.isActive = false;
-          user.deletedAt = new Date();
-          user.deletedBy = req.user?.userId ? new mongoose.Types.ObjectId(req.user.userId) : undefined;
         }
         userChanged = true;
       }
@@ -1124,10 +1120,6 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
 
     // 8. Persist changes
     Object.assign(profile, updateData);
-    if (updateData.status && updateData.status !== profile.status) {
-      profile.statusChangedAt = new Date();
-      profile.statusChangedBy = req.user?.userId ? new mongoose.Types.ObjectId(req.user.userId) : undefined;
-    }
     await profile.save();
 
     if (userChanged && user) {
@@ -3267,7 +3259,18 @@ export async function blockUserFromReport(req: AuthRequest, res: Response, next:
     const targetProfile = await Profile.findOne({ user: report.reportedUser });
     if (targetProfile) {
       targetProfile.status = 'Blocked';
-      targetProfile.statusReason = reason || 'Blocked following member reports';
+      const blockNote = {
+        note: `Profile blocked following report: ${reason || 'Member report'}`,
+        adminId: (req.user?.userId || (req.user as any)?._id) as any,
+        adminEmail: req.user?.email || 'admin@wonderfuljodi.com',
+        adminName: (req.user as any)?.fullName || req.user?.email || 'Admin',
+        createdAt: new Date(),
+      };
+      if (Array.isArray(targetProfile.adminNotes)) {
+        targetProfile.adminNotes.push(blockNote);
+      } else {
+        targetProfile.adminNotes = [blockNote];
+      }
       await targetProfile.save();
     }
 
@@ -3349,16 +3352,24 @@ export async function updateProfileSafetyStatus(req: AuthRequest, res: Response,
 
     if (profile) {
       profile.status = newStatus as any;
-      profile.statusReason = (reason || notes || '').trim();
-      profile.statusChangedAt = new Date();
-      profile.statusChangedBy = adminId as any;
       if (newStatus === 'Deleted') {
         profile.isDeleted = true;
-        profile.deletedAt = new Date();
-        profile.deletedBy = adminId as any;
-        profile.deletionReason = (reason || notes || '').trim();
       } else if (profile.isDeleted && newStatus === 'Active') {
         profile.isDeleted = false;
+      }
+      if (reason || notes) {
+        const noteEntry = {
+          note: `Status changed to ${newStatus}: ${(reason || notes || '').trim()}`,
+          adminId: adminId as any,
+          adminEmail,
+          adminName,
+          createdAt: new Date(),
+        };
+        if (Array.isArray(profile.adminNotes)) {
+          profile.adminNotes.push(noteEntry);
+        } else {
+          profile.adminNotes = [noteEntry];
+        }
       }
       await profile.save();
     }
@@ -3372,9 +3383,6 @@ export async function updateProfileSafetyStatus(req: AuthRequest, res: Response,
       }
       if (newStatus === 'Deleted') {
         user.isDeleted = true;
-        user.deletedAt = new Date();
-        user.deletedBy = adminId as any;
-        user.deletionReason = (reason || notes || '').trim();
       } else if (user.isDeleted && newStatus === 'Active') {
         user.isDeleted = false;
       }
@@ -3507,18 +3515,26 @@ export async function suspendProfile(req: AuthRequest, res: Response, next: Next
 
     if (profile) {
       profile.status = 'Suspended';
-      profile.statusReason = reason;
-      profile.statusChangedAt = new Date();
-      profile.statusChangedBy = req.user?.userId as any;
+      if (reason) {
+        const suspendNote = {
+          note: `Profile suspended: ${reason}`,
+          adminId: req.user?.userId as any,
+          adminEmail: req.user?.email || 'admin@wonderfuljodi.com',
+          adminName: (req.user as any)?.fullName || req.user?.email || 'Admin',
+          createdAt: new Date(),
+        };
+        if (Array.isArray(profile.adminNotes)) {
+          profile.adminNotes.push(suspendNote);
+        } else {
+          profile.adminNotes = [suspendNote];
+        }
+      }
       await profile.save();
     }
 
     if (user) {
       user.status = 'Suspended';
       user.isActive = false;
-      user.suspensionReason = reason;
-      user.suspendedAt = new Date();
-      user.suspendedBy = req.user?.userId as any;
       await user.save();
     }
 
@@ -3577,9 +3593,20 @@ export async function blockProfileAdmin(req: AuthRequest, res: Response, next: N
 
     if (profile) {
       profile.status = 'Blocked';
-      profile.statusReason = reason;
-      profile.statusChangedAt = new Date();
-      profile.statusChangedBy = req.user?.userId as any;
+      if (reason) {
+        const blockNote = {
+          note: `Profile blocked: ${reason}`,
+          adminId: req.user?.userId as any,
+          adminEmail: req.user?.email || 'admin@wonderfuljodi.com',
+          adminName: (req.user as any)?.fullName || req.user?.email || 'Admin',
+          createdAt: new Date(),
+        };
+        if (Array.isArray(profile.adminNotes)) {
+          profile.adminNotes.push(blockNote);
+        } else {
+          profile.adminNotes = [blockNote];
+        }
+      }
       await profile.save();
     }
 
@@ -3647,9 +3674,18 @@ export async function deleteProfileAdmin(req: AuthRequest, res: Response, next: 
     if (profile) {
       profile.status = 'Deleted';
       profile.isDeleted = true;
-      profile.deletedAt = new Date();
-      profile.deletedBy = adminId as any;
-      profile.deletionReason = reason;
+      const deletionNote = {
+        note: `Profile deleted: ${reason}`,
+        adminId: adminId as any,
+        adminEmail: req.user?.email || 'admin@wonderfuljodi.com',
+        adminName: (req.user as any)?.fullName || req.user?.email || 'Admin',
+        createdAt: new Date(),
+      };
+      if (Array.isArray(profile.adminNotes)) {
+        profile.adminNotes.push(deletionNote);
+      } else {
+        profile.adminNotes = [deletionNote];
+      }
       await profile.save();
     }
 
@@ -3658,9 +3694,6 @@ export async function deleteProfileAdmin(req: AuthRequest, res: Response, next: 
       user.status = 'Deleted';
       user.isDeleted = true;
       user.isActive = false;
-      user.deletedAt = new Date();
-      user.deletedBy = adminId as any;
-      user.deletionReason = reason;
       await user.save();
     }
 

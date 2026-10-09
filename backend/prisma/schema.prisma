@@ -82,7 +82,7 @@ model Admin {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("admins")
 }
@@ -166,7 +166,7 @@ model Profile {
   createdAt                 DateTime  @default(now()) @map("createdAt")
   updatedAt                 DateTime  @updatedAt @map("updatedAt")
 
-  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                 User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
   senderInterests      Interest[]       @relation("SenderProfile")
   receiverInterests    Interest[]       @relation("ReceiverProfile")
   shortlistedIn        Shortlist[]

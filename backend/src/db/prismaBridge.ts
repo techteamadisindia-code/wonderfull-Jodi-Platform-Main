@@ -697,6 +697,40 @@ async function resolveVirtualPopulates(
     const selectStr = typeof pop === 'object' ? pop.select : undefined;
     const selectObj = parseSelectFields(selectStr);
 
+    // Generic user populate (for Profile, Admin, Payment, Subscription, etc.)
+    if (rawPath === 'user') {
+      const userIds = new Set<string>();
+      for (const rec of records) {
+        if (!rec) continue;
+        const val =
+          rec.userId ||
+          rec.user_id ||
+          (typeof rec.user === 'string' ? rec.user : rec.user?.id || rec.user?._id);
+        if (val && typeof val === 'string') userIds.add(val);
+      }
+      if (userIds.size > 0) {
+        const users = await (prisma as any).user.findMany({
+          where: { id: { in: Array.from(userIds) } },
+          select: selectObj ? { id: true, ...selectObj } : undefined,
+        });
+        const userMap = new Map(users.map((u: any) => [u.id, toClient(u)]));
+        for (const rec of records) {
+          if (!rec) continue;
+          const val =
+            rec.userId ||
+            rec.user_id ||
+            (typeof rec.user === 'string' ? rec.user : rec.user?.id || rec.user?._id);
+          rec.user = (val && userMap.get(val)) || null;
+        }
+      } else {
+        for (const rec of records) {
+          if (!rec) continue;
+          rec.user = null;
+        }
+      }
+      continue;
+    }
+
     // 1. Report relations (reporter, reportedUser, reportedProfile, moderator, handledByAdminId)
     // Handled virtually to safely tolerate orphaned foreign keys without Prisma Inconsistent query result crash
     if (delegateName === 'report' && (rawPath === 'reporter' || rawPath === 'reportedUser')) {
@@ -1003,8 +1037,9 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
 
     if (!isDotted) {
       if (
-        this.delegateName === 'report' &&
-        ['reporter', 'reportedUser', 'reportedProfile', 'moderator', 'handledByAdminId'].includes(targetPath)
+        (this.delegateName === 'report' &&
+          ['reporter', 'reportedUser', 'reportedProfile', 'moderator', 'handledByAdminId'].includes(targetPath)) ||
+        ((this.delegateName === 'profile' || this.delegateName === 'admin') && targetPath === 'user')
       ) {
         this.virtualPopulates.push({ path: targetPath, select: targetSelect });
         return this;
@@ -1138,23 +1173,68 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
       return rec;
     };
 
-    if (this.isFindOne) {
-      const record = await this.prismaDelegate.findFirst(args);
-      if (!record) return null as unknown as T;
-      if (this.virtualPopulates.length > 0) {
-        await resolveVirtualPopulates([record], this.virtualPopulates, this.delegateName);
+    try {
+      if (this.isFindOne) {
+        const record = await this.prismaDelegate.findFirst(args);
+        if (!record) return null as unknown as T;
+        if (this.virtualPopulates.length > 0) {
+          await resolveVirtualPopulates([record], this.virtualPopulates, this.delegateName);
+        }
+        const clientRecord = formatRecord(toClient(record));
+        return attachSave(clientRecord, this.prismaDelegate, this.fieldMap, this.delegateName) as unknown as T;
+      } else {
+        const records = await this.prismaDelegate.findMany(args);
+        if (records.length > 0 && this.virtualPopulates.length > 0) {
+          await resolveVirtualPopulates(records, this.virtualPopulates, this.delegateName);
+        }
+        const clientRecords = toClientArray(records).map((r) =>
+          attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap, this.delegateName)
+        );
+        return clientRecords as unknown as T;
       }
-      const clientRecord = formatRecord(toClient(record));
-      return attachSave(clientRecord, this.prismaDelegate, this.fieldMap, this.delegateName) as unknown as T;
-    } else {
-      const records = await this.prismaDelegate.findMany(args);
-      if (records.length > 0 && this.virtualPopulates.length > 0) {
-        await resolveVirtualPopulates(records, this.virtualPopulates, this.delegateName);
+    } catch (err: any) {
+      if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+        console.warn(
+          `[PrismaBridge] Missing table encountered for delegate '${this.delegateName}' (P2021). Returning empty fallback result.`
+        );
+        return (this.isFindOne ? null : []) as unknown as T;
       }
-      const clientRecords = toClientArray(records).map((r) =>
-        attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap, this.delegateName)
-      );
-      return clientRecords as unknown as T;
+
+      if (
+        (err.message && (err.message.includes('Inconsistent query result') || err.message.includes('Field user is required'))) ||
+        err.code === 'P2025'
+      ) {
+        if (cleanInclude) {
+          const fallbackArgs = { ...args };
+          delete fallbackArgs.include;
+          if (fallbackArgs.select) {
+            for (const k of Object.keys(cleanInclude)) {
+              delete fallbackArgs.select[k];
+            }
+          }
+          const allPopulates = this.populatedRelations.map((r) => ({ path: r.path })).concat(this.virtualPopulates);
+
+          if (this.isFindOne) {
+            const record = await this.prismaDelegate.findFirst(fallbackArgs);
+            if (!record) return null as unknown as T;
+            if (allPopulates.length > 0) {
+              await resolveVirtualPopulates([record], allPopulates, this.delegateName);
+            }
+            const clientRecord = formatRecord(toClient(record));
+            return attachSave(clientRecord, this.prismaDelegate, this.fieldMap, this.delegateName) as unknown as T;
+          } else {
+            const records = await this.prismaDelegate.findMany(fallbackArgs);
+            if (records.length > 0 && allPopulates.length > 0) {
+              await resolveVirtualPopulates(records, allPopulates, this.delegateName);
+            }
+            const clientRecords = toClientArray(records).map((r) =>
+              attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap, this.delegateName)
+            );
+            return clientRecords as unknown as T;
+          }
+        }
+      }
+      throw err;
     }
   }
 
@@ -1404,6 +1484,7 @@ export interface IModelAdapter<T = any> {
   find(filter?: any): PrismaQueryBuilder<T[]>;
   findOne(filter?: any): PrismaQueryBuilder<T | null>;
   findById(id: any): PrismaQueryBuilder<T | null>;
+  exists(filter?: any): Promise<{ _id: any } | null>;
   create(data: Partial<T> | any): Promise<T>;
   create(data: Partial<T>[] | any[]): Promise<T[]>;
   insertMany(data: any[], options?: any): Promise<T[]>;
@@ -1708,9 +1789,31 @@ export function createPrismaModelAdapter<T = any>(
   };
 
   ModelConstructor.countDocuments = async function (filter: any = {}) {
-    const delegate = getDelegate();
-    const where = normalizeFilter(filter, fieldMap);
-    return delegate.count({ where });
+    try {
+      const delegate = getDelegate();
+      if (!delegate) return 0;
+      const where = normalizeFilter(filter, fieldMap);
+      return await delegate.count({ where });
+    } catch (err: any) {
+      if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+        console.warn(`[PrismaBridge] Table for delegate '${String(delegateName)}' does not exist yet. Returning 0 count.`);
+        return 0;
+      }
+      throw err;
+    }
+  };
+
+  ModelConstructor.exists = async function (filter: any = {}) {
+    try {
+      const count = await this.countDocuments(filter);
+      return count > 0 ? { _id: true } : null;
+    } catch (err: any) {
+      if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+        console.warn(`[PrismaBridge] Table for delegate '${String(delegateName)}' does not exist yet. Returning null for exists.`);
+        return null;
+      }
+      throw err;
+    }
   };
 
   ModelConstructor.estimatedDocumentCount = async function () {

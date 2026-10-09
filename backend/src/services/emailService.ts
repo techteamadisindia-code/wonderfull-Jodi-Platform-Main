@@ -10,14 +10,16 @@ interface EmailOptions {
 
 export function getEmailConfig() {
   return {
-    host: process.env.EMAIL_HOST || process.env.MAIL_HOST || '',
-    port: Number(process.env.EMAIL_PORT || process.env.MAIL_PORT) || 587,
-    user: process.env.EMAIL_USER || process.env.MAIL_USERNAME || '',
-    pass: process.env.EMAIL_PASS || process.env.MAIL_PASSWORD || '',
+    host: process.env.EMAIL_HOST || process.env.SMTP_HOST || process.env.MAIL_HOST || '',
+    port: Number(process.env.EMAIL_PORT || process.env.SMTP_PORT || process.env.MAIL_PORT) || 587,
+    user: process.env.EMAIL_USER || process.env.SMTP_USER || process.env.MAIL_USERNAME || '',
+    pass: process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.MAIL_PASSWORD || '',
     from:
       process.env.EMAIL_FROM ||
+      process.env.SMTP_FROM ||
       process.env.MAIL_FROM ||
       process.env.EMAIL_USER ||
+      process.env.SMTP_USER ||
       process.env.MAIL_USERNAME ||
       'no-reply@wonderfuljodi.com',
   };
@@ -59,19 +61,31 @@ export async function verifyEmailTransporter(): Promise<{ success: boolean; mess
   }
 }
 
-export async function sendMail(emailOptions: EmailOptions) {
+export interface SendMailResult {
+  success: boolean;
+  delivered: boolean;
+  messageId?: string;
+  error?: string;
+  code?: string;
+}
+
+export async function sendMail(emailOptions: EmailOptions): Promise<SendMailResult> {
   const config = getEmailConfig();
 
   if (!config.host || !config.user || !config.pass) {
-    console.log('\n--- EMAIL DISPATCH STATUS ---');
-    console.log('Forgot password request received');
-    console.log('Email provider: NOT_CONFIGURED (EMAIL_HOST, EMAIL_USER, or EMAIL_PASS is empty in backend/.env)');
-    console.log('SMTP: not connected');
-    console.log('Email send result: mocked to console');
-    console.log(`Recipient: ${emailOptions.to}`);
-    console.log(`Subject: ${emailOptions.subject}`);
-    console.log('-----------------------------\n');
-    return { messageId: `mock-${Date.now()}` };
+    console.warn('\n--- EMAIL DISPATCH STATUS ---');
+    console.warn('Email provider: NOT_CONFIGURED (EMAIL_HOST, EMAIL_USER, or EMAIL_PASS is empty in backend/.env)');
+    console.warn('SMTP: not connected');
+    console.warn('Email send result: FAILED (not delivered)');
+    console.warn(`Recipient: ${emailOptions.to}`);
+    console.warn(`Subject: ${emailOptions.subject}`);
+    console.warn('-----------------------------\n');
+    return {
+      success: false,
+      delivered: false,
+      error: 'SMTP credentials (EMAIL_HOST, EMAIL_USER, EMAIL_PASS) are not configured in backend/.env',
+      code: 'SMTP_NOT_CONFIGURED',
+    };
   }
 
   try {
@@ -95,7 +109,6 @@ export async function sendMail(emailOptions: EmailOptions) {
     });
 
     console.log('\n--- EMAIL DISPATCH STATUS ---');
-    console.log('Forgot password request received');
     console.log(`Email provider: configured (SMTP ${config.host}:${config.port})`);
     console.log('SMTP: connected');
     console.log('Email send result: success');
@@ -103,15 +116,23 @@ export async function sendMail(emailOptions: EmailOptions) {
     console.log(`Recipient: ${emailOptions.to}`);
     console.log('-----------------------------\n');
 
-    return info;
+    return {
+      success: true,
+      delivered: true,
+      messageId: info.messageId,
+    };
   } catch (err: any) {
     console.error('\n--- EMAIL DISPATCH ERROR ---');
-    console.error('Forgot password request received');
     console.error(`Email provider: SMTP (${config.host}:${config.port})`);
     console.error(`SMTP error code: ${err.code || 'UNKNOWN'}`);
     console.error(`SMTP error message: ${err.message}`);
     console.error('----------------------------\n');
-    throw err;
+    return {
+      success: false,
+      delivered: false,
+      error: err.message || 'Failed to send email',
+      code: err.code || 'SMTP_SEND_FAILED',
+    };
   }
 }
 

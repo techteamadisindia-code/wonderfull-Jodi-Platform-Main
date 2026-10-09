@@ -430,7 +430,7 @@ export async function replyToContactInquiry(req: AuthRequest, res: Response, nex
 
     if (isEmailConfigured) {
       try {
-        await sendMail({
+        const mailRes = await sendMail({
           to: inquiry.email,
           subject: `Re: Your Inquiry ${inquiry.inquiryId} – Wonderful Jodi Support`,
           text: `Dear ${inquiry.name},\n\n${parsed.data.replyText}\n\nYour inquiry reference: ${inquiry.inquiryId}\n\nBest regards,\nWonderful Jodi Support Team`,
@@ -469,7 +469,12 @@ export async function replyToContactInquiry(req: AuthRequest, res: Response, nex
 </body>
 </html>`.trim(),
         });
-        emailSent = true;
+        if (mailRes && mailRes.delivered) {
+          emailSent = true;
+        } else {
+          emailSent = false;
+          emailError = (mailRes && mailRes.error) || 'Email delivery failed';
+        }
       } catch (err: any) {
         emailError = err.message || 'Email delivery failed';
       }

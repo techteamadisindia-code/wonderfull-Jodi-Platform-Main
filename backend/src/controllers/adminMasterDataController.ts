@@ -13,6 +13,19 @@ import { escapeRegex } from '../utils/securityUtils';
  */
 export async function getMasterDataSummary(req: Request, res: Response, next: NextFunction) {
   try {
+    const safeCount = async (model: any) => {
+      if (!model || typeof model.countDocuments !== 'function') return 0;
+      try {
+        return await model.countDocuments();
+      } catch (err: any) {
+        if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+          console.warn('[MasterDataSummary] Missing table encountered during count, reporting 0:', err.message || err);
+          return 0;
+        }
+        throw err;
+      }
+    };
+
     const [
       countries,
       states,
@@ -25,16 +38,16 @@ export async function getMasterDataSummary(req: Request, res: Response, next: Ne
       castes,
       subCastes,
     ] = await Promise.all([
-      Country.countDocuments(),
-      State.countDocuments(),
-      District.countDocuments(),
-      SubDistrict.countDocuments(),
-      City.countDocuments(),
-      Village.countDocuments(),
-      Language.countDocuments(),
-      Religion.countDocuments(),
-      Caste.countDocuments(),
-      SubCaste.countDocuments(),
+      safeCount(Country),
+      safeCount(State),
+      safeCount(District),
+      safeCount(SubDistrict),
+      safeCount(City),
+      safeCount(Village),
+      safeCount(Language),
+      safeCount(Religion),
+      safeCount(Caste),
+      safeCount(SubCaste),
     ]);
 
     return res.json({

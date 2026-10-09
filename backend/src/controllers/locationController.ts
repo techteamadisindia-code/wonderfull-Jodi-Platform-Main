@@ -72,8 +72,8 @@ export async function getDistricts(req: Request, res: Response, next: NextFuncti
     }
 
     // Verify state exists
-    const stateExists = await State.exists({ _id: stateId });
-    if (!stateExists) {
+    const stateDoc = await State.findById(stateId);
+    if (!stateDoc) {
       return res.status(404).json({ success: false, message: 'Specified state not found.' });
     }
 
@@ -103,8 +103,8 @@ export async function getSubDistricts(req: Request, res: Response, next: NextFun
       return res.status(400).json({ success: false, message: 'Valid districtId query parameter is required.' });
     }
 
-    const districtExists = await District.exists({ _id: districtId });
-    if (!districtExists) {
+    const districtDoc = await District.findById(districtId);
+    if (!districtDoc) {
       return res.status(404).json({ success: false, message: 'Specified district not found.' });
     }
 

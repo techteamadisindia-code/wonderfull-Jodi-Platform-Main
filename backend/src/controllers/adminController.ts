@@ -2478,7 +2478,7 @@ export async function updateMessageModeration(req: AuthRequest, res: Response, n
 
     let newConvCompliance = 'SAFE';
     if (remainingFlaggedCount > 0) {
-      const hasBlocked = await Message.exists({ conversation: message.conversation, moderationStatus: 'BLOCKED' });
+      const hasBlocked = (await Message.countDocuments({ conversation: message.conversation, moderationStatus: 'BLOCKED' })) > 0;
       newConvCompliance = hasBlocked ? 'BLOCKED' : 'FLAGGED';
     }
 

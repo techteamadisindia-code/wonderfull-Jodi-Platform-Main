@@ -403,6 +403,7 @@ export interface AdminRegistrationCandidate {
       country?: string;
       about?: string;
       foodPreference?: string;
+      previousMarriageDetails?: any;
     };
     educationProfession?: {
       education?: string;

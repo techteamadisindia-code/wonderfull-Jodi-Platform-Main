@@ -455,3 +455,221 @@ export function calculateProfileCompletion(profile: any, user?: any): number {
   return calculateProfileCompletionDetails(profile, user).score;
 }
 
+/**
+ * Validates and sanitizes conditional Previous Marriage & Family Details for Divorced and Widowed candidates
+ */
+export function validatePreviousMarriageDetails(
+  maritalStatus: string,
+  details: any
+): { isValid: boolean; error?: string; sanitized?: any } {
+  const status = String(maritalStatus || '').trim();
+
+  // For Never Married, or non-divorced/non-widowed status:
+  if (status !== 'Divorced' && status !== 'Widowed') {
+    return { isValid: true, sanitized: null };
+  }
+
+  if (!details || typeof details !== 'object') {
+    return {
+      isValid: false,
+      error: 'Please complete the Previous Marriage & Family Details section.',
+    };
+  }
+
+  // 1. Children from previous marriage (Required: Yes / No)
+  const rawHasChildren = details.hasChildren;
+  if (
+    rawHasChildren === undefined ||
+    rawHasChildren === null ||
+    (typeof rawHasChildren === 'string' && !rawHasChildren.trim())
+  ) {
+    return {
+      isValid: false,
+      error: 'Please specify whether you have children from previous marriage (Yes/No).',
+    };
+  }
+
+  const hasChildren =
+    rawHasChildren === true ||
+    rawHasChildren === 'Yes' ||
+    rawHasChildren === 'true' ||
+    rawHasChildren === 1 ||
+    rawHasChildren === '1';
+
+  let childrenCount = 0;
+  const children: Array<{ gender: string; ageOrDob?: string; livingArrangement?: string }> = [];
+
+  if (hasChildren) {
+    const rawCount = Number(details.childrenCount);
+    if (isNaN(rawCount) || rawCount < 1 || rawCount > 10 || !Number.isInteger(rawCount)) {
+      return {
+        isValid: false,
+        error: 'Please select a valid number of children (between 1 and 10).',
+      };
+    }
+    childrenCount = rawCount;
+
+    if (!Array.isArray(details.children)) {
+      return {
+        isValid: false,
+        error: 'Please provide details for all ' + childrenCount + ' children.',
+      };
+    }
+
+    const rawChildren = details.children;
+    if (rawChildren.length !== childrenCount) {
+      return {
+        isValid: false,
+        error: 'Please provide details for all ' + childrenCount + ' children matching the count.',
+      };
+    }
+
+    const validGenders = ['Boy', 'Girl', 'Prefer not to disclose'];
+    const validArrangements = ['With me', 'With former spouse', 'Shared custody', 'Other', ''];
+
+    for (let i = 0; i < childrenCount; i++) {
+      const child = rawChildren[i];
+      if (!child || typeof child !== 'object') {
+        return {
+          isValid: false,
+          error: 'Details for child #' + (i + 1) + ' are malformed or missing.',
+        };
+      }
+      const gender = String(child.gender || '').trim();
+      if (!gender || !validGenders.includes(gender)) {
+        return {
+          isValid: false,
+          error: 'Please select a valid gender (Boy, Girl, or Prefer not to disclose) for child #' + (i + 1) + '.',
+        };
+      }
+      const rawArrangement = child.livingArrangement !== undefined && child.livingArrangement !== null
+        ? String(child.livingArrangement).trim()
+        : '';
+      if (rawArrangement && !validArrangements.includes(rawArrangement)) {
+        return {
+          isValid: false,
+          error: 'Please select a valid living arrangement for child #' + (i + 1) + '.',
+        };
+      }
+      const ageOrDob = child.ageOrDob ? String(child.ageOrDob).trim().slice(0, 50) : '';
+      children.push({
+        gender,
+        ageOrDob,
+        livingArrangement: rawArrangement,
+      });
+    }
+  }
+
+  const currentYear = new Date().getFullYear();
+
+  // 2. Marital Status Specific Validations
+  if (status === 'Divorced') {
+    const settlementStatus = String(details.divorceSettlementStatus || '').trim();
+    const validSettlementStatuses = [
+      'Completed',
+      'Pending',
+      'Mutual Consent Filed',
+      'Contested / In Process',
+      'Not applicable',
+      'Other',
+    ];
+    if (!settlementStatus || !validSettlementStatuses.includes(settlementStatus)) {
+      return {
+        isValid: false,
+        error: 'Please select a valid divorce settlement status.',
+      };
+    }
+
+    let finalizationYear: string | undefined = undefined;
+    let finalizationDate: string | undefined = undefined;
+    let pendingCaseDetails: string | undefined = undefined;
+    let expectedCompletionYear: string | undefined = undefined;
+
+    if (settlementStatus === 'Completed') {
+      const rawYear = String(details.divorceFinalizationYear || '').trim();
+      if (!rawYear) {
+        return {
+          isValid: false,
+          error: 'Divorce finalization year is required for completed settlements.',
+        };
+      }
+      const yearNum = Number(rawYear);
+      if (!/^\d{4}$/.test(rawYear) || isNaN(yearNum) || yearNum < 1950 || yearNum > currentYear) {
+        return {
+          isValid: false,
+          error: 'Divorce finalization year must be a 4-digit year between 1950 and ' + currentYear + '.',
+        };
+      }
+      finalizationYear = rawYear;
+      if (details.divorceFinalizationDate) {
+        finalizationDate = String(details.divorceFinalizationDate).trim();
+      }
+    } else {
+      // Pending, Mutual Consent Filed, Contested / In Process, Not applicable, Other
+      if (details.pendingCaseDetails) {
+        pendingCaseDetails = String(details.pendingCaseDetails).trim();
+      }
+      if (details.expectedCompletionYear) {
+        const expYearStr = String(details.expectedCompletionYear).trim();
+        if (expYearStr) {
+          const expYear = Number(expYearStr);
+          if (!/^\d{4}$/.test(expYearStr) || isNaN(expYear) || expYear < currentYear - 5 || expYear > currentYear + 20) {
+            return {
+              isValid: false,
+              error: 'Expected completion year must be a valid 4-digit year.',
+            };
+          }
+          expectedCompletionYear = expYearStr;
+        }
+      }
+      if (details.divorceFinalizationDate) {
+        finalizationDate = String(details.divorceFinalizationDate).trim();
+      }
+    }
+
+    return {
+      isValid: true,
+      sanitized: {
+        hasChildren,
+        childrenCount,
+        children,
+        divorceSettlementStatus: settlementStatus,
+        divorceFinalizationYear: finalizationYear,
+        divorceFinalizationDate: finalizationDate,
+        pendingCaseDetails,
+        expectedCompletionYear,
+        additionalNotes: details.additionalNotes ? String(details.additionalNotes).trim() : undefined,
+      },
+    };
+  }
+
+  if (status === 'Widowed') {
+    const rawPassingYear = String(details.spousePassingYear || '').trim();
+    if (!rawPassingYear) {
+      return {
+        isValid: false,
+        error: 'Year of spouse\'s passing is required.',
+      };
+    }
+    const passingYearNum = Number(rawPassingYear);
+    if (!/^\d{4}$/.test(rawPassingYear) || isNaN(passingYearNum) || passingYearNum < 1950 || passingYearNum > currentYear) {
+      return {
+        isValid: false,
+        error: 'Year of spouse\'s passing must be a 4-digit year between 1950 and ' + currentYear + '.',
+      };
+    }
+
+    return {
+      isValid: true,
+      sanitized: {
+        hasChildren,
+        childrenCount,
+        children,
+        spousePassingYear: rawPassingYear,
+        additionalNotes: details.additionalNotes ? String(details.additionalNotes).trim() : undefined,
+      },
+    };
+  }
+
+  return { isValid: true, sanitized: null };
+}

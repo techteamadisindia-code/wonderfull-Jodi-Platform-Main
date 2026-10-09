@@ -54,6 +54,22 @@ export interface FullUserProfile {
   dob: string | Date;
   height: string;
   maritalStatus: string;
+  previousMarriageDetails?: {
+    hasChildren?: boolean;
+    childrenCount?: number;
+    children?: Array<{
+      gender?: string;
+      ageOrDob?: string;
+      livingArrangement?: string;
+    }>;
+    divorceSettlementStatus?: string;
+    divorceFinalizationYear?: string;
+    divorceFinalizationDate?: string;
+    pendingCaseDetails?: string;
+    expectedCompletionYear?: string;
+    spousePassingYear?: string;
+    additionalNotes?: string;
+  };
   motherTongue: string;
   religion: string;
   caste: string;

@@ -120,6 +120,22 @@ export interface IProfile extends Document {
   personalityValues?: string;
   hobbiesInterests?: string;
   careerGoals?: string;
+  previousMarriageDetails?: {
+    hasChildren?: boolean;
+    childrenCount?: number;
+    children?: Array<{
+      gender?: string;
+      ageOrDob?: string;
+      livingArrangement?: string;
+    }>;
+    divorceSettlementStatus?: string;
+    divorceFinalizationYear?: string;
+    divorceFinalizationDate?: string;
+    pendingCaseDetails?: string;
+    expectedCompletionYear?: string;
+    spousePassingYear?: string;
+    additionalNotes?: string;
+  };
   familyBackground?: {
     familyType?: string;
     familyStatus?: string;
@@ -278,6 +294,7 @@ const profileSchema = new Schema<IProfile>(
     familyStatus: { type: String, trim: true },
     familyValues: { type: String, trim: true },
     nativePlace: { type: String, trim: true },
+    previousMarriageDetails: { type: Schema.Types.Mixed, default: undefined },
     familyLocation: { type: String, trim: true },
     profileManagedBy: { type: String, trim: true, default: 'Self' },
     currentLocation: {

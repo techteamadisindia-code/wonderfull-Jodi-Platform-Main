@@ -1,5 +1,24 @@
 import apiClient from './api';
 
+export interface ChildDetail {
+  gender: 'Boy' | 'Girl' | 'Prefer not to disclose' | '';
+  ageOrDob?: string;
+  livingArrangement?: 'With me' | 'With former spouse' | 'Shared custody' | 'Other' | '';
+}
+
+export interface PreviousMarriageDetails {
+  hasChildren: boolean;
+  childrenCount?: number;
+  children?: ChildDetail[];
+  divorceSettlementStatus?: 'Completed' | 'Pending' | 'Mutual Consent Filed' | 'Contested / In Process' | 'Not applicable' | 'Other' | string;
+  divorceFinalizationYear?: string;
+  divorceFinalizationDate?: string;
+  pendingCaseDetails?: string;
+  expectedCompletionYear?: string;
+  spousePassingYear?: string;
+  additionalNotes?: string;
+}
+
 export interface StepData {
   basicInfo?: {
     fullName?: string;
@@ -29,6 +48,7 @@ export interface StepData {
     foodPreference?: string;
     smoking?: string;
     drinking?: string;
+    previousMarriageDetails?: PreviousMarriageDetails;
   };
   educationProfession?: {
     education?: string;

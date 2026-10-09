@@ -13,6 +13,25 @@ export interface IRegistrationBasicInfo {
   agreeTerms?: boolean;
 }
 
+export interface IChildDetail {
+  gender: 'Boy' | 'Girl' | 'Prefer not to disclose' | string;
+  ageOrDob?: string;
+  livingArrangement?: 'With me' | 'With former spouse' | 'Shared custody' | 'Other' | string;
+}
+
+export interface IPreviousMarriageDetails {
+  hasChildren: boolean;
+  childrenCount?: number;
+  children?: IChildDetail[];
+  divorceSettlementStatus?: 'Completed' | 'Pending' | 'Not applicable' | string;
+  divorceFinalizationYear?: string;
+  divorceFinalizationDate?: string;
+  pendingCaseDetails?: string;
+  expectedCompletionYear?: string;
+  spousePassingYear?: string;
+  additionalNotes?: string;
+}
+
 export interface IRegistrationPersonalInfo {
   maritalStatus?: string;
   motherTongue?: string;
@@ -24,9 +43,14 @@ export interface IRegistrationPersonalInfo {
   state?: string;
   country?: string;
   about?: string;
+  aboutMe?: string;
+  personalityValues?: string;
+  hobbiesInterests?: string;
+  careerGoals?: string;
   foodPreference?: string;
   smoking?: string;
   drinking?: string;
+  previousMarriageDetails?: IPreviousMarriageDetails;
 }
 
 export interface IRegistrationEducationProfession {
@@ -252,6 +276,7 @@ const registrationSchema = new Schema<IRegistration>(
         foodPreference: { type: String },
         smoking: { type: String },
         drinking: { type: String },
+        previousMarriageDetails: { type: Schema.Types.Mixed, default: undefined },
       },
       educationProfession: {
         education: { type: String },

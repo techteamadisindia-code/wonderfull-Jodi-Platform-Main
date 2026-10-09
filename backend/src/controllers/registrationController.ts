@@ -9,7 +9,7 @@ import { getNextCandidateId } from '../models/Counter';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { escapeRegex, isValidObjectId } from '../utils/securityUtils';
 import jwt from 'jsonwebtoken';
-import { validateDateOfBirth, validateMedicalQualification, validatePassingYear } from '../utils/doctorValidation';
+import { validateDateOfBirth, validateMedicalQualification, validatePassingYear, validatePreviousMarriageDetails } from '../utils/doctorValidation';
 import { CURRENT_TERMS_VERSION } from '../config/termsConfig';
 
 /**
@@ -445,6 +445,28 @@ export async function saveStep(req: Request, res: Response, next: NextFunction) 
         }
       }
 
+      // Validate conditional Previous Marriage Details for Divorced and Widowed candidates
+      const activeMaritalStatus = (data.maritalStatus !== undefined ? data.maritalStatus : (registration.stepData.personalInfo?.maritalStatus || rawFormData.maritalStatus || '')) as string;
+      if (activeMaritalStatus === 'Divorced' || activeMaritalStatus === 'Widowed') {
+        const pDetails = data.previousMarriageDetails !== undefined
+          ? data.previousMarriageDetails
+          : (rawFormData.previousMarriageDetails || registration.stepData.personalInfo?.previousMarriageDetails);
+        const pValidation = validatePreviousMarriageDetails(activeMaritalStatus, pDetails);
+        if (!pValidation.isValid) {
+          return res.status(400).json({
+            success: false,
+            message: pValidation.error || 'Please fill in required details for previous marriage.',
+          });
+        }
+        data.previousMarriageDetails = pValidation.sanitized;
+      } else if (activeMaritalStatus) {
+        // If candidate selects Never Married or any other status, clear previous marriage fields
+        data.previousMarriageDetails = undefined;
+        if (registration.stepData.personalInfo) {
+          delete (registration.stepData.personalInfo as any).previousMarriageDetails;
+        }
+      }
+
       // Validate Sibling Details if provided
       const sibs = data.siblings || rawFormData.siblings;
       if (sibs && typeof sibs === 'object') {
@@ -780,6 +802,24 @@ export async function autoSave(req: Request, res: Response, next: NextFunction) 
       };
     }
 
+    if (data.maritalStatus !== undefined) {
+      const activeStatus = String(data.maritalStatus || '').trim();
+      if (activeStatus !== 'Divorced' && activeStatus !== 'Widowed') {
+        delete (data as any).previousMarriageDetails;
+        if (registration.stepData.personalInfo) {
+          delete (registration.stepData.personalInfo as any).previousMarriageDetails;
+        }
+      } else if (data.previousMarriageDetails) {
+        const v = validatePreviousMarriageDetails(activeStatus, data.previousMarriageDetails);
+        if (v.isValid && v.sanitized) {
+          if (!registration.stepData.personalInfo) {
+            registration.stepData.personalInfo = {};
+          }
+          registration.stepData.personalInfo.previousMarriageDetails = v.sanitized;
+        }
+      }
+    }
+
     const fam = data.familyBackground || data.familyDetails || {};
     if (data.familyType || data.fatherOccupation || data.motherOccupation || data.siblings || Object.keys(fam).length > 0) {
       registration.stepData.familyDetails = {
@@ -945,6 +985,17 @@ export async function validateRegistrationDraft(req: Request, res: Response, nex
     const maritalStatus = (personal.maritalStatus || raw.maritalStatus || '').trim();
     if (!maritalStatus) {
       missingFields.push({ step: 2, field: 'maritalStatus', label: 'Marital Status', message: 'Candidate marital status is required.' });
+    } else if (maritalStatus === 'Divorced' || maritalStatus === 'Widowed') {
+      const pDetails = personal.previousMarriageDetails || raw.previousMarriageDetails;
+      const v = validatePreviousMarriageDetails(maritalStatus, pDetails);
+      if (!v.isValid) {
+        missingFields.push({
+          step: 2,
+          field: 'previousMarriageDetails',
+          label: 'Previous Marriage & Family Details',
+          message: v.error || 'Please complete the Previous Marriage & Family Details section.',
+        });
+      }
     }
 
     const religion = (personal.religion || raw.religion || '').trim();
@@ -1168,6 +1219,19 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
       });
     }
 
+    let finalPreviousMarriageDetails = null;
+    if (finalMaritalStatus === 'Divorced' || finalMaritalStatus === 'Widowed') {
+      const pDetails = personal.previousMarriageDetails || raw.previousMarriageDetails || finalData.previousMarriageDetails;
+      const v = validatePreviousMarriageDetails(finalMaritalStatus, pDetails);
+      if (!v.isValid) {
+        return res.status(400).json({
+          success: false,
+          message: v.error || 'Please complete the required Previous Marriage & Family Details.',
+        });
+      }
+      finalPreviousMarriageDetails = v.sanitized;
+    }
+
     const finalCity = (personal.city || raw.city || '').trim();
     if (!finalCity) {
       return res.status(400).json({
@@ -1276,6 +1340,7 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
       personalityValues: personal.personalityValues || raw.personalityValues || '',
       hobbiesInterests: personal.hobbiesInterests || raw.hobbiesInterests || '',
       careerGoals: personal.careerGoals || raw.careerGoals || '',
+      previousMarriageDetails: finalPreviousMarriageDetails || undefined,
       familyBackground: {
         familyType: family.familyType || (personal as any).familyType || raw.familyType || '',
         familyStatus: family.familyStatus || raw.familyStatus || '',

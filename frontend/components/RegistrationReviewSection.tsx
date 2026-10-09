@@ -66,6 +66,7 @@ export interface RegistrationReviewProps {
   sistersCount: number;
   brothers: SiblingItem[];
   sisters: SiblingItem[];
+  previousMarriageDetails?: any;
 
   // Step 3: Medical Education & Career
   ugQualifications: UgQualItem[];
@@ -138,6 +139,7 @@ export function RegistrationReviewSection({
   sistersCount,
   brothers,
   sisters,
+  previousMarriageDetails,
   ugQualifications,
   pgQualifications,
   doctorateQualifications,
@@ -357,6 +359,98 @@ export function RegistrationReviewSection({
             <p className="font-bold text-slate-800">{familyValues || familyLocation || 'Traditional & Progressive'}</p>
           </div>
         </div>
+
+        {/* Previous Marriage & Family Details (for Divorced and Widowed) */}
+        {(maritalStatus === 'Divorced' || maritalStatus === 'Widowed') && previousMarriageDetails && (
+          <div className="pt-3 border-t border-slate-100 bg-rose-50/40 border border-rose-100/70 p-3.5 rounded-xl space-y-2 text-xs">
+            <div className="flex items-center gap-2 text-[#E51F3E] font-bold">
+              <HeartHandshake className="w-3.5 h-3.5" />
+              <span>Previous Marriage & Family Details ({maritalStatus})</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              <div>
+                <span className="text-slate-400 font-medium block">Children from Previous Marriage</span>
+                <span className="font-semibold text-slate-800">
+                  {previousMarriageDetails.hasChildren === true || previousMarriageDetails.hasChildren === 'Yes'
+                    ? `Yes (${previousMarriageDetails.childrenCount || previousMarriageDetails.children?.length || 1} child${(previousMarriageDetails.childrenCount || 1) > 1 ? 'ren' : ''})`
+                    : 'No'}
+                </span>
+              </div>
+
+              {maritalStatus === 'Divorced' && (
+                <>
+                  <div>
+                    <span className="text-slate-400 font-medium block">Divorce Settlement Status</span>
+                    <span className="font-semibold text-slate-800">{previousMarriageDetails.divorceSettlementStatus || '—'}</span>
+                  </div>
+                  {previousMarriageDetails.divorceSettlementStatus === 'Completed' && (
+                    <div>
+                      <span className="text-slate-400 font-medium block">Finalization Year</span>
+                      <span className="font-semibold text-slate-800">
+                        {previousMarriageDetails.divorceFinalizationYear || '—'}
+                        {previousMarriageDetails.divorceFinalizationDate ? ` (${previousMarriageDetails.divorceFinalizationDate})` : ''}
+                      </span>
+                    </div>
+                  )}
+                  {previousMarriageDetails.divorceSettlementStatus === 'Pending' && (
+                    <>
+                      {previousMarriageDetails.pendingCaseDetails && (
+                        <div>
+                          <span className="text-slate-400 font-medium block">Case Status / Details</span>
+                          <span className="font-semibold text-slate-800">{previousMarriageDetails.pendingCaseDetails}</span>
+                        </div>
+                      )}
+                      {previousMarriageDetails.expectedCompletionYear && (
+                        <div>
+                          <span className="text-slate-400 font-medium block">Expected Completion</span>
+                          <span className="font-semibold text-slate-800">{previousMarriageDetails.expectedCompletionYear}</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+
+              {maritalStatus === 'Widowed' && (
+                <div>
+                  <span className="text-slate-400 font-medium block">Year of Spouse&apos;s Passing</span>
+                  <span className="font-semibold text-slate-800">{previousMarriageDetails.spousePassingYear || '—'}</span>
+                </div>
+              )}
+            </div>
+
+            {/* List of Children Details */}
+            {(previousMarriageDetails.hasChildren === true || previousMarriageDetails.hasChildren === 'Yes') &&
+              Array.isArray(previousMarriageDetails.children) &&
+              previousMarriageDetails.children.length > 0 && (
+                <div className="pt-2 border-t border-rose-100/80 space-y-1.5">
+                  <span className="text-slate-500 font-semibold block text-[11px]">Child Details:</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {previousMarriageDetails.children.map((child: any, cIdx: number) => (
+                      <div key={cIdx} className="bg-white p-2 rounded-lg border border-rose-200/60 text-[11px] space-y-0.5">
+                        <span className="font-bold text-slate-800">Child {cIdx + 1}: {child.gender || 'Gender not specified'}</span>
+                        {child.ageOrDob && (
+                          <div className="text-slate-600">Age / DOB: <span className="font-medium text-slate-800">{child.ageOrDob}</span></div>
+                        )}
+                        {child.livingArrangement && (
+                          <div className="text-slate-600">Living Arrangement: <span className="font-medium text-slate-800">{child.livingArrangement}</span></div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+            )}
+
+            {previousMarriageDetails.additionalNotes && (
+              <div className="pt-2 border-t border-rose-100/80">
+                <span className="text-slate-500 font-semibold block text-[11px]">Additional Notes:</span>
+                <p className="text-slate-700 bg-white p-2 rounded-lg border border-rose-200/60 italic">
+                  {previousMarriageDetails.additionalNotes}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* About Me & Family Background Text */}
         {(aboutMe || aboutFamily) && (

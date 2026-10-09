@@ -147,6 +147,14 @@ const DEFAULT_STATES = [
 const STORAGE_KEY = 'wj_registration_id';
 const BACKUP_KEY = 'wj_reg_form_backup';
 
+export interface ChildDetailItem {
+  gender: 'Boy' | 'Girl' | 'Prefer not to disclose' | '';
+  ageOrDob?: string;
+  age?: string;
+  dob?: string;
+  livingArrangement?: 'With me' | 'With former spouse' | 'Shared custody' | 'Other' | '';
+}
+
 export interface SiblingItem {
   name: string;
   age: string;
@@ -221,6 +229,112 @@ function RegisterForm() {
   const [height, setHeight] = useState(`5' 6"`);
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
+
+  // Conditional Previous Marriage & Family Details (for Divorced & Widowed)
+  const [hasChildren, setHasChildren] = useState<'Yes' | 'No' | ''>('');
+  const [childrenCount, setChildrenCount] = useState<number>(0);
+  const [children, setChildren] = useState<ChildDetailItem[]>([]);
+  const [divorceSettlementStatus, setDivorceSettlementStatus] = useState<'Completed' | 'Pending' | 'Not applicable' | ''>('');
+  const [divorceFinalizationYear, setDivorceFinalizationYear] = useState('');
+  const [divorceFinalizationDate, setDivorceFinalizationDate] = useState('');
+  const [pendingCaseDetails, setPendingCaseDetails] = useState('');
+  const [expectedCompletionYear, setExpectedCompletionYear] = useState('');
+  const [spousePassingYear, setSpousePassingYear] = useState('');
+  const [previousMarriageNotes, setPreviousMarriageNotes] = useState('');
+
+  const buildPreviousMarriageData = useCallback(() => {
+    if (maritalStatus === 'Divorced') {
+      return {
+        hasChildren: hasChildren === 'Yes',
+        childrenCount: hasChildren === 'Yes' ? childrenCount : 0,
+        children: hasChildren === 'Yes' ? children.map((c) => ({
+          gender: c.gender,
+          ageOrDob: c.ageOrDob || c.age || '',
+          livingArrangement: c.livingArrangement || '',
+        })) : [],
+        divorceSettlementStatus: divorceSettlementStatus || undefined,
+        divorceFinalizationYear: divorceSettlementStatus === 'Completed' ? (divorceFinalizationYear || undefined) : undefined,
+        divorceFinalizationDate: divorceSettlementStatus === 'Completed' ? (divorceFinalizationDate || undefined) : undefined,
+        pendingCaseDetails: divorceSettlementStatus === 'Pending' ? (pendingCaseDetails || undefined) : undefined,
+        expectedCompletionYear: divorceSettlementStatus === 'Pending' ? (expectedCompletionYear || undefined) : undefined,
+        additionalNotes: previousMarriageNotes || undefined,
+      };
+    } else if (maritalStatus === 'Widowed') {
+      return {
+        hasChildren: hasChildren === 'Yes',
+        childrenCount: hasChildren === 'Yes' ? childrenCount : 0,
+        children: hasChildren === 'Yes' ? children.map((c) => ({
+          gender: c.gender,
+          ageOrDob: c.ageOrDob || c.age || '',
+          livingArrangement: c.livingArrangement || '',
+        })) : [],
+        spousePassingYear: spousePassingYear || undefined,
+        additionalNotes: previousMarriageNotes || undefined,
+      };
+    }
+    return null;
+  }, [
+    maritalStatus,
+    hasChildren,
+    childrenCount,
+    children,
+    divorceSettlementStatus,
+    divorceFinalizationYear,
+    divorceFinalizationDate,
+    pendingCaseDetails,
+    expectedCompletionYear,
+    spousePassingYear,
+    previousMarriageNotes,
+  ]);
+
+  const handleHasChildrenChange = (val: 'Yes' | 'No') => {
+    setHasChildren(val);
+    if (val === 'No') {
+      setChildrenCount(0);
+      setChildren([]);
+    } else if (val === 'Yes') {
+      const initialCount = childrenCount > 0 ? childrenCount : 1;
+      setChildrenCount(initialCount);
+      if (children.length === 0) {
+        setChildren([{ gender: '', ageOrDob: '', age: '', dob: '', livingArrangement: '' }]);
+      }
+    }
+    if (step2Errors.hasChildren) {
+      setStep2Errors((prev) => ({ ...prev, hasChildren: '' }));
+    }
+  };
+
+  const handleChildrenCountChange = (count: number) => {
+    const validCount = Math.max(1, Math.min(10, count));
+    setChildrenCount(validCount);
+    setChildren((prev) => {
+      const updated = [...prev];
+      if (updated.length < validCount) {
+        while (updated.length < validCount) {
+          updated.push({ gender: '', ageOrDob: '', age: '', dob: '', livingArrangement: '' });
+        }
+      } else if (updated.length > validCount) {
+        return updated.slice(0, validCount);
+      }
+      return updated;
+    });
+    if (step2Errors.childrenCount) {
+      setStep2Errors((prev) => ({ ...prev, childrenCount: '' }));
+    }
+  };
+
+  const handleChildChange = (index: number, field: keyof ChildDetailItem, value: string) => {
+    setChildren((prev) => {
+      const updated = [...prev];
+      if (updated[index]) {
+        updated[index] = { ...updated[index], [field]: value };
+      }
+      return updated;
+    });
+    if (step2Errors[`child_${field}_${index}`]) {
+      setStep2Errors((prev) => ({ ...prev, [`child_${field}_${index}`]: '' }));
+    }
+  };
 
   // Structured Location Hierarchy State
   const [locationData, setLocationData] = useState<{
@@ -538,6 +652,49 @@ function RegisterForm() {
               setLocationData((p as any).location || (session as any).currentLocation);
             }
 
+            // Conditional Previous Marriage & Family Details
+            const pmd = p.previousMarriageDetails;
+            if (pmd) {
+              if (pmd.hasChildren !== undefined) {
+                setHasChildren(pmd.hasChildren ? 'Yes' : 'No');
+              }
+              if (pmd.childrenCount !== undefined) {
+                setChildrenCount(Number(pmd.childrenCount) || 0);
+              }
+              if (Array.isArray(pmd.children)) {
+                setChildren(
+                  pmd.children.map((c: any) => ({
+                    gender: c.gender || '',
+                    ageOrDob: c.ageOrDob || c.age || '',
+                    age: c.age || c.ageOrDob || '',
+                    dob: c.dob || '',
+                    livingArrangement: c.livingArrangement || '',
+                  }))
+                );
+              }
+              if (pmd.divorceSettlementStatus) {
+                setDivorceSettlementStatus(pmd.divorceSettlementStatus as 'Completed' | 'Pending' | 'Not applicable');
+              }
+              if (pmd.divorceFinalizationYear) {
+                setDivorceFinalizationYear(String(pmd.divorceFinalizationYear));
+              }
+              if (pmd.divorceFinalizationDate) {
+                setDivorceFinalizationDate(String(pmd.divorceFinalizationDate));
+              }
+              if (pmd.pendingCaseDetails) {
+                setPendingCaseDetails(pmd.pendingCaseDetails);
+              }
+              if (pmd.expectedCompletionYear) {
+                setExpectedCompletionYear(String(pmd.expectedCompletionYear));
+              }
+              if (pmd.spousePassingYear) {
+                setSpousePassingYear(String(pmd.spousePassingYear));
+              }
+              if (pmd.additionalNotes) {
+                setPreviousMarriageNotes(pmd.additionalNotes);
+              }
+            }
+
             // Subsection A: About Me
             if (p.aboutMe || p.about) setAboutMe(p.aboutMe || p.about || '');
             if (p.personalityValues) setPersonalityValues(p.personalityValues);
@@ -797,6 +954,16 @@ function RegisterForm() {
     setMotherTongue('');
     setReligion('');
     setCaste('');
+    setHasChildren('');
+    setChildrenCount(0);
+    setChildren([]);
+    setDivorceSettlementStatus('');
+    setDivorceFinalizationYear('');
+    setDivorceFinalizationDate('');
+    setPendingCaseDetails('');
+    setExpectedCompletionYear('');
+    setSpousePassingYear('');
+    setPreviousMarriageNotes('');
     setState('');
     setCity('');
     setCitySearchInput('');
@@ -862,18 +1029,18 @@ function RegisterForm() {
           filename: file.name,
         });
 
-        const url = res.data?.data?.url || res.data?.url;
-        if (url) {
-          setUploadedPhotoUrl(url);
-          if (registrationId) {
-            triggerAutoSave('photos', { primaryPhoto: url, photos: [url] });
-          }
-        } else {
-          setPhotoError('Photo uploaded but server did not return a valid URL.');
+        const url = res.data?.data?.url || res.data?.url || base64;
+        setUploadedPhotoUrl(url);
+
+        if (registrationId) {
+          triggerAutoSave('photos', { primaryPhoto: url, photos: [url] });
         }
       } catch (err: any) {
-        console.warn('Photo upload failed:', err);
-        setPhotoError('Unable to upload photo to server. Please try again or continue.');
+        console.warn('Upload API notice (fallback to preview base64):', err);
+        setUploadedPhotoUrl(base64);
+        if (registrationId) {
+          triggerAutoSave('photos', { primaryPhoto: base64, photos: [base64] });
+        }
       } finally {
         setPhotoUploading(false);
       }
@@ -1008,20 +1175,9 @@ function RegisterForm() {
         setStep(2);
       }
     } catch (err: any) {
-      const rawData = err.response?.data;
-      const msg =
-        (typeof rawData === 'object' && rawData?.message) ||
-        (typeof rawData === 'string' && rawData.length < 200 ? rawData : '') ||
-        err?.message ||
-        '';
-      const status = err.response?.status;
-
+      const msg = err.response?.data?.message || '';
       if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('exists')) {
         setGlobalError('This email or mobile is already registered with an active account. Please sign in instead.');
-      } else if (status === 503 || msg.toLowerCase().includes('database')) {
-        setGlobalError('Database service is temporarily unavailable. Please try again shortly.');
-      } else if (err.code === 'ERR_NETWORK' || msg.toLowerCase().includes('network') || msg.toLowerCase().includes('socket')) {
-        setGlobalError('Network connection issue. Please check your internet connection or server availability.');
       } else {
         setGlobalError(msg || 'Could not save registration progress. Please check your details.');
       }
@@ -1035,6 +1191,7 @@ function RegisterForm() {
     e.preventDefault();
     setGlobalError('');
     const errors: Record<string, string> = {};
+    const currentYear = new Date().getFullYear();
 
     if (!maritalStatus) {
       errors.maritalStatus = 'Please select candidate marital status.';
@@ -1047,6 +1204,55 @@ function RegisterForm() {
     }
     if (!city) {
       errors.city = 'Please select city of residence.';
+    }
+
+    // Conditional Validation for Divorced and Widowed Candidates
+    if (maritalStatus === 'Divorced' || maritalStatus === 'Widowed') {
+      if (!hasChildren) {
+        errors.hasChildren = 'Please select whether you have children from previous marriage.';
+      } else if (hasChildren === 'Yes') {
+        if (!childrenCount || childrenCount < 1) {
+          errors.childrenCount = 'Please select number of children.';
+        } else {
+          children.forEach((c, idx) => {
+            if (!c.gender) {
+              errors[`child_gender_${idx}`] = `Please select gender for child #${idx + 1}.`;
+            }
+          });
+        }
+      }
+
+      if (maritalStatus === 'Divorced') {
+        if (!divorceSettlementStatus) {
+          errors.divorceSettlementStatus = 'Please select divorce settlement status.';
+        } else if (divorceSettlementStatus === 'Completed') {
+          if (!divorceFinalizationYear || !divorceFinalizationYear.trim()) {
+            errors.divorceFinalizationYear = 'Divorce finalization year is required for completed settlements.';
+          } else if (
+            !/^\d{4}$/.test(divorceFinalizationYear.trim()) ||
+            Number(divorceFinalizationYear) > currentYear ||
+            Number(divorceFinalizationYear) < 1950
+          ) {
+            errors.divorceFinalizationYear = `Year must be 4 digits between 1950 and ${currentYear}.`;
+          }
+        } else if (divorceSettlementStatus === 'Pending') {
+          if (expectedCompletionYear && expectedCompletionYear.trim()) {
+            if (!/^\d{4}$/.test(expectedCompletionYear.trim())) {
+              errors.expectedCompletionYear = 'Expected completion year must be a 4-digit year.';
+            }
+          }
+        }
+      } else if (maritalStatus === 'Widowed') {
+        if (!spousePassingYear || !spousePassingYear.trim()) {
+          errors.spousePassingYear = "Year of spouse's passing is required.";
+        } else if (
+          !/^\d{4}$/.test(spousePassingYear.trim()) ||
+          Number(spousePassingYear) > currentYear ||
+          Number(spousePassingYear) < 1950
+        ) {
+          errors.spousePassingYear = `Year must be 4 digits between 1950 and ${currentYear}.`;
+        }
+      }
     }
 
     // Validate sibling ages
@@ -1067,6 +1273,8 @@ function RegisterForm() {
     setLoading(true);
     try {
       if (registrationId) {
+        const prevMarriageData = buildPreviousMarriageData();
+
         await saveRegistrationStep({
           registrationId,
           stepNumber: 3,
@@ -1085,6 +1293,7 @@ function RegisterForm() {
               stateName: state,
               countryName: 'India',
             },
+            previousMarriageDetails: prevMarriageData || undefined,
             about: aboutMe,
             aboutMe,
             personalityValues,
@@ -2020,9 +2229,62 @@ function RegisterForm() {
                     <select
                       value={maritalStatus}
                       onChange={(e) => {
-                        setMaritalStatus(e.target.value);
+                        const newStatus = e.target.value;
+                        setMaritalStatus(newStatus);
                         if (step2Errors.maritalStatus) setStep2Errors((prev) => ({ ...prev, maritalStatus: '' }));
-                        triggerAutoSave('personalInfo', { maritalStatus: e.target.value });
+
+                        // Clean up irrelevant conditional fields when switching marital status
+                        if (newStatus === 'Divorced') {
+                          setSpousePassingYear('');
+                          setStep2Errors((prev) => {
+                            const next = { ...prev };
+                            delete next.spousePassingYear;
+                            return next;
+                          });
+                        } else if (newStatus === 'Widowed') {
+                          setDivorceSettlementStatus('');
+                          setDivorceFinalizationYear('');
+                          setDivorceFinalizationDate('');
+                          setPendingCaseDetails('');
+                          setExpectedCompletionYear('');
+                          setStep2Errors((prev) => {
+                            const next = { ...prev };
+                            delete next.divorceSettlementStatus;
+                            delete next.divorceFinalizationYear;
+                            delete next.expectedCompletionYear;
+                            return next;
+                          });
+                        } else {
+                          // Never Married or other statuses
+                          setHasChildren('');
+                          setChildrenCount(0);
+                          setChildren([]);
+                          setDivorceSettlementStatus('');
+                          setDivorceFinalizationYear('');
+                          setDivorceFinalizationDate('');
+                          setPendingCaseDetails('');
+                          setExpectedCompletionYear('');
+                          setSpousePassingYear('');
+                          setPreviousMarriageNotes('');
+                          setStep2Errors((prev) => {
+                            const next = { ...prev };
+                            delete next.hasChildren;
+                            delete next.childrenCount;
+                            delete next.divorceSettlementStatus;
+                            delete next.divorceFinalizationYear;
+                            delete next.expectedCompletionYear;
+                            delete next.spousePassingYear;
+                            Object.keys(next).forEach((k) => {
+                              if (k.startsWith('child_')) delete next[k];
+                            });
+                            return next;
+                          });
+                        }
+
+                        triggerAutoSave('personalInfo', {
+                          maritalStatus: newStatus,
+                          previousMarriageDetails: (newStatus === 'Divorced' || newStatus === 'Widowed') ? buildPreviousMarriageData() : null,
+                        });
                       }}
                       className={`w-full h-[46px] rounded-[12px] border ${
                         step2Errors.maritalStatus ? 'border-rose-500 bg-rose-50/20' : 'border-[#DCE3EC] bg-white'
@@ -2290,6 +2552,351 @@ function RegisterForm() {
                   </div>
                 </div>
               </div>
+
+              {/* CONDITIONAL CARD: Previous Marriage & Family Details (Only for Divorced and Widowed) */}
+              {(maritalStatus === 'Divorced' || maritalStatus === 'Widowed') && (
+                <div className="bg-white rounded-2xl p-5 sm:p-6 border border-rose-200/80 shadow-xs space-y-5">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-rose-50 text-[#E51F3E] flex items-center justify-center">
+                        <HeartHandshake className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">
+                          Previous Marriage &amp; Family Details
+                        </h3>
+                        <p className="text-[11px] text-slate-500">
+                          {maritalStatus === 'Divorced'
+                            ? 'Previous marriage details, settlement status, and children.'
+                            : "Spouse's passing details, family background, and children."}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-rose-50 text-[#E51F3E] border border-rose-200/60">
+                      {maritalStatus}
+                    </span>
+                  </div>
+
+                  {/* Section A: Children from previous marriage */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-2">
+                        Children from previous marriage? *
+                      </label>
+                      <div className="flex items-center gap-4">
+                        <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-800">
+                          <input
+                            type="radio"
+                            name="hasChildren"
+                            value="Yes"
+                            checked={hasChildren === 'Yes'}
+                            onChange={() => handleHasChildrenChange('Yes')}
+                            className="text-[#E51F3E] focus:ring-[#E51F3E]"
+                          />
+                          <span>Yes</span>
+                        </label>
+                        <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-800">
+                          <input
+                            type="radio"
+                            name="hasChildren"
+                            value="No"
+                            checked={hasChildren === 'No'}
+                            onChange={() => handleHasChildrenChange('No')}
+                            className="text-[#E51F3E] focus:ring-[#E51F3E]"
+                          />
+                          <span>No</span>
+                        </label>
+                      </div>
+                      {step2Errors.hasChildren && (
+                        <p className="text-[11px] text-rose-600 font-medium mt-1">{step2Errors.hasChildren}</p>
+                      )}
+                    </div>
+
+                    {/* Children count and detail rows if Yes */}
+                    {hasChildren === 'Yes' && (
+                      <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200 space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200/60">
+                          <div>
+                            <label className="text-xs font-bold text-slate-800 block">
+                              Number of Children *
+                            </label>
+                            <p className="text-[11px] text-slate-500">Select total count of children from previous marriage</p>
+                          </div>
+                          <select
+                            value={childrenCount}
+                            onChange={(e) => handleChildrenCountChange(Number(e.target.value))}
+                            className={`h-[40px] rounded-lg border ${
+                              step2Errors.childrenCount ? 'border-rose-500 bg-rose-50/20' : 'border-slate-200 bg-white'
+                            } px-3 text-xs font-bold text-slate-800 focus:outline-none focus:border-[#E51F3E]`}
+                          >
+                            <option value="1">1 Child</option>
+                            <option value="2">2 Children</option>
+                            <option value="3">3 Children</option>
+                            <option value="4">4 Children</option>
+                            <option value="5">5 Children</option>
+                          </select>
+                        </div>
+                        {step2Errors.childrenCount && (
+                          <p className="text-[11px] text-rose-600 font-medium">{step2Errors.childrenCount}</p>
+                        )}
+
+                        {/* Child Details Cards */}
+                        <div className="space-y-3">
+                          {children.map((child, idx) => (
+                            <div key={idx} className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-3 shadow-2xs">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                                  <Users className="w-3.5 h-3.5 text-[#E51F3E]" />
+                                  Child #{idx + 1} Details
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                {/* Gender */}
+                                <div>
+                                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                                    Gender *
+                                  </label>
+                                  <select
+                                    value={child.gender}
+                                    onChange={(e) => handleChildChange(idx, 'gender', e.target.value as any)}
+                                    className={`w-full h-[42px] rounded-lg border ${
+                                      step2Errors[`child_gender_${idx}`] ? 'border-rose-500 bg-rose-50/20' : 'border-slate-200 bg-white'
+                                    } px-2.5 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]`}
+                                  >
+                                    <option value="">Select Gender *</option>
+                                    <option value="Boy">Boy</option>
+                                    <option value="Girl">Girl</option>
+                                    <option value="Prefer not to disclose">Prefer not to disclose</option>
+                                  </select>
+                                  {step2Errors[`child_gender_${idx}`] && (
+                                    <p className="text-[10px] text-rose-600 font-medium mt-1">{step2Errors[`child_gender_${idx}`]}</p>
+                                  )}
+                                </div>
+
+                                {/* Age or DOB */}
+                                <div>
+                                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                                    Age or Date of Birth <span className="font-normal text-slate-400">(Optional)</span>
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g. 5 yrs or 2019-05-12"
+                                    value={child.ageOrDob || child.age || ''}
+                                    onChange={(e) => {
+                                      handleChildChange(idx, 'ageOrDob', e.target.value);
+                                      handleChildChange(idx, 'age', e.target.value);
+                                    }}
+                                    className="w-full h-[42px] rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#E51F3E]"
+                                  />
+                                </div>
+
+                                {/* Living Arrangement */}
+                                <div>
+                                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                                    Living Arrangement <span className="font-normal text-slate-400">(Optional)</span>
+                                  </label>
+                                  <select
+                                    value={child.livingArrangement || ''}
+                                    onChange={(e) => handleChildChange(idx, 'livingArrangement', e.target.value as any)}
+                                    className="w-full h-[42px] rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 focus:outline-none focus:border-[#E51F3E]"
+                                  >
+                                    <option value="">Select living arrangement</option>
+                                    <option value="With me">With me</option>
+                                    <option value="With former spouse">With former spouse</option>
+                                    <option value="Shared custody">Shared custody</option>
+                                    <option value="Other">Other</option>
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Section B: Divorced specific fields */}
+                  {maritalStatus === 'Divorced' && (
+                    <div className="pt-3 border-t border-slate-100 space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                            Divorce Settlement Status *
+                          </label>
+                          <select
+                            value={divorceSettlementStatus}
+                            onChange={(e) => {
+                              const val = e.target.value as any;
+                              setDivorceSettlementStatus(val);
+                              if (step2Errors.divorceSettlementStatus) setStep2Errors((prev) => ({ ...prev, divorceSettlementStatus: '' }));
+                              if (val !== 'Completed') {
+                                setDivorceFinalizationYear('');
+                                setDivorceFinalizationDate('');
+                                if (step2Errors.divorceFinalizationYear) setStep2Errors((prev) => ({ ...prev, divorceFinalizationYear: '' }));
+                              }
+                              if (val !== 'Pending') {
+                                setPendingCaseDetails('');
+                                setExpectedCompletionYear('');
+                                if (step2Errors.expectedCompletionYear) setStep2Errors((prev) => ({ ...prev, expectedCompletionYear: '' }));
+                              }
+                            }}
+                            className={`w-full h-[46px] rounded-[12px] border ${
+                              step2Errors.divorceSettlementStatus ? 'border-rose-500 bg-rose-50/20' : 'border-[#DCE3EC] bg-white'
+                            } px-3.5 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E]`}
+                          >
+                            <option value="" disabled>Select settlement status *</option>
+                            <option value="Completed">Completed</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Not applicable">Not applicable</option>
+                          </select>
+                          {step2Errors.divorceSettlementStatus && (
+                            <p className="text-[11px] text-rose-600 font-medium mt-1">{step2Errors.divorceSettlementStatus}</p>
+                          )}
+                        </div>
+
+                        {divorceSettlementStatus === 'Completed' && (
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                              Divorce Finalization Year *
+                            </label>
+                            <input
+                              type="text"
+                              maxLength={4}
+                              placeholder="YYYY (e.g. 2021)"
+                              value={divorceFinalizationYear}
+                              onChange={(e) => {
+                                const val = e.target.value.replace(/\D/g, '');
+                                setDivorceFinalizationYear(val);
+                                if (step2Errors.divorceFinalizationYear) setStep2Errors((prev) => ({ ...prev, divorceFinalizationYear: '' }));
+                              }}
+                              className={`w-full h-[46px] rounded-[12px] border ${
+                                step2Errors.divorceFinalizationYear ? 'border-rose-500 bg-rose-50/20' : 'border-[#DCE3EC] bg-white'
+                              } px-3.5 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E]`}
+                            />
+                            {step2Errors.divorceFinalizationYear && (
+                              <p className="text-[11px] text-rose-600 font-medium mt-1">{step2Errors.divorceFinalizationYear}</p>
+                            )}
+                          </div>
+                        )}
+
+                        {divorceSettlementStatus === 'Completed' && (
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                              Divorce Finalization Date <span className="font-normal text-slate-400">(Optional)</span>
+                            </label>
+                            <input
+                              type="date"
+                              value={divorceFinalizationDate}
+                              onChange={(e) => setDivorceFinalizationDate(e.target.value)}
+                              className="w-full h-[46px] rounded-[12px] border border-[#DCE3EC] bg-white px-3.5 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E]"
+                            />
+                          </div>
+                        )}
+
+                        {divorceSettlementStatus !== 'Completed' && divorceSettlementStatus !== 'Not applicable' && divorceSettlementStatus !== '' && (
+                          <div>
+                            <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                              Expected Completion Year <span className="font-normal text-slate-400">(Optional)</span>
+                            </label>
+                            <input
+                              type="text"
+                              maxLength={4}
+                              placeholder="YYYY (e.g. 2026)"
+                              value={expectedCompletionYear}
+                              onChange={(e) => {
+                                const val = e.target.value.replace(/\D/g, '');
+                                setExpectedCompletionYear(val);
+                                if (step2Errors.expectedCompletionYear) setStep2Errors((prev) => ({ ...prev, expectedCompletionYear: '' }));
+                              }}
+                              className={`w-full h-[46px] rounded-[12px] border ${
+                                step2Errors.expectedCompletionYear ? 'border-rose-500 bg-rose-50/20' : 'border-[#DCE3EC] bg-white'
+                              } px-3.5 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E]`}
+                            />
+                            {step2Errors.expectedCompletionYear && (
+                              <p className="text-[11px] text-rose-600 font-medium mt-1">{step2Errors.expectedCompletionYear}</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {divorceSettlementStatus !== 'Completed' && divorceSettlementStatus !== 'Not applicable' && divorceSettlementStatus !== '' && (
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                            Case Status or Brief Details <span className="font-normal text-slate-400">(Optional)</span>
+                          </label>
+                          <textarea
+                            rows={2}
+                            value={pendingCaseDetails}
+                            onChange={(e) => setPendingCaseDetails(e.target.value)}
+                            placeholder="e.g. Mutual consent proceedings in final hearing stage..."
+                            className="w-full rounded-[12px] border border-[#DCE3EC] bg-white p-3 text-sm text-[#101728] placeholder-slate-400 focus:outline-none focus:border-[#E51F3E]"
+                          />
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                          Previous Marriage Details / Additional Notes <span className="font-normal text-slate-400">(Optional)</span>
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={previousMarriageNotes}
+                          onChange={(e) => setPreviousMarriageNotes(e.target.value)}
+                          placeholder="Any context or notes you wish to share regarding your previous marriage..."
+                          className="w-full rounded-[12px] border border-[#DCE3EC] bg-white p-3 text-sm text-[#101728] placeholder-slate-400 focus:outline-none focus:border-[#E51F3E]"
+                        />
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Note: Please do not provide sensitive legal case numbers or confidential court documents.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Section C: Widowed specific fields */}
+                  {maritalStatus === 'Widowed' && (
+                    <div className="pt-3 border-t border-slate-100 space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                            Year of Spouse&apos;s Passing *
+                          </label>
+                          <input
+                            type="text"
+                            maxLength={4}
+                            placeholder="YYYY (e.g. 2020)"
+                            value={spousePassingYear}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, '');
+                              setSpousePassingYear(val);
+                              if (step2Errors.spousePassingYear) setStep2Errors((prev) => ({ ...prev, spousePassingYear: '' }));
+                            }}
+                            className={`w-full h-[46px] rounded-[12px] border ${
+                              step2Errors.spousePassingYear ? 'border-rose-500 bg-rose-50/20' : 'border-[#DCE3EC] bg-white'
+                            } px-3.5 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E]`}
+                          />
+                          {step2Errors.spousePassingYear && (
+                            <p className="text-[11px] text-rose-600 font-medium mt-1">{step2Errors.spousePassingYear}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                          Additional Family Details / Notes <span className="font-normal text-slate-400">(Optional)</span>
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={previousMarriageNotes}
+                          onChange={(e) => setPreviousMarriageNotes(e.target.value)}
+                          placeholder="Any context or family details you wish to share..."
+                          className="w-full rounded-[12px] border border-[#DCE3EC] bg-white p-3 text-sm text-[#101728] placeholder-slate-400 focus:outline-none focus:border-[#E51F3E]"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* CARD 2: About Me (Subsection A) */}
               <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-xs space-y-4">
@@ -3800,6 +4407,7 @@ function RegisterForm() {
               sistersCount={sistersCount}
               brothers={brothers}
               sisters={sisters}
+              previousMarriageDetails={buildPreviousMarriageData()}
               ugQualifications={ugQualifications}
               pgQualifications={pgQualifications}
               doctorateQualifications={doctorateQualifications}

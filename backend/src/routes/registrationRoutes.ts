@@ -27,5 +27,6 @@ router.post('/complete', completeRegistration);
 router.post('/:registrationId/step', saveStep);
 router.post('/:registrationId/complete', completeRegistration);
 router.get('/:registrationId', getRegistrationById);
+router.get('/session/:registrationId', getRegistrationById);
 
 export default router;

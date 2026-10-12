@@ -67,10 +67,13 @@ import { DoctorAvatar } from '../../components/DoctorAvatar';
 import { BasicDetailsEditSection } from '../../components/BasicDetailsEditSection';
 import { ProfileBanner } from '../../components/profile/ProfileBanner';
 import { ProfileSummaryCard } from '../../components/profile/ProfileSummaryCard';
+import {
+  formatHeightDisplay,
+  HEIGHT_OPTIONS,
+  ANNUAL_INCOME_OPTIONS,
+} from '../../lib/doctorConstants';
 
-const HEIGHTS = [
-  `5' 0"`, `5' 1"`, `5' 2"`, `5' 3"`, `5' 4"`, `5' 5"`, `5' 6"`, `5' 7"`, `5' 8"`, `5' 9"`, `5' 10"`, `5' 11"`, `6' 0"`, `6' 1"`, `6' 2"`, `6' 3"`, `6' 4"`
-];
+const HEIGHTS = HEIGHT_OPTIONS.map((h) => h.label);
 
 const HEIGHT_METERS: Record<string, string> = {
   '5\' 0"': '1.52 m',
@@ -943,8 +946,9 @@ export default function MyProfilePage() {
 
   const age = getAge(profile.dob);
   const formattedDob = formatDateLong(profile.dob);
-  const heightMeters = HEIGHT_METERS[profile.height] ? ` (${HEIGHT_METERS[profile.height]})` : '';
-  const heightDisplay = profile.height ? `${profile.height}${heightMeters}` : 'Height Not Specified';
+  const formattedHeight = formatHeightDisplay(profile.height) || profile.height;
+  const heightMeters = HEIGHT_METERS[profile.height] || (formattedHeight && HEIGHT_METERS[formattedHeight]) ? ` (${HEIGHT_METERS[profile.height] || HEIGHT_METERS[formattedHeight]})` : '';
+  const heightDisplay = formattedHeight ? `${formattedHeight}${heightMeters}` : 'Height Not Specified';
   const candidateNameDisplay = profile.displayName || profile.user?.fullName || 'Doctor Candidate';
   const candidateLocationDisplay =
     profile.currentLocation?.formattedAddress ||
@@ -1707,6 +1711,82 @@ export default function MyProfilePage() {
                     )}
                   </span>
                 </div>
+
+                {/* Structured Doctor Qualifications */}
+                {profile.medicalQualifications && (
+                  <div className="sm:col-span-2 pt-3 border-t border-slate-100 space-y-3">
+                    <span className="text-slate-500 text-[10.5px] font-bold uppercase tracking-wider block">
+                      Structured Qualifications (UG, PG, Super-Speciality)
+                    </span>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* Undergraduate (UG) */}
+                      {profile.medicalQualifications.undergraduate?.map((ug: any, idx: number) => (
+                        <div key={`ug-own-${idx}`} className="p-3.5 bg-rose-50/40 border border-rose-100 rounded-2xl space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-[#E51F3E] bg-rose-100/60 px-2 py-0.5 rounded-full">
+                              UG Qualification
+                            </span>
+                            {ug.completionYear && (
+                              <span className="text-[11px] font-bold text-slate-500">
+                                {ug.completionYear}
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-extrabold text-slate-900 text-sm">
+                            {ug.qualification} {ug.specialization ? `• ${ug.specialization}` : ''}
+                          </div>
+                          <div className="text-xs text-slate-600">
+                            {ug.college || ug.institution || 'Medical College'}
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Postgraduate (PG) */}
+                      {profile.medicalQualifications.postgraduate?.map((pg: any, idx: number) => (
+                        <div key={`pg-own-${idx}`} className="p-3.5 bg-indigo-50/40 border border-indigo-100 rounded-2xl space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/60 px-2 py-0.5 rounded-full">
+                              PG Degree
+                            </span>
+                            {pg.completionYear && (
+                              <span className="text-[11px] font-bold text-slate-500">
+                                {pg.completionYear}
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-extrabold text-slate-900 text-sm">
+                            {pg.qualification} {pg.specialization ? `• ${pg.specialization}` : ''}
+                          </div>
+                          <div className="text-xs text-slate-600">
+                            {pg.college || pg.institution || 'Postgraduate Institute'}
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Doctorate / Super-Speciality */}
+                      {profile.medicalQualifications.doctorate?.map((doc: any, idx: number) => (
+                        <div key={`doc-own-${idx}`} className="p-3.5 bg-purple-50/40 border border-purple-100 rounded-2xl space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-purple-700 bg-purple-100/60 px-2 py-0.5 rounded-full">
+                              Super-Speciality
+                            </span>
+                            {doc.completionYear && (
+                              <span className="text-[11px] font-bold text-slate-500">
+                                {doc.completionYear}
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-extrabold text-slate-900 text-sm">
+                            {doc.qualification} {doc.specialization ? `• ${doc.specialization}` : ''}
+                          </div>
+                          <div className="text-xs text-slate-600">
+                            {doc.college || doc.institution || 'Super-Speciality Institute'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
 
@@ -3023,14 +3103,22 @@ export default function MyProfilePage() {
                     </div>
                     <div>
                       <label className="text-xs font-bold text-slate-700 block mb-1">Annual Income Range</label>
-                      <input
-                        type="text"
+                      <select
                         name="annualIncome"
                         value={modalFormData.annualIncome || ''}
                         onChange={handleInputChange}
-                        placeholder="e.g. ₹ 35 - 50 Lakhs"
                         className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
-                      />
+                      >
+                        <option value="">Select Annual Income Range</option>
+                        {modalFormData.annualIncome && modalFormData.annualIncome !== 'null' && !(ANNUAL_INCOME_OPTIONS as readonly string[]).includes(modalFormData.annualIncome) && (
+                          <option value={modalFormData.annualIncome}>{modalFormData.annualIncome}</option>
+                        )}
+                        {ANNUAL_INCOME_OPTIONS.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 

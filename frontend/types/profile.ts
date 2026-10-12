@@ -31,6 +31,43 @@ export interface ProfileCard {
   verificationStatus: string;
   membershipBadge?: 'PREMIUM' | 'VIP' | 'VVIP';
   lastActiveAt?: string;
+  currentLocation?: {
+    stateId?: any;
+    stateName?: string;
+    districtId?: any;
+    districtName?: string;
+    cityId?: any;
+    cityName?: string;
+    countryName?: string;
+    formattedAddress?: string;
+    [key: string]: any;
+  };
+  medicalQualifications?: {
+    undergraduate?: Array<{
+      qualification: string;
+      specialization?: string;
+      college?: string;
+      institution?: string;
+      completionYear?: string;
+      status?: string;
+    }>;
+    postgraduate?: Array<{
+      qualification: string;
+      specialization?: string;
+      college?: string;
+      institution?: string;
+      completionYear?: string;
+      status?: string;
+    }>;
+    doctorate?: Array<{
+      qualification: string;
+      specialization?: string;
+      college?: string;
+      institution?: string;
+      completionYear?: string;
+      status?: string;
+    }>;
+  };
 }
 
 export interface SearchResult {
@@ -165,5 +202,42 @@ export interface FullUserProfile {
     role?: string;
     verified?: boolean;
     verificationStatus?: string;
+  };
+  currentLocation?: {
+    stateId?: any;
+    stateName?: string;
+    districtId?: any;
+    districtName?: string;
+    cityId?: any;
+    cityName?: string;
+    countryName?: string;
+    formattedAddress?: string;
+    [key: string]: any;
+  };
+  medicalQualifications?: {
+    undergraduate?: Array<{
+      qualification: string;
+      specialization?: string;
+      college?: string;
+      institution?: string;
+      completionYear?: string;
+      status?: string;
+    }>;
+    postgraduate?: Array<{
+      qualification: string;
+      specialization?: string;
+      college?: string;
+      institution?: string;
+      completionYear?: string;
+      status?: string;
+    }>;
+    doctorate?: Array<{
+      qualification: string;
+      specialization?: string;
+      college?: string;
+      institution?: string;
+      completionYear?: string;
+      status?: string;
+    }>;
   };
 }

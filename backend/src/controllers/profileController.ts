@@ -11,7 +11,12 @@ import {
   serializePrivateProfile,
   recordSecurityEvent,
 } from '../utils/securityUtils';
-import { validateDateOfBirth, validateMedicalQualification } from '../utils/doctorValidation';
+import {
+  validateDateOfBirth,
+  validateMedicalQualification,
+  formatHeightDisplay,
+  validateAnnualIncome,
+} from '../utils/doctorValidation';
 import { validateLocationHierarchy } from './locationController';
 import { validateCommunityHierarchy } from './communityMasterController';
 import { Language } from '../models/CommunityMaster';
@@ -33,7 +38,12 @@ const profileSchema = z.object({
         return { message: result.error || 'Date of birth year must be exactly 4 digits.' };
       }
     ),
-  height: z.string().trim().min(1).max(50),
+  height: z
+    .string()
+    .trim()
+    .min(1)
+    .max(50)
+    .transform((val) => formatHeightDisplay(val) || val),
   maritalStatus: z.string().trim().min(1).max(50),
   motherTongue: z.string().trim().min(1).max(50),
   religion: z.string().trim().min(1).max(50),
@@ -60,7 +70,14 @@ const profileSchema = z.object({
   profession: z.string().trim().min(1).max(100),
   company: z.string().trim().max(100).optional(),
   workLocation: z.string().trim().max(100).optional(),
-  annualIncome: z.string().trim().max(50).optional(),
+  annualIncome: z
+    .string()
+    .trim()
+    .max(50)
+    .optional()
+    .refine((val) => !val || validateAnnualIncome(val).isValid, {
+      message: 'Please select a valid annual income range.',
+    }),
   country: z.string().trim().min(1).max(50),
   state: z.string().trim().min(1).max(50),
   city: z.string().trim().min(1).max(50),
@@ -96,14 +113,19 @@ const profileSchema = z.object({
   currentLocation: z
     .object({
       countryId: z.string().optional(),
+      countryName: z.string().optional(),
       stateId: z.string().optional(),
+      stateName: z.string().optional(),
       districtId: z.string().optional(),
+      districtName: z.string().optional(),
       subDistrictId: z.string().optional(),
       cityId: z.string().optional(),
+      cityName: z.string().optional(),
       villageId: z.string().optional(),
       pincode: z.string().max(20).optional(),
       formattedAddress: z.string().max(300).optional(),
     })
+    .passthrough()
     .optional(),
   nativePlaceDetails: z
     .object({
@@ -340,63 +362,46 @@ export async function updateMyProfile(req: AuthRequest, res: Response, next: Nex
     let profile = await Profile.findOne({ user: userId });
 
     if (!profile) {
-      const userDoc = await User.findById(userId);
-      profile = new Profile({
-        user: userId,
-        displayName: userDoc?.fullName || 'Doctor Candidate',
-        gender: 'Female',
-        dob: new Date('1996-05-15'),
-        height: `5' 6"`,
-        maritalStatus: 'Never Married',
-        motherTongue: data.motherTongue || '',
-        religion: data.religion || '',
-        caste: data.caste || '',
-        education: data.education || 'MBBS',
-        degree: data.degree || 'MBBS',
-        profession: data.profession || 'General Physician',
-        country: data.country || 'India',
-        state: data.state || '',
-        city: 'Mumbai',
-        verificationStatus: 'UNVERIFIED',
-        lastActiveAt: new Date(),
-        ...data,
+      return res.status(404).json({
+        success: false,
+        message: 'Profile not found. Please complete profile registration first.',
       });
-    } else {
-      // Deep merge partnerPreferences and privacySettings if provided
-      if (data.partnerPreferences) {
-        profile.partnerPreferences = {
-          ...((profile.partnerPreferences as any)?.toObject?.() || profile.partnerPreferences || {}),
-          ...data.partnerPreferences,
-        };
-        delete (data as any).partnerPreferences;
-      }
-
-      if (data.privacySettings) {
-        profile.privacySettings = {
-          ...((profile.privacySettings as any)?.toObject?.() || profile.privacySettings || {}),
-          ...data.privacySettings,
-        };
-        delete (data as any).privacySettings;
-      }
-
-      if (data.horoscope) {
-        profile.horoscope = {
-          ...((profile.horoscope as any)?.toObject?.() || profile.horoscope || {}),
-          ...data.horoscope,
-        };
-        delete (data as any).horoscope;
-      }
-
-      if (data.lifestyleInterests) {
-        profile.lifestyleInterests = {
-          ...((profile.lifestyleInterests as any)?.toObject?.() || profile.lifestyleInterests || {}),
-          ...data.lifestyleInterests,
-        };
-        delete (data as any).lifestyleInterests;
-      }
-
-      Object.assign(profile, data);
     }
+
+    // Deep merge partnerPreferences and privacySettings if provided
+    if (data.partnerPreferences) {
+      profile.partnerPreferences = {
+        ...((profile.partnerPreferences as any)?.toObject?.() || profile.partnerPreferences || {}),
+        ...data.partnerPreferences,
+      };
+      delete (data as any).partnerPreferences;
+    }
+
+    if (data.privacySettings) {
+      profile.privacySettings = {
+        ...((profile.privacySettings as any)?.toObject?.() || profile.privacySettings || {}),
+        ...data.privacySettings,
+      };
+      delete (data as any).privacySettings;
+    }
+
+    if (data.horoscope) {
+      profile.horoscope = {
+        ...((profile.horoscope as any)?.toObject?.() || profile.horoscope || {}),
+        ...data.horoscope,
+      };
+      delete (data as any).horoscope;
+    }
+
+    if (data.lifestyleInterests) {
+      profile.lifestyleInterests = {
+        ...((profile.lifestyleInterests as any)?.toObject?.() || profile.lifestyleInterests || {}),
+        ...data.lifestyleInterests,
+      };
+      delete (data as any).lifestyleInterests;
+    }
+
+    Object.assign(profile, data);
 
     if (data.dob) {
       const parsedDob = validateDateOfBirth(data.dob, data.gender || profile.gender);

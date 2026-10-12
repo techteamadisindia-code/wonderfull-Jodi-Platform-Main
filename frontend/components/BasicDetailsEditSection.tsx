@@ -37,10 +37,8 @@ import {
   SubCasteItem,
   LanguageItem,
 } from '../services/masterDataApi';
+import { HEIGHT_OPTIONS, ANNUAL_INCOME_OPTIONS, formatHeightDisplay } from '../lib/doctorConstants';
 
-const HEIGHTS = [
-  `5' 0"`, `5' 1"`, `5' 2"`, `5' 3"`, `5' 4"`, `5' 5"`, `5' 6"`, `5' 7"`, `5' 8"`, `5' 9"`, `5' 10"`, `5' 11"`, `6' 0"`, `6' 1"`, `6' 2"`, `6' 3"`, `6' 4"`
-];
 
 const MARITAL_STATUSES = ['Never Married', 'Divorced', 'Widowed', 'Separated', 'Awaiting Divorce'];
 
@@ -713,12 +711,16 @@ export function BasicDetailsEditSection({ formData, onChange }: BasicDetailsEdit
           <div>
             <label className="text-xs font-bold text-slate-700 block mb-1">Height *</label>
             <select
-              value={formData.height || `5' 10"`}
+              value={formatHeightDisplay(formData.height) || formData.height || ''}
               onChange={(e) => onChange({ height: e.target.value })}
               className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
             >
-              {HEIGHTS.map((h) => (
-                <option key={h} value={h}>{h}</option>
+              <option value="">Select Height</option>
+              {formData.height && !HEIGHT_OPTIONS.some((h) => h.value === (formatHeightDisplay(formData.height) || formData.height)) && (
+                <option value={formData.height}>{formatHeightDisplay(formData.height) || formData.height}</option>
+              )}
+              {HEIGHT_OPTIONS.map((h) => (
+                <option key={h.value} value={h.value}>{h.label}</option>
               ))}
             </select>
           </div>
@@ -1068,13 +1070,19 @@ export function BasicDetailsEditSection({ formData, onChange }: BasicDetailsEdit
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-xs font-bold text-slate-700 block mb-1">Annual Income Range</label>
-            <input
-              type="text"
+            <select
               value={formData.annualIncome || ''}
               onChange={(e) => onChange({ annualIncome: e.target.value })}
-              placeholder="e.g. ₹ 35 - 50 Lakhs"
               className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
-            />
+            >
+              <option value="">Select Annual Income Range</option>
+              {formData.annualIncome && formData.annualIncome !== 'null' && !(ANNUAL_INCOME_OPTIONS as readonly string[]).includes(formData.annualIncome) && (
+                <option value={formData.annualIncome}>{formData.annualIncome}</option>
+              )}
+              {ANNUAL_INCOME_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
           </div>
 
           <div>

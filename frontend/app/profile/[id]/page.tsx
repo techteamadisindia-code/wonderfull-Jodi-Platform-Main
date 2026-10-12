@@ -34,6 +34,7 @@ import {
   X,
   Crown,
 } from 'lucide-react';
+import { formatHeightDisplay } from '../../../lib/doctorConstants';
 import { addShortlist, removeShortlist, getAuthToken, getMyProfile } from '../../../lib/api';
 import apiClient from '../../../services/api';
 import { fetchMySubscription, UserSubscriptionDetails } from '../../../services/membershipApi';
@@ -719,7 +720,7 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                   {profile.height && (
                     <>
                       <span className="text-slate-300">•</span>
-                      <span>{profile.height}</span>
+                      <span>{formatHeightDisplay(profile.height) || profile.height}</span>
                     </>
                   )}
                 </p>
@@ -1035,6 +1036,100 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                       Annual Income Range
                     </span>
                     <span className="font-extrabold text-emerald-900 text-base">{profile.annualIncome}</span>
+                  </div>
+                )}
+
+                {/* Structured Doctor Qualifications */}
+                {profile.medicalQualifications && (
+                  <div className="sm:col-span-2 pt-3 border-t border-slate-100 space-y-3">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                      Medical Qualifications & Specializations
+                    </span>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* Undergraduate (UG) */}
+                      {profile.medicalQualifications.undergraduate?.map((ug: any, idx: number) => (
+                        <div key={`ug-${idx}`} className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-[#E51F3E] bg-rose-50 border border-rose-200/60 px-2 py-0.5 rounded-full">
+                              UG Qualification
+                            </span>
+                            {ug.completionYear && (
+                              <span className="text-[11px] font-bold text-slate-500">
+                                {ug.completionYear}
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-extrabold text-slate-900 text-sm">
+                            {ug.qualification} {ug.specialization ? `• ${ug.specialization}` : ''}
+                          </div>
+                          <div className="text-xs text-slate-600">
+                            {profile.isAuthenticatedViewer ? (
+                              <span>{ug.college || ug.institution || 'Medical College'}</span>
+                            ) : (
+                              <span className="text-slate-400 italic inline-flex items-center gap-1 text-[11px]">
+                                <Lock className="w-3 h-3 text-slate-400 shrink-0" /> College Hidden for Guests
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Postgraduate (PG) */}
+                      {profile.medicalQualifications.postgraduate?.map((pg: any, idx: number) => (
+                        <div key={`pg-${idx}`} className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/60 px-2 py-0.5 rounded-full">
+                              PG Degree
+                            </span>
+                            {pg.completionYear && (
+                              <span className="text-[11px] font-bold text-slate-500">
+                                {pg.completionYear}
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-extrabold text-slate-900 text-sm">
+                            {pg.qualification} {pg.specialization ? `• ${pg.specialization}` : ''}
+                          </div>
+                          <div className="text-xs text-slate-600">
+                            {profile.isAuthenticatedViewer ? (
+                              <span>{pg.college || pg.institution || 'Postgraduate Institute'}</span>
+                            ) : (
+                              <span className="text-slate-400 italic inline-flex items-center gap-1 text-[11px]">
+                                <Lock className="w-3 h-3 text-slate-400 shrink-0" /> College Hidden for Guests
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Doctorate / Super-Speciality */}
+                      {profile.medicalQualifications.doctorate?.map((doc: any, idx: number) => (
+                        <div key={`doc-${idx}`} className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200/60 px-2 py-0.5 rounded-full">
+                              Super-Speciality
+                            </span>
+                            {doc.completionYear && (
+                              <span className="text-[11px] font-bold text-slate-500">
+                                {doc.completionYear}
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-extrabold text-slate-900 text-sm">
+                            {doc.qualification} {doc.specialization ? `• ${doc.specialization}` : ''}
+                          </div>
+                          <div className="text-xs text-slate-600">
+                            {profile.isAuthenticatedViewer ? (
+                              <span>{doc.college || doc.institution || 'Medical Super-Speciality Institute'}</span>
+                            ) : (
+                              <span className="text-slate-400 italic inline-flex items-center gap-1 text-[11px]">
+                                <Lock className="w-3 h-3 text-slate-400 shrink-0" /> College Hidden for Guests
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

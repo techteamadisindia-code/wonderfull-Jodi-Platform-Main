@@ -27,6 +27,9 @@ import { updateAdminProfile } from '../../services/profileApi';
 import {
   DOCTOR_QUALIFICATIONS,
   DOCTOR_SPECIALIZATIONS,
+  HEIGHT_OPTIONS,
+  ANNUAL_INCOME_OPTIONS,
+  formatHeightDisplay,
 } from '../../lib/doctorConstants';
 
 interface AdminEditProfileModalProps {
@@ -94,7 +97,7 @@ export function AdminEditProfileModal({
       company: profile.company || profile.workplace || '',
       workLocation: profile.workLocation || '',
       workType: profile.workType || 'Hospital Practice',
-      annualIncome: profile.annualIncome || '₹ 25 - 35 Lakhs',
+      annualIncome: profile.annualIncome || '',
       medicalRegistrationNumber: profile.medicalRegistrationNumber || '',
       medicalCouncil: profile.medicalCouncil || '',
 
@@ -452,13 +455,19 @@ export function AdminEditProfileModal({
               {/* Height */}
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">Height</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 5'7'' (170 cm)"
-                  value={formData.height || ''}
+                <select
+                  value={formatHeightDisplay(formData.height) || formData.height || ''}
                   onChange={(e) => handleFieldChange('height', e.target.value)}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
-                />
+                >
+                  <option value="">Select Height</option>
+                  {formData.height && !HEIGHT_OPTIONS.some((h) => h.value === (formatHeightDisplay(formData.height) || formData.height)) && (
+                    <option value={formData.height}>{formatHeightDisplay(formData.height) || formData.height}</option>
+                  )}
+                  {HEIGHT_OPTIONS.map((h) => (
+                    <option key={h.value} value={h.value}>{h.label}</option>
+                  ))}
+                </select>
               </div>
 
               {/* Religion */}
@@ -630,18 +639,17 @@ export function AdminEditProfileModal({
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">Annual Income</label>
                 <select
-                  value={formData.annualIncome || '₹ 25 - 35 Lakhs'}
+                  value={formData.annualIncome || ''}
                   onChange={(e) => handleFieldChange('annualIncome', e.target.value)}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
                 >
-                  <option value="Under ₹ 10 Lakhs">Under ₹ 10 Lakhs</option>
-                  <option value="₹ 10 - 15 Lakhs">₹ 10 - 15 Lakhs</option>
-                  <option value="₹ 15 - 25 Lakhs">₹ 15 - 25 Lakhs</option>
-                  <option value="₹ 25 - 35 Lakhs">₹ 25 - 35 Lakhs</option>
-                  <option value="₹ 35 - 50 Lakhs">₹ 35 - 50 Lakhs</option>
-                  <option value="₹ 50 - 75 Lakhs">₹ 50 - 75 Lakhs</option>
-                  <option value="₹ 75 Lakhs - 1 Crore">₹ 75 Lakhs - 1 Crore</option>
-                  <option value="Above ₹ 1 Crore">Above ₹ 1 Crore</option>
+                  <option value="">Select Annual Income Range</option>
+                  {formData.annualIncome && formData.annualIncome !== 'null' && !(ANNUAL_INCOME_OPTIONS as readonly string[]).includes(formData.annualIncome) && (
+                    <option value={formData.annualIncome}>{formData.annualIncome}</option>
+                  )}
+                  {ANNUAL_INCOME_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
                 </select>
               </div>
             </div>

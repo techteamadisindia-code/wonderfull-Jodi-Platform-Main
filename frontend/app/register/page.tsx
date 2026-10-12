@@ -12,13 +12,26 @@ import {
   completeRegistration,
   checkRegistrationAvailability,
   validateRegistrationSession,
+  getStoredResumeToken,
+  setStoredResumeToken,
+  clearStoredResumeToken,
+  RESUME_TOKEN_STORAGE_KEY,
   StepData,
 } from '../../services/registrationApi';
 import {
   RegistrationReviewSection,
   MissingFieldItem,
 } from '../../components/RegistrationReviewSection';
-import { fetchLanguages, fetchCastes, fetchStates, searchCitiesByState } from '../../services/masterDataApi';
+import {
+  fetchLanguages,
+  fetchCastes,
+  fetchStates,
+  fetchDistricts,
+  fetchCities,
+  StateItem,
+  DistrictItem,
+  CityItem,
+} from '../../services/masterDataApi';
 import api from '../../lib/api';
 import { Logo } from '../../components/Logo';
 import {
@@ -61,6 +74,13 @@ import {
   PG_MEDICAL_QUALIFICATIONS,
   DOCTORATE_MEDICAL_QUALIFICATIONS,
   DEGREE_COMPLETION_STATUSES,
+  ANNUAL_INCOME_OPTIONS,
+  HEIGHT_OPTIONS,
+  formatHeightDisplay,
+  getSpecializationsForPgDegree,
+  getSuggestedSuperSpecialties,
+  getSuggestedCompletionYear,
+  validateDegreeYearSequence,
   PARTNER_QUALIFICATIONS,
   PARTNER_SPECIALIZATIONS,
   PARTNER_MARITAL_STATUSES,
@@ -75,25 +95,6 @@ import { InstitutionAutocomplete } from '../../components/InstitutionAutocomplet
 
 const PROFESSIONS = DOCTOR_SPECIALIZATIONS;
 const QUALIFICATIONS = DOCTOR_QUALIFICATIONS;
-
-const CITIES = [
-  'Mumbai',
-  'Delhi NCR',
-  'New Delhi',
-  'Bengaluru',
-  'Pune',
-  'Hyderabad',
-  'Chennai',
-  'Jaipur',
-  'Kolkata',
-  'Ahmedabad',
-  'Chandigarh',
-  'Lucknow',
-  'Nagpur',
-  'Indore',
-  'Bhopal',
-  'Other City',
-];
 
 const RELIGIONS = [
   'Hindu',
@@ -115,19 +116,6 @@ const MARITAL_STATUSES = [
   'Annulled',
 ];
 
-const HEIGHT_OPTIONS = [
-  `4' 10"`,
-  `5' 0"`,
-  `5' 2"`,
-  `5' 4"`,
-  `5' 6"`,
-  `5' 8"`,
-  `5' 10"`,
-  `6' 0"`,
-  `6' 2"`,
-  `6' 4"`,
-];
-
 const DEFAULT_LANGUAGES = [
   'Marathi', 'Hindi', 'Gujarati', 'Kannada', 'Telugu', 'Tamil', 'Malayalam',
   'Bengali', 'Punjabi', 'Odia', 'Urdu', 'Assamese', 'Konkani', 'Sindhi',
@@ -145,6 +133,7 @@ const DEFAULT_STATES = [
 ];
 
 const STORAGE_KEY = 'wj_registration_id';
+const TOKEN_STORAGE_KEY = RESUME_TOKEN_STORAGE_KEY;
 const BACKUP_KEY = 'wj_reg_form_backup';
 
 export interface ChildDetailItem {
@@ -201,6 +190,7 @@ function RegisterForm() {
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [reviewMissingFields, setReviewMissingFields] = useState<MissingFieldItem[]>([]);
   const [registrationId, setRegistrationId] = useState<string>('');
+  const [resumeToken, setResumeToken] = useState<string>('');
   const [isResumed, setIsResumed] = useState<boolean>(false);
   const [initialLoading, setInitialLoading] = useState<boolean>(false);
 
@@ -226,9 +216,10 @@ function RegisterForm() {
   const [motherTongue, setMotherTongue] = useState('');
   const [religion, setReligion] = useState('');
   const [caste, setCaste] = useState('');
-  const [height, setHeight] = useState(`5' 6"`);
-  const [city, setCity] = useState('');
+  const [height, setHeight] = useState('');
   const [state, setState] = useState('');
+  const [district, setDistrict] = useState('');
+  const [city, setCity] = useState('');
 
   // Conditional Previous Marriage & Family Details (for Divorced & Widowed)
   const [hasChildren, setHasChildren] = useState<'Yes' | 'No' | ''>('');
@@ -352,104 +343,157 @@ function RegisterForm() {
     officialCode?: string;
   } | null>(null);
 
-  const [citySearchInput, setCitySearchInput] = useState('');
-  const [citySuggestions, setCitySuggestions] = useState<any[]>([]);
-  const [loadingCitySuggestions, setLoadingCitySuggestions] = useState(false);
-  const [showCityDropdown, setShowCityDropdown] = useState(false);
-  const cityDebounceRef = useRef<NodeJS.Timeout | null>(null);
-  const cityDropdownRef = useRef<HTMLDivElement | null>(null);
-
-  // Close city autocomplete dropdown on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (cityDropdownRef.current && !cityDropdownRef.current.contains(e.target as Node)) {
-        setShowCityDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Handler for state selection change
-  const handleStateChange = (selectedState: string) => {
-    setState(selectedState);
-    // When candidate changes state, clear any previous city and suggestions
-    setCity('');
-    setCitySearchInput('');
-    setLocationData(null);
-    setCitySuggestions([]);
-    setShowCityDropdown(false);
-    if (step2Errors.city) {
-      setStep2Errors((prev) => ({ ...prev, city: '' }));
-    }
-    if (step2Errors.state) {
-      setStep2Errors((prev) => ({ ...prev, state: '' }));
-    }
-    triggerAutoSave('personalInfo', { state: selectedState, city: '', location: null });
-  };
-
-  // Handler for debounced city autocomplete search
-  const handleCitySearchChange = (val: string) => {
-    setCitySearchInput(val);
-    setCity(val);
-    setShowCityDropdown(true);
-
-    if (cityDebounceRef.current) {
-      clearTimeout(cityDebounceRef.current);
-    }
-
-    if (!state || !state.trim()) {
-      setCitySuggestions([]);
-      return;
-    }
-
-    setLoadingCitySuggestions(true);
-    cityDebounceRef.current = setTimeout(async () => {
-      try {
-        const results = await searchCitiesByState(state, val);
-        setCitySuggestions(results || []);
-      } catch (err) {
-        console.warn('Failed to load city suggestions:', err);
-        setCitySuggestions([]);
-      } finally {
-        setLoadingCitySuggestions(false);
-      }
-    }, 300);
-  };
-
-  // Handler for selecting an authoritative city from suggestions
-  const handleSelectCity = (sugg: any) => {
-    setCity(sugg.name);
-    setCitySearchInput(sugg.name);
-    setShowCityDropdown(false);
-    const loc = {
-      countryId: sugg.countryId || undefined,
-      stateId: typeof sugg.stateId === 'object' ? sugg.stateId?._id : sugg.stateId,
-      districtId: typeof sugg.districtId === 'object' ? sugg.districtId?._id : sugg.districtId,
-      talukaId: sugg.subDistrictId || undefined,
-      cityId: sugg._id,
-      countryName: 'India',
-      stateName: (typeof sugg.stateId === 'object' ? sugg.stateId?.name : state) || state,
-      districtName: typeof sugg.districtId === 'object' ? sugg.districtId?.name : undefined,
-      cityName: sugg.name,
-      pinCode: sugg.pincode ? String(sugg.pincode) : undefined,
-      officialCode: sugg.lgdCode ? String(sugg.lgdCode) : undefined,
-    };
-    setLocationData(loc);
-    if (step2Errors.city) {
-      setStep2Errors((prev) => ({ ...prev, city: '' }));
-    }
-    triggerAutoSave('personalInfo', {
-      city: sugg.name,
-      state: loc.stateName,
-      location: loc,
-    });
-  };
+  const [districtsList, setDistrictsList] = useState<DistrictItem[]>([]);
+  const [citiesList, setCitiesList] = useState<CityItem[]>([]);
+  const [loadingDistricts, setLoadingDistricts] = useState(false);
+  const [loadingCities, setLoadingCities] = useState(false);
 
   // Master Data Lists for Dynamic Selection
   const [languagesList, setLanguagesList] = useState<string[]>(DEFAULT_LANGUAGES);
   const [castesList, setCastesList] = useState<string[]>([]);
-  const [statesList, setStatesList] = useState<string[]>(DEFAULT_STATES);
+  const [statesList, setStatesList] = useState<StateItem[]>(
+    DEFAULT_STATES.map((name) => ({ _id: name, name, countryId: '', code: '', type: 'State', sortOrder: 0 }))
+  );
+
+  // Cascading Handler: When State changes, clear district & city and load districts
+  const handleStateChange = async (selectedStateName: string) => {
+    setState(selectedStateName);
+    setDistrict('');
+    setCity('');
+    setDistrictsList([]);
+    setCitiesList([]);
+    setLocationData(null);
+    if (step2Errors.state) setStep2Errors((prev) => ({ ...prev, state: '' }));
+    if (step2Errors.district) setStep2Errors((prev) => ({ ...prev, district: '' }));
+    if (step2Errors.city) setStep2Errors((prev) => ({ ...prev, city: '' }));
+
+    if (!selectedStateName) {
+      triggerAutoSave('personalInfo', { state: '', district: '', city: '', location: null });
+      return;
+    }
+
+    const stateObj = statesList.find((s) => s.name === selectedStateName);
+    const stateIdToUse = stateObj?._id || selectedStateName;
+
+    setLoadingDistricts(true);
+    try {
+      const districts = await fetchDistricts(stateIdToUse);
+      setDistrictsList(districts || []);
+    } catch (err) {
+      console.warn('Failed to load districts:', err);
+      setDistrictsList([]);
+    } finally {
+      setLoadingDistricts(false);
+    }
+
+    triggerAutoSave('personalInfo', {
+      state: selectedStateName,
+      district: '',
+      city: '',
+      location: {
+        stateName: selectedStateName,
+        stateId: stateObj?._id,
+        countryName: 'India',
+      },
+    });
+  };
+
+  // Cascading Handler: When District changes, clear city and load cities
+  const handleDistrictChange = async (selectedDistrictName: string) => {
+    setDistrict(selectedDistrictName);
+    setCity('');
+    setCitiesList([]);
+    if (step2Errors.district) setStep2Errors((prev) => ({ ...prev, district: '' }));
+    if (step2Errors.city) setStep2Errors((prev) => ({ ...prev, city: '' }));
+
+    if (!selectedDistrictName) {
+      triggerAutoSave('personalInfo', {
+        district: '',
+        city: '',
+        location: locationData ? { ...locationData, districtName: '', districtId: undefined, cityName: '', cityId: undefined } : null,
+      });
+      return;
+    }
+
+    const distObj = districtsList.find((d) => d.name === selectedDistrictName);
+    const distIdToUse = distObj?._id || selectedDistrictName;
+    const stateObj = statesList.find((s) => s.name === state);
+
+    setLoadingCities(true);
+    try {
+      const res = await fetchCities({
+        districtId: distIdToUse,
+        stateId: stateObj?._id || state,
+        limit: 100,
+      });
+      const fetchedCities = res?.data || [];
+      if (fetchedCities.length === 0) {
+        setCitiesList([{
+          _id: distIdToUse,
+          name: distObj?.headquarters || selectedDistrictName,
+          districtId: distIdToUse,
+          stateId: stateObj?._id || state,
+          type: 'District HQ',
+        }]);
+      } else {
+        setCitiesList(fetchedCities);
+      }
+    } catch (err) {
+      console.warn('Failed to load cities:', err);
+      setCitiesList([{
+        _id: distIdToUse,
+        name: selectedDistrictName,
+        districtId: distIdToUse,
+        stateId: stateObj?._id || state,
+        type: 'District HQ',
+      }]);
+    } finally {
+      setLoadingCities(false);
+    }
+
+    const newLoc = {
+      countryName: 'India',
+      stateName: state,
+      stateId: stateObj?._id,
+      districtName: selectedDistrictName,
+      districtId: distObj?._id,
+    };
+    setLocationData(newLoc);
+    triggerAutoSave('personalInfo', {
+      state,
+      district: selectedDistrictName,
+      city: '',
+      location: newLoc,
+    });
+  };
+
+  // Cascading Handler: When City is selected
+  const handleCityChange = (selectedCityName: string) => {
+    setCity(selectedCityName);
+    if (step2Errors.city) setStep2Errors((prev) => ({ ...prev, city: '' }));
+
+    const cityObj = citiesList.find((c) => c.name === selectedCityName);
+    const distObj = districtsList.find((d) => d.name === district);
+    const stateObj = statesList.find((s) => s.name === state);
+
+    const fullLoc = {
+      countryName: 'India',
+      stateName: state,
+      stateId: stateObj?._id,
+      districtName: district,
+      districtId: distObj?._id,
+      cityName: selectedCityName,
+      cityId: cityObj?._id,
+      pinCode: cityObj?.pincode ? String(cityObj.pincode) : undefined,
+    };
+    setLocationData(fullLoc);
+    triggerAutoSave('personalInfo', {
+      state,
+      district,
+      city: selectedCityName,
+      location: fullLoc,
+    });
+  };
 
   // Subsection A: About Me
   const [aboutMe, setAboutMe] = useState('');
@@ -484,7 +528,7 @@ function RegisterForm() {
   const [profession, setProfession] = useState<string>('');
   const [company, setCompany] = useState('');
   const [workLocation, setWorkLocation] = useState('');
-  const [annualIncome, setAnnualIncome] = useState('₹ 15 - 25 Lakhs');
+  const [annualIncome, setAnnualIncome] = useState('');
   const [medicalRegistrationNumber, setMedicalRegistrationNumber] = useState('');
   const [medicalExperience, setMedicalExperience] = useState('');
 
@@ -569,7 +613,7 @@ function RegisterForm() {
     fetchStates()
       .then((items) => {
         if (items && items.length > 0) {
-          setStatesList(items.map((s) => s.name));
+          setStatesList(items);
         }
       })
       .catch(() => {});
@@ -604,21 +648,47 @@ function RegisterForm() {
       if (isFreshParam) {
         if (typeof window !== 'undefined') {
           localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem(TOKEN_STORAGE_KEY);
           localStorage.removeItem(BACKUP_KEY);
         }
+        clearStoredResumeToken();
         handleStartFresh();
         setInitialLoading(false);
         return;
       }
 
       const regIdParam = searchParams.get('regId') || searchParams.get('registrationId');
+      const tokenParam = searchParams.get('token') || searchParams.get('resumeToken');
       const savedRegId = regIdParam || (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null);
+      const savedToken = tokenParam || (typeof window !== 'undefined' ? localStorage.getItem(TOKEN_STORAGE_KEY) : null) || '';
+
+      if (savedToken) {
+        setResumeToken(savedToken);
+        setStoredResumeToken(savedToken);
+      }
+
+      // Safe handoff: promptly remove sensitive token parameters from the address bar to prevent exposure in browser history or referrer headers
+      if (typeof window !== 'undefined' && (searchParams.has('token') || searchParams.has('resumeToken'))) {
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('token');
+          url.searchParams.delete('resumeToken');
+          const cleanUrl = url.pathname + (url.searchParams.toString() ? `?${url.searchParams.toString()}` : '') + url.hash;
+          window.history.replaceState(window.history.state, '', cleanUrl);
+        } catch {
+          // Ignore URL manipulation failures
+        }
+      }
 
       if (savedRegId) {
         try {
-          const session = await getRegistrationSession(savedRegId);
+          const session = await getRegistrationSession(savedRegId, savedToken || undefined);
           if (session && (session.status === 'IN_PROGRESS' || session.status === 'STARTED')) {
             setRegistrationId(session.registrationId);
+            if (session.resumeToken) {
+              setResumeToken(session.resumeToken);
+              setStoredResumeToken(session.resumeToken);
+            }
             setIsResumed(true);
 
             // Populate Step 1
@@ -643,11 +713,41 @@ function RegisterForm() {
             if (p.religion) setReligion(p.religion);
             if (p.caste) setCaste(p.caste);
             if (p.height) setHeight(p.height);
-            if (p.state) setState(p.state);
-            if (p.city) {
-              setCity(p.city);
-              setCitySearchInput(p.city);
+            const pAny = p as any;
+            const savedState = p.state || pAny.location?.stateName || '';
+            const savedDistrict = pAny.district || pAny.location?.districtName || '';
+            const savedCity = p.city || pAny.location?.cityName || '';
+
+            if (savedState) {
+              setState(savedState);
+              fetchDistricts(pAny.location?.stateId || savedState).then((districts) => {
+                setDistrictsList(districts || []);
+                if (savedDistrict) {
+                  setDistrict(savedDistrict);
+                  const distObj = districts.find((d) => d.name === savedDistrict);
+                  fetchCities({
+                    districtId: distObj?._id || savedDistrict,
+                    stateId: pAny.location?.stateId || savedState,
+                    limit: 100,
+                  }).then((res) => {
+                    const list = res?.data || [];
+                    if (list.length === 0) {
+                      setCitiesList([{
+                        _id: distObj?._id || savedDistrict,
+                        name: distObj?.headquarters || savedDistrict,
+                        districtId: distObj?._id || savedDistrict,
+                        stateId: pAny.location?.stateId || savedState,
+                        type: 'District HQ',
+                      }]);
+                    } else {
+                      setCitiesList(list);
+                    }
+                    if (savedCity) setCity(savedCity);
+                  }).catch(() => {});
+                }
+              }).catch(() => {});
             }
+            if (savedCity) setCity(savedCity);
             if ((p as any).location || (session as any).currentLocation) {
               setLocationData((p as any).location || (session as any).currentLocation);
             }
@@ -844,11 +944,19 @@ function RegisterForm() {
             const targetStep = Math.min(4, Math.max(1, session.currentStep)) as RegistrationStep;
             setStep(targetStep);
           } else if (session?.status === 'COMPLETED') {
-            if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem(STORAGE_KEY);
+              localStorage.removeItem(TOKEN_STORAGE_KEY);
+            }
+            clearStoredResumeToken();
           }
         } catch (err) {
           console.warn('Failed to restore previous registration session:', err);
-          if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(TOKEN_STORAGE_KEY);
+          }
+          clearStoredResumeToken();
         } finally {
           if (isMounted) setInitialLoading(false);
         }
@@ -879,6 +987,7 @@ function RegisterForm() {
         try {
           const res = await autoSaveRegistration({
             registrationId,
+            resumeToken: resumeToken || undefined,
             section,
             data,
             rawFormData: {
@@ -905,7 +1014,7 @@ function RegisterForm() {
         }
       }, 900);
     },
-    [registrationId, fullName, email, mobile, gender, city, profession, ugQualifications]
+    [registrationId, resumeToken, fullName, email, mobile, gender, city, profession, ugQualifications]
   );
 
   // Backup Form locally for resilience
@@ -934,11 +1043,14 @@ function RegisterForm() {
 
   // Reset form / Start Fresh
   const handleStartFresh = () => {
+    clearStoredResumeToken();
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
       localStorage.removeItem(BACKUP_KEY);
     }
     setRegistrationId('');
+    setResumeToken('');
     setIsResumed(false);
     setCompletedSteps([]);
     setReturnToReview(false);
@@ -964,12 +1076,13 @@ function RegisterForm() {
     setExpectedCompletionYear('');
     setSpousePassingYear('');
     setPreviousMarriageNotes('');
+    setHeight('');
     setState('');
+    setDistrict('');
     setCity('');
-    setCitySearchInput('');
     setLocationData(null);
-    setCitySuggestions([]);
-    setShowCityDropdown(false);
+    setDistrictsList([]);
+    setCitiesList([]);
     setAboutMe('');
     setFamilyType('');
     setFamilyStatus('');
@@ -987,6 +1100,7 @@ function RegisterForm() {
     setProfession('');
     setCompany('');
     setWorkLocation('');
+    setAnnualIncome('');
     setMedicalRegistrationNumber('');
     setMedicalExperience('');
     setPrefEducation('Any Medical Qualification');
@@ -1126,6 +1240,7 @@ function RegisterForm() {
           lookingFor: gender === 'Female' ? 'Male' : 'Female',
           agreeTerms,
           referralCode: referralCode || undefined,
+          resumeToken: resumeToken || undefined,
           rawFormData: {
             fullName: cleanName,
             email: email.trim().toLowerCase(),
@@ -1138,6 +1253,7 @@ function RegisterForm() {
       } else {
         session = await saveRegistrationStep({
           registrationId,
+          resumeToken: resumeToken || undefined,
           stepNumber: 2,
           section: 'basicInfo',
           data: {
@@ -1163,6 +1279,13 @@ function RegisterForm() {
         setRegistrationId(session.registrationId);
         if (typeof window !== 'undefined') {
           localStorage.setItem(STORAGE_KEY, session.registrationId);
+        }
+      }
+      if (session?.resumeToken) {
+        setResumeToken(session.resumeToken);
+        setStoredResumeToken(session.resumeToken);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(TOKEN_STORAGE_KEY, session.resumeToken);
         }
       }
 
@@ -1199,8 +1322,14 @@ function RegisterForm() {
     if (!religion) {
       errors.religion = 'Please select religion.';
     }
+    if (!height) {
+      errors.height = 'Please select candidate height.';
+    }
     if (!state) {
       errors.state = 'Please select state / province of residence.';
+    }
+    if (!district) {
+      errors.district = 'Please select district of residence.';
     }
     if (!city) {
       errors.city = 'Please select city of residence.';
@@ -1277,6 +1406,7 @@ function RegisterForm() {
 
         await saveRegistrationStep({
           registrationId,
+          resumeToken: resumeToken || undefined,
           stepNumber: 3,
           section: 'personalInfo',
           data: {
@@ -1285,11 +1415,13 @@ function RegisterForm() {
             religion,
             caste,
             height,
+            district,
             city,
             state,
             country: 'India',
             location: locationData || {
               cityName: city,
+              districtName: district,
               stateName: state,
               countryName: 'India',
             },
@@ -1402,6 +1534,14 @@ function RegisterForm() {
       }
     });
 
+    const ugPassing = ugQualifications[0]?.passingYear;
+    const pgPassing = pgQualifications[0]?.passingYear;
+    const docPassing = doctorateQualifications[0]?.passingYear;
+    const seqCheck = validateDegreeYearSequence(ugPassing, pgPassing, docPassing);
+    if (!seqCheck.isValid) {
+      errors.degree_year_sequence = seqCheck.error || 'Qualification completion years must follow a chronological progression.';
+    }
+
     if (!profession) {
       errors.profession = 'Please select your medical specialization / practice.';
     }
@@ -1413,13 +1553,20 @@ function RegisterForm() {
     try {
       if (registrationId) {
         const primaryUg = ugQualifications[0];
+        const primaryPg = pgQualifications[0];
+        const primaryDoc = doctorateQualifications[0];
+        const highestDegreeName = primaryDoc?.qualification || primaryPg?.qualification || primaryUg?.qualification || 'MBBS';
+        const highestSpec = primaryDoc?.specialization || primaryPg?.specialization || '';
+        const compositeDegree = highestSpec ? `${highestDegreeName} (${highestSpec})` : highestDegreeName;
+
         await saveRegistrationStep({
           registrationId,
+          resumeToken: resumeToken || undefined,
           stepNumber: 4,
           section: 'educationProfession',
           data: {
-            education: primaryUg?.qualification || 'MBBS',
-            degree: primaryUg?.qualification || 'MBBS',
+            education: highestDegreeName,
+            degree: compositeDegree,
             profession,
             company: company || workLocation || '',
             workLocation: workLocation || city,
@@ -1500,6 +1647,7 @@ function RegisterForm() {
       if (registrationId) {
         await saveRegistrationStep({
           registrationId,
+          resumeToken: resumeToken || undefined,
           stepNumber: 4,
           section: 'preferences',
           data: {
@@ -1554,7 +1702,7 @@ function RegisterForm() {
 
         // Run server-side validation to prepare missing fields for review
         try {
-          const valRes = await validateRegistrationSession(registrationId);
+          const valRes = await validateRegistrationSession(registrationId, resumeToken || undefined);
           if (valRes && valRes.missingFields) {
             setReviewMissingFields(valRes.missingFields);
           }
@@ -1587,7 +1735,7 @@ function RegisterForm() {
 
       // Check backend validation first
       try {
-        const valRes = await validateRegistrationSession(registrationId);
+        const valRes = await validateRegistrationSession(registrationId, resumeToken || undefined);
         if (!valRes.isValid && valRes.missingFields && valRes.missingFields.length > 0) {
           setReviewMissingFields(valRes.missingFields);
           setGlobalError('Please complete all required fields before final submission.');
@@ -1602,6 +1750,7 @@ function RegisterForm() {
 
       const finalResult = await completeRegistration({
         registrationId,
+        resumeToken: resumeToken || undefined,
         referralCode: referralCode || undefined,
         finalData: {
           agreeTerms: true,
@@ -1650,8 +1799,10 @@ function RegisterForm() {
         setAuthToken(finalResult.token);
       }
 
+      clearStoredResumeToken();
       if (typeof window !== 'undefined') {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
         localStorage.removeItem(BACKUP_KEY);
       }
 
@@ -2381,25 +2532,38 @@ function RegisterForm() {
 
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                      Height
+                      Height *
                     </label>
                     <select
-                      value={height}
+                      value={formatHeightDisplay(height) || height}
                       onChange={(e) => {
                         setHeight(e.target.value);
+                        if (step2Errors.height) setStep2Errors((prev) => ({ ...prev, height: '' }));
                         triggerAutoSave('personalInfo', { height: e.target.value });
                       }}
-                      className="w-full h-[46px] rounded-[12px] border border-[#DCE3EC] bg-white px-3 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E]"
+                      className={`w-full h-[46px] rounded-[12px] border ${
+                        step2Errors.height ? 'border-rose-500 bg-rose-50/20' : 'border-[#DCE3EC] bg-white'
+                      } px-3 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E]`}
                     >
+                      <option value="">Select Height *</option>
+                      {height && !HEIGHT_OPTIONS.some((h) => h.value === (formatHeightDisplay(height) || height)) && (
+                        <option value={height}>{formatHeightDisplay(height) || height}</option>
+                      )}
                       {HEIGHT_OPTIONS.map((h) => (
-                        <option key={h} value={h}>{h}</option>
+                        <option key={h.value} value={h.value}>
+                          {h.label}
+                        </option>
                       ))}
                     </select>
+                    {step2Errors.height && (
+                      <p className="text-[11px] text-rose-600 font-medium mt-1">{step2Errors.height}</p>
+                    )}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* 1. STATE / PROVINCE (Hierarchy Apex) */}
+                {/* Cascading State -> District -> City Dropdowns */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* 1. STATE (Apex) */}
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1.5">
                       State / Province *
@@ -2409,12 +2573,12 @@ function RegisterForm() {
                       onChange={(e) => handleStateChange(e.target.value)}
                       className={`w-full h-[46px] rounded-[12px] border ${
                         step2Errors.state ? 'border-rose-500 bg-rose-50/20' : 'border-[#DCE3EC] bg-white'
-                      } px-3.5 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E]`}
+                      } px-3 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E]`}
                     >
-                      <option value="">Select State / Province *</option>
+                      <option value="">Select State *</option>
                       {statesList.map((st) => (
-                        <option key={st} value={st}>
-                          {st}
+                        <option key={st._id || st.name} value={st.name}>
+                          {st.name}
                         </option>
                       ))}
                     </select>
@@ -2423,134 +2587,86 @@ function RegisterForm() {
                     )}
                   </div>
 
-                  {/* 2. CITY OF RESIDENCE (Backend-driven Suggestions filtered by State) */}
-                  <div className="relative" ref={cityDropdownRef}>
-                    <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                      City of Residence *
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        disabled={!state}
-                        value={citySearchInput}
-                        onChange={(e) => handleCitySearchChange(e.target.value)}
-                        onFocus={() => {
-                          if (state) {
-                            setShowCityDropdown(true);
-                            if (citySuggestions.length === 0 && !loadingCitySuggestions) {
-                              handleCitySearchChange(citySearchInput);
-                            }
-                          }
-                        }}
-                        placeholder={state ? "Enter or search city name..." : "Select State first..."}
-                        className={`w-full h-[46px] rounded-[12px] border ${
-                          step2Errors.city ? 'border-rose-500 bg-rose-50/20' : 'border-[#DCE3EC] bg-white'
-                        } pl-3.5 pr-9 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E] disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed`}
-                      />
-                      {loadingCitySuggestions ? (
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                          <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                        </div>
-                      ) : citySearchInput ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCity('');
-                            setCitySearchInput('');
-                            setLocationData(null);
-                            setCitySuggestions([]);
-                            triggerAutoSave('personalInfo', { city: '', location: null });
-                          }}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      ) : (
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                          <MapPin className="w-4 h-4" />
-                        </div>
+                  {/* 2. DISTRICT (Cascaded from State) */}
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1.5 flex items-center justify-between">
+                      <span>District *</span>
+                      {loadingDistricts && (
+                        <span className="text-[10px] text-[#E51F3E] flex items-center gap-1 font-normal">
+                          <Loader2 className="w-3 h-3 animate-spin" /> Loading...
+                        </span>
                       )}
-                    </div>
+                    </label>
+                    <select
+                      disabled={!state || loadingDistricts}
+                      value={district}
+                      onChange={(e) => handleDistrictChange(e.target.value)}
+                      className={`w-full h-[46px] rounded-[12px] border ${
+                        step2Errors.district ? 'border-rose-500 bg-rose-50/20' : 'border-[#DCE3EC] bg-white'
+                      } px-3 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E] disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed`}
+                    >
+                      <option value="">
+                        {!state ? 'Select State first' : loadingDistricts ? 'Loading districts...' : 'Select District *'}
+                      </option>
+                      {district && !districtsList.some((d) => d.name === district) && (
+                        <option value={district}>{district}</option>
+                      )}
+                      {districtsList.map((d) => (
+                        <option key={d._id || d.name} value={d.name}>
+                          {d.name}
+                        </option>
+                      ))}
+                    </select>
+                    {step2Errors.district && (
+                      <p className="text-[11px] text-rose-600 font-medium mt-1">{step2Errors.district}</p>
+                    )}
+                  </div>
 
+                  {/* 3. CITY (Cascaded from District) */}
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1.5 flex items-center justify-between">
+                      <span>City of Residence *</span>
+                      {loadingCities && (
+                        <span className="text-[10px] text-[#E51F3E] flex items-center gap-1 font-normal">
+                          <Loader2 className="w-3 h-3 animate-spin" /> Loading...
+                        </span>
+                      )}
+                    </label>
+                    <select
+                      disabled={!district || loadingCities}
+                      value={city}
+                      onChange={(e) => handleCityChange(e.target.value)}
+                      className={`w-full h-[46px] rounded-[12px] border ${
+                        step2Errors.city ? 'border-rose-500 bg-rose-50/20' : 'border-[#DCE3EC] bg-white'
+                      } px-3 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E] disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed`}
+                    >
+                      <option value="">
+                        {!district ? 'Select District first' : loadingCities ? 'Loading cities...' : 'Select City *'}
+                      </option>
+                      {city && !citiesList.some((c) => c.name === city) && (
+                        <option value={city}>{city}</option>
+                      )}
+                      {citiesList.map((c) => (
+                        <option key={c._id || c.name} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
                     {step2Errors.city && (
                       <p className="text-[11px] text-rose-600 font-medium mt-1">{step2Errors.city}</p>
                     )}
-
-                    {/* Verified Location Hierarchy Snapshot Pill */}
-                    {locationData?.cityName && (
-                      <div className="mt-1.5 flex items-center gap-1.5 text-[10.5px] text-emerald-700 bg-emerald-50/80 border border-emerald-200/80 px-2.5 py-1 rounded-lg">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
-                        <span>
-                          <strong>{locationData.cityName}</strong>
-                          {locationData.districtName ? `, ${locationData.districtName}` : ''}
-                          {locationData.pinCode ? ` (PIN: ${locationData.pinCode})` : ''}
-                          {locationData.officialCode ? ` • LGD: ${locationData.officialCode}` : ''}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Backend-driven Suggestions Dropdown */}
-                    {showCityDropdown && state && (
-                      <div className="absolute z-30 left-0 right-0 mt-1 max-h-60 overflow-y-auto bg-white rounded-xl border border-slate-200 shadow-xl divide-y divide-slate-100">
-                        {loadingCitySuggestions && citySuggestions.length === 0 ? (
-                          <div className="p-3 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#E51F3E]" />
-                            <span>Searching locations in {state}...</span>
-                          </div>
-                        ) : citySuggestions.length > 0 ? (
-                          citySuggestions.map((sugg) => {
-                            const districtName = typeof sugg.districtId === 'object' ? sugg.districtId?.name : '';
-                            return (
-                              <button
-                                key={sugg._id}
-                                type="button"
-                                onClick={() => handleSelectCity(sugg)}
-                                className="w-full text-left px-3.5 py-2.5 hover:bg-rose-50/60 transition flex items-center justify-between group cursor-pointer"
-                              >
-                                <div>
-                                  <span className="text-xs font-bold text-slate-900 group-hover:text-[#E51F3E] block">
-                                    {sugg.name}
-                                  </span>
-                                  {districtName && (
-                                    <span className="text-[10px] text-slate-400 block">
-                                      District: {districtName}
-                                    </span>
-                                  )}
-                                </div>
-                                {sugg.pincode && (
-                                  <span className="text-[10px] font-semibold bg-slate-100 px-2 py-0.5 rounded-full text-slate-600">
-                                    PIN: {sugg.pincode}
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })
-                        ) : (
-                          <div className="p-3 text-center text-xs text-slate-400">
-                            {citySearchInput.trim() ? (
-                              <div>
-                                <p>No master locations found matching &quot;{citySearchInput}&quot; in {state}.</p>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setCity(citySearchInput.trim());
-                                    setShowCityDropdown(false);
-                                    triggerAutoSave('personalInfo', { city: citySearchInput.trim() });
-                                  }}
-                                  className="mt-1 text-[#E51F3E] font-bold text-[11px] underline cursor-pointer"
-                                >
-                                  Use &quot;{citySearchInput.trim()}&quot; as custom city
-                                </button>
-                              </div>
-                            ) : (
-                              <span>No locations found in {state}.</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
+
+                {/* Location Status Pill */}
+                {city && state && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50/80 border border-emerald-200/80 px-3 py-1.5 rounded-xl">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>
+                      Selected Location: <strong>{city}</strong>{district ? `, ${district}` : ''}, {state}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* CONDITIONAL CARD: Previous Marriage & Family Details (Only for Divorced and Widowed) */}
@@ -3644,7 +3760,8 @@ function RegisterForm() {
                           </label>
                           <input
                             type="text"
-                            placeholder="e.g. General Medicine, Orthopedics"
+                            list={`pg-spec-list-${idx}`}
+                            placeholder="e.g. General Medicine, Orthopaedics"
                             value={pg.specialization}
                             onChange={(e) => {
                               const val = e.target.value;
@@ -3654,6 +3771,11 @@ function RegisterForm() {
                             }}
                             className="w-full h-[44px] rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800"
                           />
+                          <datalist id={`pg-spec-list-${idx}`}>
+                            {getSpecializationsForPgDegree(pg.qualification).map((spec) => (
+                              <option key={spec} value={spec} />
+                            ))}
+                          </datalist>
                         </div>
 
                         <div>
@@ -3709,6 +3831,22 @@ function RegisterForm() {
                             }}
                             className="w-full h-[44px] rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800"
                           />
+                          {(() => {
+                            const sugYear = getSuggestedCompletionYear(ugQualifications[0]?.passingYear, 3);
+                            return sugYear && !pg.passingYear ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPgQualifications((prev) =>
+                                    prev.map((item, i) => i === idx ? { ...item, passingYear: sugYear } : item)
+                                  );
+                                }}
+                                className="mt-1 text-[10px] text-[#E51F3E] bg-rose-50 hover:bg-rose-100 border border-rose-200/60 rounded px-1.5 py-0.5 inline-block font-medium cursor-pointer"
+                              >
+                                Suggested: {sugYear} (+3 yrs)
+                              </button>
+                            ) : null;
+                          })()}
                           {step3Errors[`pg_year_${idx}`] && (
                             <p className="text-[10px] text-rose-600 font-medium mt-1">{step3Errors[`pg_year_${idx}`]}</p>
                           )}
@@ -3720,9 +3858,10 @@ function RegisterForm() {
                   <button
                     type="button"
                     onClick={() => {
+                      const sugYear = getSuggestedCompletionYear(ugQualifications[0]?.passingYear, 3);
                       setPgQualifications((prev) => [
                         ...prev,
-                        { qualification: 'MD', specialization: '', college: '', passingYear: '', status: 'Completed' },
+                        { qualification: 'MD', specialization: '', college: '', passingYear: sugYear || '', status: 'Completed' },
                       ]);
                     }}
                     className="py-2 px-3 rounded-xl border border-dashed border-rose-300 text-[#E51F3E] bg-white hover:bg-rose-50/50 text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer"
@@ -3738,7 +3877,7 @@ function RegisterForm() {
                     <span className="text-xs font-bold text-slate-800">
                       C. Doctorate / Super-Specialization
                     </span>
-                    <span className="text-[11px] text-slate-400">DM, MCh, Fellowship, PhD (Optional)</span>
+                    <span className="text-[11px] text-slate-400">DM, MCh, DrNB (Optional)</span>
                   </div>
 
                   {doctorateQualifications.map((doc, idx) => (
@@ -3782,6 +3921,7 @@ function RegisterForm() {
                           </label>
                           <input
                             type="text"
+                            list={`doc-spec-list-${idx}`}
                             placeholder="e.g. Cardiology, Neurosurgery"
                             value={doc.specialization}
                             onChange={(e) => {
@@ -3792,6 +3932,11 @@ function RegisterForm() {
                             }}
                             className="w-full h-[44px] rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800"
                           />
+                          <datalist id={`doc-spec-list-${idx}`}>
+                            {getSuggestedSuperSpecialties(pgQualifications[0]?.specialization).map((spec) => (
+                              <option key={spec} value={spec} />
+                            ))}
+                          </datalist>
                         </div>
 
                         <div>
@@ -3847,6 +3992,23 @@ function RegisterForm() {
                             }}
                             className="w-full h-[44px] rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800"
                           />
+                          {(() => {
+                            const prevPgYear = pgQualifications[0]?.passingYear || ugQualifications[0]?.passingYear;
+                            const sugYear = getSuggestedCompletionYear(prevPgYear, 3);
+                            return sugYear && !doc.passingYear ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDoctorateQualifications((prev) =>
+                                    prev.map((item, i) => i === idx ? { ...item, passingYear: sugYear } : item)
+                                  );
+                                }}
+                                className="mt-1 text-[10px] text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200/60 rounded px-1.5 py-0.5 inline-block font-medium cursor-pointer"
+                              >
+                                Suggested: {sugYear} (+3 yrs)
+                              </button>
+                            ) : null;
+                          })()}
                           {step3Errors[`doc_year_${idx}`] && (
                             <p className="text-[10px] text-rose-600 font-medium mt-1">{step3Errors[`doc_year_${idx}`]}</p>
                           )}
@@ -3858,9 +4020,11 @@ function RegisterForm() {
                   <button
                     type="button"
                     onClick={() => {
+                      const prevYear = pgQualifications[0]?.passingYear || ugQualifications[0]?.passingYear;
+                      const sugYear = getSuggestedCompletionYear(prevYear, 3);
                       setDoctorateQualifications((prev) => [
                         ...prev,
-                        { qualification: 'DM', specialization: '', college: '', passingYear: '', status: 'Completed' },
+                        { qualification: 'DM', specialization: '', college: '', passingYear: sugYear || '', status: 'Completed' },
                       ]);
                     }}
                     className="py-2 px-3 rounded-xl border border-dashed border-rose-300 text-[#E51F3E] bg-white hover:bg-rose-50/50 text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer"
@@ -3869,6 +4033,14 @@ function RegisterForm() {
                     <span>Add Doctorate / Super-Specialization</span>
                   </button>
                 </div>
+
+                {/* Degree Year Sequence Validation Alert */}
+                {step3Errors.degree_year_sequence && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                    <span>{step3Errors.degree_year_sequence}</span>
+                  </div>
+                )}
               </div>
 
               {/* CARD 2: Career & Medical Practice */}
@@ -3955,15 +4127,11 @@ function RegisterForm() {
                       }}
                       className="w-full h-[46px] rounded-[12px] border border-[#DCE3EC] bg-white px-3 text-sm text-[#101728] focus:outline-none focus:border-[#E51F3E]"
                     >
-                      {[
-                        '₹ 5 - 10 Lakhs',
-                        '₹ 10 - 15 Lakhs',
-                        '₹ 15 - 25 Lakhs',
-                        '₹ 25 - 35 Lakhs',
-                        '₹ 35 - 50 Lakhs',
-                        '₹ 50 Lakhs - 1 Crore',
-                        '₹ 1 Crore+',
-                      ].map((inc) => (
+                      <option value="">Select Annual Income Range</option>
+                      {annualIncome && annualIncome !== 'null' && !(ANNUAL_INCOME_OPTIONS as readonly string[]).includes(annualIncome) && (
+                        <option value={annualIncome}>{annualIncome}</option>
+                      )}
+                      {ANNUAL_INCOME_OPTIONS.map((inc) => (
                         <option key={inc} value={inc}>{inc}</option>
                       ))}
                     </select>
@@ -4162,7 +4330,7 @@ function RegisterForm() {
                         className="h-[44px] rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800"
                       >
                         {HEIGHT_OPTIONS.map((h) => (
-                          <option key={h} value={h}>Min {h}</option>
+                          <option key={h.value} value={h.value}>Min {h.label}</option>
                         ))}
                       </select>
                       <select
@@ -4171,7 +4339,7 @@ function RegisterForm() {
                         className="h-[44px] rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-800"
                       >
                         {HEIGHT_OPTIONS.map((h) => (
-                          <option key={h} value={h}>Max {h}</option>
+                          <option key={h.value} value={h.value}>Max {h.label}</option>
                         ))}
                       </select>
                     </div>
@@ -4387,6 +4555,7 @@ function RegisterForm() {
               religion={religion}
               caste={caste}
               height={height}
+              district={district}
               city={city}
               state={state}
               locationData={locationData}

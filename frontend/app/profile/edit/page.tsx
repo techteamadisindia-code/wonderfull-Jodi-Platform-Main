@@ -23,9 +23,27 @@ import { isValidImageUrl } from '../../../lib/imageUtils';
 import {
   DOCTOR_QUALIFICATIONS,
   DOCTOR_SPECIALIZATIONS,
+  HEIGHT_OPTIONS,
+  ANNUAL_INCOME_OPTIONS,
+  formatHeightDisplay,
+  UG_MEDICAL_QUALIFICATIONS,
+  PG_MEDICAL_QUALIFICATIONS,
+  DOCTORATE_MEDICAL_QUALIFICATIONS,
+  getSpecializationsForPgDegree,
+  getSuggestedSuperSpecialties,
+  getSuggestedCompletionYear,
+  validateDegreeYearSequence,
   validateDateOfBirth,
   validateMedicalQualification,
 } from '../../../lib/doctorConstants';
+import {
+  fetchStates,
+  fetchDistricts,
+  fetchCities,
+  StateItem,
+  DistrictItem,
+  CityItem,
+} from '../../../services/masterDataApi';
 import { DobInput } from '../../../components/DobInput';
 
 const PROFESSIONS = DOCTOR_SPECIALIZATIONS;
@@ -52,43 +70,6 @@ const MOTHER_TONGUES = [
 const DIETS = ['Vegetarian', 'Non-Vegetarian', 'Eggetarian', 'Vegan', 'Jain Vegetarian'];
 const FAMILY_TYPES = ['Nuclear', 'Joint'];
 
-const CITIES = [
-  'New Delhi',
-  'Mumbai',
-  'Bengaluru',
-  'Hyderabad',
-  'Chennai',
-  'Jaipur',
-  'Pune',
-  'Kolkata',
-  'Ahmedabad',
-  'Chandigarh',
-  'Lucknow',
-  'Gurugram',
-  'Noida',
-  'Kochi',
-  'Indore',
-];
-
-const HEIGHTS = [
-  `5' 0"`,
-  `5' 1"`,
-  `5' 2"`,
-  `5' 3"`,
-  `5' 4"`,
-  `5' 5"`,
-  `5' 6"`,
-  `5' 7"`,
-  `5' 8"`,
-  `5' 9"`,
-  `5' 10"`,
-  `5' 11"`,
-  `6' 0"`,
-  `6' 1"`,
-  `6' 2"`,
-  `6' 3"`,
-  `6' 4"`,
-];
 
 export default function EditProfilePage() {
   const router = useRouter();
@@ -104,7 +85,7 @@ export default function EditProfilePage() {
     displayName: '',
     gender: 'Female',
     dob: '',
-    height: `5' 6"`,
+    height: '',
     maritalStatus: 'Never Married',
     motherTongue: '',
     religion: 'Hindu',
@@ -118,10 +99,10 @@ export default function EditProfilePage() {
     currentHospital: '',
     company: '',
     workLocation: '',
-    annualIncome: '₹ 25 - 35 Lakhs',
+    annualIncome: '',
     country: 'India',
     state: '',
-    city: 'Mumbai',
+    city: '',
     about: '',
     familyType: 'Nuclear',
     fatherOccupation: '',
@@ -140,7 +121,50 @@ export default function EditProfilePage() {
     otherPreferences: '',
   });
 
+  // Cascading Location States
+  const [statesList, setStatesList] = useState<StateItem[]>([]);
+  const [districtsList, setDistrictsList] = useState<DistrictItem[]>([]);
+  const [citiesList, setCitiesList] = useState<CityItem[]>([]);
+  const [district, setDistrict] = useState('');
+  const [loadingDistricts, setLoadingDistricts] = useState(false);
+  const [loadingCities, setLoadingCities] = useState(false);
+  const [locationData, setLocationData] = useState<{
+    stateId?: any;
+    stateName?: string;
+    districtId?: any;
+    districtName?: string;
+    cityId?: any;
+    cityName?: string;
+    countryName?: string;
+    [key: string]: any;
+  } | null>(null);
+
+  // Structured Doctor Education States
+  const [ugQualification, setUgQualification] = useState('MBBS');
+  const [ugSpecialization, setUgSpecialization] = useState('');
+  const [ugCollege, setUgCollege] = useState('');
+  const [ugYear, setUgYear] = useState('');
+
+  const [pgDegree, setPgDegree] = useState('');
+  const [pgSpecialization, setPgSpecialization] = useState('');
+  const [pgCollege, setPgCollege] = useState('');
+  const [pgYear, setPgYear] = useState('');
+
+  const [docDegree, setDocDegree] = useState('');
+  const [docSpecialization, setDocSpecialization] = useState('');
+  const [docCollege, setDocCollege] = useState('');
+  const [docYear, setDocYear] = useState('');
+
+  const [yearSequenceError, setYearSequenceError] = useState<string | null>(null);
+
   const [photoPreview, setPhotoPreview] = useState('');
+
+  // Initial load: Preload States list
+  useEffect(() => {
+    fetchStates()
+      .then((states) => setStatesList(states || []))
+      .catch((err) => console.warn('Failed to load states list:', err));
+  }, []);
 
   useEffect(() => {
     const token = getAuthToken();
@@ -150,7 +174,7 @@ export default function EditProfilePage() {
     }
 
     getMyProfile()
-      .then((profile) => {
+      .then(async (profile) => {
         if (profile) {
           let formattedDob = '';
           if (profile.dob) {
@@ -164,7 +188,7 @@ export default function EditProfilePage() {
             displayName: profile.displayName || '',
             gender: profile.gender || 'Female',
             dob: formattedDob || '',
-            height: profile.height || `5' 6"`,
+            height: profile.height || '',
             maritalStatus: profile.maritalStatus || 'Never Married',
             motherTongue: profile.motherTongue || '',
             religion: profile.religion || 'Hindu',
@@ -181,7 +205,7 @@ export default function EditProfilePage() {
             annualIncome: profile.annualIncome || '',
             country: profile.country || 'India',
             state: profile.state || '',
-            city: profile.city || 'Mumbai',
+            city: profile.city || '',
             about: profile.about || '',
             familyType: profile.familyType || 'Nuclear',
             fatherOccupation: profile.fatherOccupation || '',
@@ -200,6 +224,81 @@ export default function EditProfilePage() {
             otherPreferences: profile.partnerPreferences?.otherPreferences || '',
           });
 
+          // Preload cascading location
+          const savedDistrict = profile.currentLocation?.districtName || (profile as any).district || '';
+          if (savedDistrict) setDistrict(savedDistrict);
+          if (profile.currentLocation) {
+            setLocationData(profile.currentLocation);
+          }
+
+          if (profile.state) {
+            try {
+              const dists = await fetchDistricts(profile.currentLocation?.stateId || profile.state);
+              setDistrictsList(dists || []);
+              if (savedDistrict) {
+                const matchedDist = dists?.find((d) => d.name === savedDistrict);
+                const distIdToUse = matchedDist?._id || savedDistrict;
+                const cRes = await fetchCities({
+                  districtId: distIdToUse,
+                  stateId: profile.currentLocation?.stateId || profile.state,
+                  limit: 100,
+                });
+                const fetchedCities = cRes?.data || [];
+                if (fetchedCities.length === 0) {
+                  setCitiesList([
+                    {
+                      _id: distIdToUse,
+                      name: matchedDist?.headquarters || savedDistrict,
+                      districtId: distIdToUse,
+                      stateId: profile.currentLocation?.stateId || profile.state,
+                      type: 'District HQ',
+                    },
+                  ]);
+                } else {
+                  setCitiesList(fetchedCities);
+                }
+              }
+            } catch (locErr) {
+              console.warn('Error restoring location dropdowns in edit page:', locErr);
+            }
+          }
+
+          // Preload structured doctor education
+          const medQuals = profile.medicalQualifications;
+          if (medQuals && typeof medQuals === 'object') {
+            const ug = Array.isArray(medQuals.undergraduate) ? medQuals.undergraduate[0] : null;
+            if (ug) {
+              setUgQualification(ug.qualification || 'MBBS');
+              setUgSpecialization(ug.specialization || '');
+              setUgCollege(ug.college || ug.institution || '');
+              setUgYear(ug.completionYear || '');
+            } else {
+              setUgQualification(profile.education || 'MBBS');
+              setUgCollege(profile.medicalCollege || '');
+              setUgYear(profile.graduationYear || '');
+            }
+
+            const pg = Array.isArray(medQuals.postgraduate) ? medQuals.postgraduate[0] : null;
+            if (pg) {
+              setPgDegree(pg.qualification || '');
+              setPgSpecialization(pg.specialization || '');
+              setPgCollege(pg.college || pg.institution || '');
+              setPgYear(pg.completionYear || '');
+            }
+
+            const doc = Array.isArray(medQuals.doctorate) ? medQuals.doctorate[0] : null;
+            if (doc) {
+              setDocDegree(doc.qualification || '');
+              setDocSpecialization(doc.specialization || '');
+              setDocCollege(doc.college || doc.institution || '');
+              setDocYear(doc.completionYear || '');
+            }
+          } else {
+            setUgQualification(profile.education || 'MBBS');
+            setUgCollege(profile.medicalCollege || '');
+            setUgYear(profile.graduationYear || '');
+          }
+
           if (profile.primaryPhoto && isValidImageUrl(profile.primaryPhoto)) {
             setPhotoPreview(profile.primaryPhoto);
           }
@@ -215,6 +314,128 @@ export default function EditProfilePage() {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  // Cascading Location Handlers
+  const handleStateChange = async (selectedStateName: string) => {
+    setFormData((prev) => ({ ...prev, state: selectedStateName, city: '' }));
+    setDistrict('');
+    setDistrictsList([]);
+    setCitiesList([]);
+    setLocationData(null);
+
+    if (!selectedStateName) return;
+
+    const stateObj = statesList.find((s) => s.name === selectedStateName);
+    const stateIdToUse = stateObj?._id || selectedStateName;
+
+    setLoadingDistricts(true);
+    try {
+      const districts = await fetchDistricts(stateIdToUse);
+      setDistrictsList(districts || []);
+    } catch (err) {
+      console.warn('Failed to load districts:', err);
+      setDistrictsList([]);
+    } finally {
+      setLoadingDistricts(false);
+    }
+
+    setLocationData({
+      countryName: 'India',
+      stateName: selectedStateName,
+      stateId: stateObj?._id,
+    });
+  };
+
+  const handleDistrictChange = async (selectedDistrictName: string) => {
+    setDistrict(selectedDistrictName);
+    setFormData((prev) => ({ ...prev, city: '' }));
+    setCitiesList([]);
+
+    if (!selectedDistrictName) return;
+
+    const distObj = districtsList.find((d) => d.name === selectedDistrictName);
+    const distIdToUse = distObj?._id || selectedDistrictName;
+    const stateObj = statesList.find((s) => s.name === formData.state);
+
+    setLoadingCities(true);
+    try {
+      const res = await fetchCities({
+        districtId: distIdToUse,
+        stateId: stateObj?._id || formData.state,
+        limit: 100,
+      });
+      const fetchedCities = res?.data || [];
+      if (fetchedCities.length === 0) {
+        setCitiesList([
+          {
+            _id: distIdToUse,
+            name: distObj?.headquarters || selectedDistrictName,
+            districtId: distIdToUse,
+            stateId: stateObj?._id || formData.state,
+            type: 'District HQ',
+          },
+        ]);
+      } else {
+        setCitiesList(fetchedCities);
+      }
+    } catch (err) {
+      console.warn('Failed to load cities:', err);
+      setCitiesList([
+        {
+          _id: distIdToUse,
+          name: selectedDistrictName,
+          districtId: distIdToUse,
+          stateId: stateObj?._id || formData.state,
+          type: 'District HQ',
+        },
+      ]);
+    } finally {
+      setLoadingCities(false);
+    }
+
+    setLocationData((prev) => ({
+      countryName: 'India',
+      stateName: formData.state,
+      stateId: stateObj?._id,
+      ...prev,
+      districtName: selectedDistrictName,
+      districtId: distObj?._id,
+      cityName: '',
+      cityId: undefined,
+    }));
+  };
+
+  const handleCityChange = (selectedCityName: string) => {
+    setFormData((prev) => ({ ...prev, city: selectedCityName }));
+    const cityObj = citiesList.find((c) => c.name === selectedCityName);
+    setLocationData((prev) => ({
+      countryName: 'India',
+      stateName: formData.state,
+      districtName: district,
+      ...prev,
+      cityName: selectedCityName,
+      cityId: cityObj?._id,
+    }));
+  };
+
+  // Structured Education Year Sequence Handlers
+  const handleUgYearChange = (val: string) => {
+    setUgYear(val);
+    const check = validateDegreeYearSequence(val, pgYear, docYear);
+    setYearSequenceError(check.isValid ? null : (check.error || null));
+  };
+
+  const handlePgYearChange = (val: string) => {
+    setPgYear(val);
+    const check = validateDegreeYearSequence(ugYear, val, docYear);
+    setYearSequenceError(check.isValid ? null : (check.error || null));
+  };
+
+  const handleDocYearChange = (val: string) => {
+    setDocYear(val);
+    const check = validateDegreeYearSequence(ugYear, pgYear, val);
+    setYearSequenceError(check.isValid ? null : (check.error || null));
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -274,16 +495,93 @@ export default function EditProfilePage() {
       return;
     }
 
-    const qualValidation = validateMedicalQualification(formData.education);
-    if (!qualValidation.isValid) {
-      setErrorMsg(qualValidation.error || 'Please select a valid medical/doctor qualification.');
+    if (!ugQualification) {
+      setErrorMsg('Please select your undergraduate medical qualification (UG).');
+      setSaving(false);
+      return;
+    }
+
+    const seqCheck = validateDegreeYearSequence(ugYear, pgYear, docYear);
+    if (!seqCheck.isValid) {
+      setErrorMsg(seqCheck.error || 'Please correct the chronological completion year sequence.');
       setSaving(false);
       return;
     }
 
     try {
+      // Build structured medical qualifications
+      const structuredMedQuals = {
+        undergraduate: ugQualification
+          ? [
+              {
+                qualification: ugQualification,
+                specialization: ugSpecialization || undefined,
+                college: ugCollege || undefined,
+                institution: ugCollege || undefined,
+                completionYear: ugYear || undefined,
+                status: 'Completed',
+              },
+            ]
+          : [],
+        postgraduate: pgDegree
+          ? [
+              {
+                qualification: pgDegree,
+                specialization: pgSpecialization || undefined,
+                college: pgCollege || undefined,
+                institution: pgCollege || undefined,
+                completionYear: pgYear || undefined,
+                status: 'Completed',
+              },
+            ]
+          : [],
+        doctorate: docDegree
+          ? [
+              {
+                qualification: docDegree,
+                specialization: docSpecialization || undefined,
+                college: docCollege || undefined,
+                institution: docCollege || undefined,
+                completionYear: docYear || undefined,
+                status: 'Completed',
+              },
+            ]
+          : [],
+      };
+
+      // Composite highest degree title
+      const docTitle = docDegree ? (docSpecialization ? `${docDegree} (${docSpecialization})` : docDegree) : null;
+      const pgTitle = pgDegree ? (pgSpecialization ? `${pgDegree} (${pgSpecialization})` : pgDegree) : null;
+      const ugTitle = ugQualification ? (ugSpecialization ? `${ugQualification} (${ugSpecialization})` : ugQualification) : null;
+      const compositeDegree = [docTitle, pgTitle, ugTitle].filter(Boolean).join(', ') || formData.degree || ugQualification;
+      const primaryEducation = docDegree || pgDegree || ugQualification;
+
+      const fullLocation = {
+        stateId: locationData?.stateId,
+        stateName: formData.state,
+        districtId: locationData?.districtId,
+        districtName: district,
+        cityId: locationData?.cityId,
+        cityName: formData.city,
+        countryName: formData.country || 'India',
+        formattedAddress: [formData.city, district, formData.state, formData.country || 'India']
+          .filter(Boolean)
+          .join(', '),
+      };
+
       const payload = {
         ...formData,
+        height: formData.height || '',
+        annualIncome: formData.annualIncome || '',
+        state: formData.state,
+        district: district,
+        city: formData.city,
+        currentLocation: fullLocation,
+        education: primaryEducation,
+        degree: compositeDegree,
+        medicalCollege: ugCollege || pgCollege || formData.degree,
+        graduationYear: ugYear || pgYear || undefined,
+        medicalQualifications: structuredMedQuals,
         partnerPreferences: {
           preferredAgeMin: Number(formData.preferredAgeMin) || 24,
           preferredAgeMax: Number(formData.preferredAgeMax) || 36,
@@ -294,6 +592,7 @@ export default function EditProfilePage() {
           otherPreferences: formData.otherPreferences,
         },
       };
+
       const result = await updateMyProfile(payload);
       if (result && result.success !== false) {
         setSuccessMsg('Profile updated successfully! Redirecting...');
@@ -474,13 +773,17 @@ export default function EditProfilePage() {
                 </label>
                 <select
                   name="height"
-                  value={formData.height}
+                  value={formatHeightDisplay(formData.height) || formData.height}
                   onChange={handleInputChange}
                   className="w-full h-11 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
                 >
-                  {HEIGHTS.map((h) => (
-                    <option key={h} value={h}>
-                      {h}
+                  <option value="">Select Height *</option>
+                  {formData.height && !HEIGHT_OPTIONS.some((h) => h.value === (formatHeightDisplay(formData.height) || formData.height)) && (
+                    <option value={formData.height}>{formatHeightDisplay(formData.height) || formData.height}</option>
+                  )}
+                  {HEIGHT_OPTIONS.map((h) => (
+                    <option key={h.value} value={h.value}>
+                      {h.label}
                     </option>
                   ))}
                 </select>
@@ -490,48 +793,255 @@ export default function EditProfilePage() {
 
           {/* 2. Education & Profession */}
           <section className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-8 space-y-6">
-            <div className="border-b border-slate-100 pb-3 flex items-center gap-2">
-              <Briefcase className="w-5 h-5 text-[#E51F3E]" />
-              <h2 className="font-serif text-lg sm:text-xl font-bold text-[#101828]">
-                Medical Education & Career Details
-              </h2>
+            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Briefcase className="w-5 h-5 text-[#E51F3E]" />
+                <h2 className="font-serif text-lg sm:text-xl font-bold text-[#101828]">
+                  Medical Education & Career Details
+                </h2>
+              </div>
+              <span className="text-[11px] font-semibold text-rose-700 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
+                Doctor Matrimony Hierarchy
+              </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                  Medical Qualification *
-                </label>
-                <select
-                  name="education"
-                  value={formData.education}
-                  onChange={handleInputChange}
-                  className="w-full h-11 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
-                >
-                  <option value="" disabled>Select your medical qualification</option>
-                  {QUALIFICATIONS.map((q) => (
-                    <option key={q} value={q}>
-                      {q}
-                    </option>
-                  ))}
-                </select>
+            {yearSequenceError && (
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>{yearSequenceError}</span>
+              </div>
+            )}
+
+            {/* 3-Tier Doctor Education */}
+            <div className="space-y-5">
+              {/* Tier 1: Undergraduate (UG) - Required */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="w-4 h-4 text-[#E51F3E]" />
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                      1. Undergraduate Degree (UG) *
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/60 px-2 py-0.5 rounded-full">
+                    Required
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">UG Qualification *</label>
+                    <select
+                      value={ugQualification}
+                      onChange={(e) => setUgQualification(e.target.value)}
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    >
+                      {UG_MEDICAL_QUALIFICATIONS.map((q) => (
+                        <option key={q} value={q}>{q}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">UG Specialization</label>
+                    <input
+                      type="text"
+                      value={ugSpecialization}
+                      onChange={(e) => setUgSpecialization(e.target.value)}
+                      placeholder="e.g. General Practice / Surgery"
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Medical College / Institute</label>
+                    <input
+                      type="text"
+                      value={ugCollege}
+                      onChange={(e) => setUgCollege(e.target.value)}
+                      placeholder="e.g. AIIMS Delhi / CMC Vellore"
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Completion Year</label>
+                    <input
+                      type="number"
+                      min="1970"
+                      max={new Date().getFullYear() + 5}
+                      value={ugYear}
+                      onChange={(e) => handleUgYearChange(e.target.value)}
+                      placeholder="e.g. 2018"
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                  Medical Degree / College / Institution *
-                </label>
-                <input
-                  type="text"
-                  name="degree"
-                  required
-                  value={formData.degree}
-                  onChange={handleInputChange}
-                  placeholder="e.g. MBBS, MD Cardiology (AIIMS)"
-                  className="w-full h-11 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
-                />
+              {/* Tier 2: Postgraduate (PG) - Optional */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="w-4 h-4 text-indigo-600" />
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                      2. Postgraduate Degree (PG)
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-500 bg-slate-200/60 px-2 py-0.5 rounded-full">
+                    Optional (MD / MS / MDS / DNB)
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">PG Degree</label>
+                    <select
+                      value={pgDegree}
+                      onChange={(e) => setPgDegree(e.target.value)}
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    >
+                      <option value="">No PG Degree</option>
+                      {PG_MEDICAL_QUALIFICATIONS.map((q) => (
+                        <option key={q} value={q}>{q}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">PG Specialization</label>
+                    <input
+                      type="text"
+                      list="edit-pg-specialties"
+                      value={pgSpecialization}
+                      onChange={(e) => setPgSpecialization(e.target.value)}
+                      disabled={!pgDegree}
+                      placeholder={pgDegree ? 'e.g. General Medicine, Orthopaedics' : 'Select PG degree first'}
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E] disabled:bg-slate-100 disabled:cursor-not-allowed"
+                    />
+                    <datalist id="edit-pg-specialties">
+                      {getSpecializationsForPgDegree(pgDegree).map((s) => (
+                        <option key={s} value={s} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">PG Medical College</label>
+                    <input
+                      type="text"
+                      value={pgCollege}
+                      onChange={(e) => setPgCollege(e.target.value)}
+                      disabled={!pgDegree}
+                      placeholder="e.g. KEM Hospital / PGI Chandigarh"
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E] disabled:bg-slate-100 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-slate-600">Completion Year</label>
+                      {ugYear && !pgYear && pgDegree && (
+                        <button
+                          type="button"
+                          onClick={() => handlePgYearChange(getSuggestedCompletionYear(ugYear, 3))}
+                          className="text-[10px] font-bold text-indigo-600 hover:underline cursor-pointer"
+                        >
+                          +3 yrs suggestion
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="number"
+                      min="1970"
+                      max={new Date().getFullYear() + 5}
+                      value={pgYear}
+                      onChange={(e) => handlePgYearChange(e.target.value)}
+                      disabled={!pgDegree}
+                      placeholder="e.g. 2021"
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E] disabled:bg-slate-100 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                </div>
               </div>
 
+              {/* Tier 3: Doctorate / Super-Speciality (DM / MCh / DrNB) */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-600" />
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                      3. Doctorate / Super-Speciality
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-500 bg-slate-200/60 px-2 py-0.5 rounded-full">
+                    Optional (DM / MCh / DrNB)
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Super-Speciality</label>
+                    <select
+                      value={docDegree}
+                      onChange={(e) => setDocDegree(e.target.value)}
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    >
+                      <option value="">No Super-Speciality</option>
+                      {DOCTORATE_MEDICAL_QUALIFICATIONS.map((q) => (
+                        <option key={q} value={q}>{q}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Sub-Speciality / Branch</label>
+                    <input
+                      type="text"
+                      list="edit-doc-specialties"
+                      value={docSpecialization}
+                      onChange={(e) => setDocSpecialization(e.target.value)}
+                      disabled={!docDegree}
+                      placeholder={docDegree ? 'e.g. Cardiology, Neurosurgery' : 'Select degree first'}
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E] disabled:bg-slate-100 disabled:cursor-not-allowed"
+                    />
+                    <datalist id="edit-doc-specialties">
+                      {getSuggestedSuperSpecialties(pgSpecialization).map((s) => (
+                        <option key={s} value={s} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Institute / Hospital</label>
+                    <input
+                      type="text"
+                      value={docCollege}
+                      onChange={(e) => setDocCollege(e.target.value)}
+                      disabled={!docDegree}
+                      placeholder="e.g. Tata Memorial / AIIMS"
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E] disabled:bg-slate-100 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-slate-600">Completion Year</label>
+                      {pgYear && !docYear && docDegree && (
+                        <button
+                          type="button"
+                          onClick={() => handleDocYearChange(getSuggestedCompletionYear(pgYear, 3))}
+                          className="text-[10px] font-bold text-purple-600 hover:underline cursor-pointer"
+                        >
+                          +3 yrs suggestion
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="number"
+                      min="1970"
+                      max={new Date().getFullYear() + 5}
+                      value={docYear}
+                      onChange={(e) => handleDocYearChange(e.target.value)}
+                      disabled={!docDegree}
+                      placeholder="e.g. 2024"
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E] disabled:bg-slate-100 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Career & Financial Details */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">
                   Medical Specialization / Practice *
@@ -560,7 +1070,7 @@ export default function EditProfilePage() {
                   name="company"
                   value={formData.company}
                   onChange={handleInputChange}
-                  placeholder="e.g. Apollo Hospitals / Google / KPMG"
+                  placeholder="e.g. Apollo Hospitals / Private Clinic"
                   className="w-full h-11 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
                 />
               </div>
@@ -569,14 +1079,24 @@ export default function EditProfilePage() {
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">
                   Annual Income Range
                 </label>
-                <input
-                  type="text"
+                <select
                   name="annualIncome"
                   value={formData.annualIncome}
                   onChange={handleInputChange}
-                  placeholder="e.g. ₹ 30 - 45 Lakhs"
                   className="w-full h-11 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
-                />
+                >
+                  <option value="">Select Annual Income Range</option>
+                  {formData.annualIncome && formData.annualIncome !== 'null' && !(ANNUAL_INCOME_OPTIONS as readonly string[]).includes(formData.annualIncome) && (
+                    <option value={formData.annualIncome}>
+                      {formData.annualIncome}
+                    </option>
+                  )}
+                  {ANNUAL_INCOME_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -597,45 +1117,94 @@ export default function EditProfilePage() {
 
           {/* 3. Location & Social Background */}
           <section className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-8 space-y-6">
-            <div className="border-b border-slate-100 pb-3 flex items-center gap-2">
-              <MapPin className="w-5 h-5 text-[#E51F3E]" />
-              <h2 className="font-serif text-lg sm:text-xl font-bold text-[#101828]">
-                Location & Social Background
-              </h2>
+            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-[#E51F3E]" />
+                <h2 className="font-serif text-lg sm:text-xl font-bold text-[#101828]">
+                  Location & Social Background
+                </h2>
+              </div>
+              <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+                State → District → City Cascading
+              </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Cascading State Dropdown */}
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                  City *
+                  State *
                 </label>
                 <select
-                  name="city"
-                  value={formData.city}
-                  onChange={handleInputChange}
+                  value={formData.state}
+                  onChange={(e) => handleStateChange(e.target.value)}
                   className="w-full h-11 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
                 >
-                  {CITIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
+                  <option value="">Select State *</option>
+                  {statesList.map((s) => (
+                    <option key={s._id} value={s.name}>
+                      {s.name}
                     </option>
                   ))}
                 </select>
               </div>
 
+              {/* Cascading District Dropdown */}
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                  State *
+                  District *
                 </label>
-                <input
-                  type="text"
-                  name="state"
-                  required
-                  value={formData.state}
-                  onChange={handleInputChange}
-                  placeholder="e.g. Maharashtra"
-                  className="w-full h-11 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E]"
-                />
+                <select
+                  value={district}
+                  disabled={!formData.state || loadingDistricts}
+                  onChange={(e) => handleDistrictChange(e.target.value)}
+                  className="w-full h-11 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E] disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                >
+                  <option value="">
+                    {loadingDistricts
+                      ? 'Loading Districts...'
+                      : !formData.state
+                      ? 'Select State first'
+                      : 'Select District *'}
+                  </option>
+                  {district && !districtsList.some((d) => d.name === district) && (
+                    <option value={district}>{district}</option>
+                  )}
+                  {districtsList.map((d) => (
+                    <option key={d._id} value={d.name}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Cascading City Dropdown */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  City / Town *
+                </label>
+                <select
+                  value={formData.city}
+                  disabled={!district || loadingCities}
+                  onChange={(e) => handleCityChange(e.target.value)}
+                  className="w-full h-11 rounded-xl border border-slate-200 bg-[#F8FAFC] px-3.5 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:border-[#E51F3E] disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                >
+                  <option value="">
+                    {loadingCities
+                      ? 'Loading Cities...'
+                      : !district
+                      ? 'Select District first'
+                      : 'Select City *'}
+                  </option>
+                  {formData.city && !citiesList.some((c) => c.name === formData.city) && (
+                    <option value={formData.city}>{formData.city}</option>
+                  )}
+                  {citiesList.map((c) => (
+                    <option key={c._id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>

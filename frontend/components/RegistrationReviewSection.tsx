@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { SiblingItem, UgQualItem, PgQualItem, DoctorateQualItem } from '../app/register/page';
 import { isValidImageUrl } from '../lib/imageUtils';
+import { formatHeightDisplay } from '../lib/doctorConstants';
 
 export interface MissingFieldItem {
   step: number;
@@ -46,6 +47,7 @@ export interface RegistrationReviewProps {
   religion: string;
   caste: string;
   height: string;
+  district?: string;
   city: string;
   state: string;
   locationData?: any;
@@ -119,6 +121,7 @@ export function RegistrationReviewSection({
   religion,
   caste,
   height,
+  district,
   city,
   state,
   locationData,
@@ -314,13 +317,12 @@ export function RegistrationReviewSection({
           </div>
           <div>
             <span className="text-slate-400 font-medium block">Height</span>
-            <span className="font-semibold text-slate-800">{height || '—'}</span>
+            <span className="font-semibold text-slate-800">{height ? formatHeightDisplay(height) : '—'}</span>
           </div>
           <div>
-            <span className="text-slate-400 font-medium block">City of Residence</span>
+            <span className="text-slate-400 font-medium block">Location</span>
             <span className="font-semibold text-slate-800">
-              {city || '—'}
-              {locationData?.districtName ? ` (${locationData.districtName})` : ''}
+              {[city, district || locationData?.districtName, state].filter(Boolean).join(', ') || '—'}
               {locationData?.pinCode ? ` - ${locationData.pinCode}` : ''}
             </span>
           </div>

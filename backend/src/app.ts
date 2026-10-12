@@ -81,6 +81,12 @@ import { globalLimiter } from './middleware/rateLimiters';
 import { errorHandler } from './middleware/errorHandler';
 import { checkMaintenanceMode } from './middleware/maintenanceMiddleware';
 
+// When running in development via ts-node-dev or npm run dev, ensure NODE_ENV defaults to 'development'
+// so that local development runs with dev-appropriate settings (e.g. relaxed rate limits, non-secure cookies on http://localhost)
+if (process.env.TS_NODE_DEV && (!process.env.NODE_ENV || process.env.NODE_ENV === 'production')) {
+  process.env.NODE_ENV = 'development';
+}
+
 dotenv.config();
 dotenv.config({ path: path.resolve(process.cwd(), 'backend', '.env') });
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });

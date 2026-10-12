@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { CookieOptions, Request } from 'express';
 import { SecurityLog, ISecurityLog } from '../models/SecurityLog';
+import { formatHeightDisplay } from './doctorValidation';
 
 /**
  * Generate cryptographically secure random token in hex format
@@ -480,7 +481,7 @@ export function serializePublicProfile(
     age,
     gender: p.gender,
     dob: safeDob,
-    height: p.height,
+    height: formatHeightDisplay(p.height) || p.height,
     maritalStatus: p.maritalStatus,
     motherTongue: p.motherTongue,
     religion: p.religion,
@@ -515,8 +516,8 @@ export function serializePublicProfile(
           email: p.user.email,
         }
       : undefined,
-    medicalCollege: p.medicalCollege,
-    medicalUniversity: p.medicalUniversity,
+    medicalCollege: isAuthenticatedViewer ? p.medicalCollege : undefined,
+    medicalUniversity: isAuthenticatedViewer ? p.medicalUniversity : undefined,
     graduationYear: p.graduationYear,
     additionalQualification: p.additionalQualification,
     currentRole: p.currentRole,
@@ -572,7 +573,39 @@ export function serializePublicProfile(
     careerGoals: p.careerGoals,
     familyBackground: isAuthenticatedViewer ? p.familyBackground : undefined,
     siblingsDetails: isAuthenticatedViewer ? p.siblingsDetails : undefined,
-    medicalQualifications: p.medicalQualifications,
+    medicalQualifications: (() => {
+      const medQuals = p.medicalQualifications;
+      if (!medQuals || typeof medQuals !== 'object') return null;
+      const sanitizeEntry = (entry: any) => {
+        if (!entry || typeof entry !== 'object') return null;
+        return {
+          qualification: entry.qualification,
+          specialization: entry.specialization,
+          completionYear: entry.completionYear || entry.year || entry.passingYear,
+          status: entry.status || 'Completed',
+          college: isAuthenticatedViewer ? (entry.college || entry.institution) : undefined,
+          institution: isAuthenticatedViewer ? (entry.institution || entry.college) : undefined,
+        };
+      };
+      const getArray = (val: any) => {
+        if (Array.isArray(val)) return val;
+        if (val && typeof val === 'object' && (val.qualification || val.degree)) {
+          return [{ ...val, qualification: val.qualification || val.degree }];
+        }
+        return [];
+      };
+      return {
+        undergraduate: getArray(medQuals.undergraduate || medQuals.ug)
+          .map(sanitizeEntry)
+          .filter(Boolean),
+        postgraduate: getArray(medQuals.postgraduate || medQuals.pg)
+          .map(sanitizeEntry)
+          .filter(Boolean),
+        doctorate: getArray(medQuals.doctorate || medQuals.superSpeciality)
+          .map(sanitizeEntry)
+          .filter(Boolean),
+      };
+    })(),
     previousMarriageDetails: isAuthenticatedViewer ? (p.previousMarriageDetails || undefined) : undefined,
     partnerExpectations: p.partnerExpectations,
     photos: safePhotos,

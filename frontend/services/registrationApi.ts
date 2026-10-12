@@ -173,6 +173,28 @@ export interface RegistrationSessionData {
   completedAt?: string;
 }
 
+export const RESUME_TOKEN_STORAGE_KEY = 'wj_resume_token';
+
+export function getStoredResumeToken(): string | null {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const token = localStorage.getItem(RESUME_TOKEN_STORAGE_KEY);
+    return token && token.trim() ? token.trim() : null;
+  }
+  return null;
+}
+
+export function setStoredResumeToken(token: string): void {
+  if (typeof window !== 'undefined' && window.localStorage && token && token.trim()) {
+    localStorage.setItem(RESUME_TOKEN_STORAGE_KEY, token.trim());
+  }
+}
+
+export function clearStoredResumeToken(): void {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    localStorage.removeItem(RESUME_TOKEN_STORAGE_KEY);
+  }
+}
+
 /**
  * 1. Start a new registration and save Page 1 immediately to database
  */
@@ -186,13 +208,22 @@ export async function startRegistration(payload: {
   lookingFor?: string;
   agreeTerms?: boolean;
   referralCode?: string;
+  resumeToken?: string;
   rawFormData?: Record<string, any>;
 }): Promise<RegistrationSessionData> {
+  const token = payload.resumeToken || getStoredResumeToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['x-resume-token'] = token;
+
   const response = await apiClient.post<{
     success: boolean;
     data: RegistrationSessionData;
     message: string;
-  }>('/registration/start', payload);
+  }>('/registration/start', { ...payload, ...(token ? { resumeToken: token } : {}) }, { headers });
+
+  if (response.data.data?.resumeToken) {
+    setStoredResumeToken(response.data.data.resumeToken);
+  }
 
   return response.data.data;
 }
@@ -205,13 +236,18 @@ export async function saveRegistrationStep(payload: {
   stepNumber: number;
   section: string;
   data: Record<string, any>;
+  resumeToken?: string;
   rawFormData?: Record<string, any>;
 }): Promise<RegistrationSessionData> {
+  const token = payload.resumeToken || getStoredResumeToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['x-resume-token'] = token;
+
   const response = await apiClient.post<{
     success: boolean;
     data: RegistrationSessionData;
     message: string;
-  }>('/registration/step', payload);
+  }>('/registration/step', { ...payload, ...(token ? { resumeToken: token } : {}) }, { headers });
 
   return response.data.data;
 }
@@ -223,13 +259,18 @@ export async function autoSaveRegistration(payload: {
   registrationId: string;
   section?: string;
   data?: Record<string, any>;
+  resumeToken?: string;
   rawFormData?: Record<string, any>;
 }): Promise<{ success: boolean; savedAt: string; completionPercentage: number }> {
+  const token = payload.resumeToken || getStoredResumeToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['x-resume-token'] = token;
+
   const response = await apiClient.post<{
     success: boolean;
     savedAt: string;
     completionPercentage: number;
-  }>('/registration/auto-save', payload);
+  }>('/registration/auto-save', { ...payload, ...(token ? { resumeToken: token } : {}) }, { headers });
 
   return response.data;
 }
@@ -238,12 +279,17 @@ export async function autoSaveRegistration(payload: {
  * 4. Retrieve saved registration session to resume from last step
  */
 export async function getRegistrationSession(
-  registrationId: string
+  registrationId: string,
+  resumeToken?: string
 ): Promise<RegistrationSessionData> {
+  const token = resumeToken || getStoredResumeToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['x-resume-token'] = token;
+
   const response = await apiClient.get<{
     success: boolean;
     data: RegistrationSessionData;
-  }>(`/registration/${encodeURIComponent(registrationId)}`);
+  }>(`/registration/${encodeURIComponent(registrationId)}`, { headers });
 
   return response.data.data;
 }
@@ -254,6 +300,7 @@ export async function getRegistrationSession(
 export async function completeRegistration(payload: {
   registrationId: string;
   referralCode?: string;
+  resumeToken?: string;
   finalData?: Record<string, any>;
 }): Promise<{
   success: boolean;
@@ -262,6 +309,10 @@ export async function completeRegistration(payload: {
   profile: any;
   message: string;
 }> {
+  const token = payload.resumeToken || getStoredResumeToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['x-resume-token'] = token;
+
   const response = await apiClient.post<{
     success: boolean;
     token: string;
@@ -273,7 +324,9 @@ export async function completeRegistration(payload: {
       status: string;
     };
     message: string;
-  }>('/registration/complete', payload);
+  }>('/registration/complete', { ...payload, ...(token ? { resumeToken: token } : {}) }, { headers });
+
+  clearStoredResumeToken();
 
   return {
     success: response.data.success,
@@ -307,7 +360,10 @@ export async function checkRegistrationAvailability(params: {
 /**
  * 7. Server-side validation of entire registration draft across all 4 steps
  */
-export async function validateRegistrationSession(registrationId: string): Promise<{
+export async function validateRegistrationSession(
+  registrationId: string,
+  resumeToken?: string
+): Promise<{
   success: boolean;
   isValid: boolean;
   missingFields: Array<{ step: number; field: string; label: string; message: string }>;
@@ -315,6 +371,10 @@ export async function validateRegistrationSession(registrationId: string): Promi
   registrationId: string;
   status: string;
 }> {
+  const token = resumeToken || getStoredResumeToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['x-resume-token'] = token;
+
   const response = await apiClient.get<{
     success: boolean;
     isValid: boolean;
@@ -322,7 +382,7 @@ export async function validateRegistrationSession(registrationId: string): Promi
     completionPercentage: number;
     registrationId: string;
     status: string;
-  }>(`/registration/${encodeURIComponent(registrationId)}/validate`);
+  }>(`/registration/${encodeURIComponent(registrationId)}/validate`, { headers });
 
   return response.data;
 }

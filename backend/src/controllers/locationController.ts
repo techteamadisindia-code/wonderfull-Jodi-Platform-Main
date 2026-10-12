@@ -65,19 +65,28 @@ export async function getStates(req: Request, res: Response, next: NextFunction)
  */
 export async function getDistricts(req: Request, res: Response, next: NextFunction) {
   try {
-    const { stateId, search } = req.query;
+    const { stateId, stateName, search } = req.query;
+    const targetState = stateId || stateName || req.query.state;
 
-    if (!stateId || !mongoose.isValidObjectId(stateId)) {
+    if (!targetState) {
       return res.status(400).json({ success: false, message: 'Valid stateId query parameter is required.' });
     }
 
-    // Verify state exists
-    const stateDoc = await State.findById(stateId);
+    let stateDoc = null;
+    if (mongoose.isValidObjectId(targetState)) {
+      stateDoc = await State.findById(targetState);
+    }
+    if (!stateDoc) {
+      stateDoc = await State.findOne({
+        name: { $regex: new RegExp(`^${escapeRegex(String(targetState).trim())}$`, 'i') },
+      });
+    }
+
     if (!stateDoc) {
       return res.status(404).json({ success: false, message: 'Specified state not found.' });
     }
 
-    const filter: any = { stateId, isActive: true };
+    const filter: any = { stateId: stateDoc._id.toString(), isActive: true };
     if (search && typeof search === 'string' && search.trim()) {
       filter.name = { $regex: new RegExp(escapeRegex(search.trim()), 'i') };
     }
@@ -132,12 +141,6 @@ export async function getCities(req: Request, res: Response, next: NextFunction)
 
     const filter: any = { isActive: true };
 
-    if (districtId && mongoose.isValidObjectId(districtId)) {
-      filter.districtId = districtId;
-    }
-    if (subDistrictId && mongoose.isValidObjectId(subDistrictId)) {
-      filter.subDistrictId = subDistrictId;
-    }
     const targetState = stateId || req.query.state;
     if (targetState) {
       if (mongoose.isValidObjectId(targetState)) {
@@ -158,6 +161,25 @@ export async function getCities(req: Request, res: Response, next: NextFunction)
       }
     }
 
+    const targetDistrict = districtId || req.query.district;
+    if (targetDistrict) {
+      if (mongoose.isValidObjectId(targetDistrict)) {
+        filter.districtId = targetDistrict;
+      } else {
+        const distDoc = await District.findOne({
+          name: { $regex: new RegExp(`^${escapeRegex(String(targetDistrict).trim())}$`, 'i') },
+          ...(filter.stateId ? { stateId: filter.stateId } : {}),
+        });
+        if (distDoc) {
+          filter.districtId = distDoc._id;
+        }
+      }
+    }
+
+    if (subDistrictId && mongoose.isValidObjectId(subDistrictId)) {
+      filter.subDistrictId = subDistrictId;
+    }
+
     if (search && typeof search === 'string' && search.trim()) {
       filter.name = { $regex: new RegExp(escapeRegex(search.trim()), 'i') };
     }
@@ -166,7 +188,7 @@ export async function getCities(req: Request, res: Response, next: NextFunction)
     const limitNum = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 30));
     const skip = (pageNum - 1) * limitNum;
 
-    const [total, cities] = await Promise.all([
+    let [total, cities] = await Promise.all([
       City.countDocuments(filter),
       City.find(filter)
         .populate('districtId', 'name')
@@ -177,6 +199,27 @@ export async function getCities(req: Request, res: Response, next: NextFunction)
         .lean(),
     ]);
 
+    // Fallback: If no municipal cities are found in DB for a specific district,
+    // provide the district headquarters/name as a valid city option so user is not blocked
+    if ((!cities || cities.length === 0) && filter.districtId) {
+      const dist = await District.findById(filter.districtId).lean();
+      if (dist) {
+        cities = [
+          {
+            _id: dist._id,
+            id: dist._id.toString(),
+            name: dist.headquarters || dist.name,
+            districtId: dist._id,
+            stateId: dist.stateId,
+            type: 'District City',
+            isActive: true,
+            sortOrder: 1,
+          } as any,
+        ];
+        total = 1;
+      }
+    }
+
     return res.json({
       success: true,
       data: cities,
@@ -184,7 +227,7 @@ export async function getCities(req: Request, res: Response, next: NextFunction)
         total,
         page: pageNum,
         limit: limitNum,
-        pages: Math.ceil(total / limitNum),
+        pages: Math.ceil(total / limitNum) || 1,
       },
     });
   } catch (error) {
@@ -298,13 +341,36 @@ export async function validateLocationHierarchy(data: {
     }
 
     if (data.cityId) {
-      if (!mongoose.isValidObjectId(data.cityId)) return { isValid: false, error: 'Invalid cityId' };
-      const city = await City.findById(data.cityId);
-      if (!city) return { isValid: false, error: 'City not found' };
-      if (data.districtId && city.districtId.toString() !== data.districtId) {
-        return { isValid: false, error: 'Selected City does not belong to the selected District.' };
+      const isHqPrefix = typeof data.cityId === 'string' && data.cityId.startsWith('hq-');
+      const cleanCityId = isHqPrefix ? (data.cityId as string).replace('hq-', '') : data.cityId;
+
+      if (isHqPrefix || cleanCityId === data.districtId) {
+        if (mongoose.isValidObjectId(cleanCityId)) {
+          const district = await District.findById(cleanCityId);
+          if (district) {
+            resolved.city = district.headquarters || district.name;
+          } else {
+            return { isValid: false, error: 'District not found for headquarters fallback' };
+          }
+        }
+      } else {
+        if (!mongoose.isValidObjectId(cleanCityId)) return { isValid: false, error: 'Invalid cityId' };
+        const city = await City.findById(cleanCityId);
+        if (!city) {
+          // Check if cleanCityId points to a District as fallback
+          const distFallback = await District.findById(cleanCityId);
+          if (distFallback) {
+            resolved.city = distFallback.headquarters || distFallback.name;
+          } else {
+            return { isValid: false, error: 'City not found' };
+          }
+        } else {
+          if (data.districtId && city.districtId.toString() !== data.districtId) {
+            return { isValid: false, error: 'Selected City does not belong to the selected District.' };
+          }
+          resolved.city = city.name;
+        }
       }
-      resolved.city = city.name;
     }
 
     if (data.villageId) {

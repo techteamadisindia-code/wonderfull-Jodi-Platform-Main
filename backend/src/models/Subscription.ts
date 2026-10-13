@@ -32,7 +32,7 @@ const subscriptionSchema = new Schema<ISubscription>(
 
 
 
-export const Subscription = createPrismaModelAdapter<ISubscription>('subscription', {"user":"userId","planId":"membershipPlanId"});
+export const Subscription = createPrismaModelAdapter<ISubscription>('subscription', { user: 'userId' });
 
 export type IUserSubscription = ISubscription;
 export const UserSubscription = Subscription;

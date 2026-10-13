@@ -9,6 +9,7 @@ exports.findPlanDynamic = findPlanDynamic;
 exports.calculateOfferEndpoint = calculateOfferEndpoint;
 exports.claimFreeMembership = claimFreeMembership;
 exports.createOrder = createOrder;
+exports.reconcileVerifiedPaymentSubscription = reconcileVerifiedPaymentSubscription;
 exports.verifyPayment = verifyPayment;
 exports.getMyMembershipStatus = getMyMembershipStatus;
 exports.getMySubscription = getMySubscription;
@@ -566,23 +567,39 @@ async function createOrder(req, res, next) {
             });
         }
         const payableAmount = offerResult.finalPrice;
-        // Paid plan upgrade flow
+        // Detect payment gateway configuration
         const keyId = process.env.RAZORPAY_KEY_ID || process.env.RAPIDPAY_KEY_ID || '';
         const keySecret = process.env.RAZORPAY_KEY_SECRET || process.env.RAPIDPAY_KEY_SECRET || '';
-        const isLiveGateway = Boolean(keyId && keySecret && keyId !== 'rzp_test_mock' && keyId.startsWith('rzp_'));
+        const isLiveGateway = Boolean(keyId &&
+            keySecret &&
+            keyId.startsWith('rzp_') &&
+            keyId !== 'rzp_test_mock' &&
+            !keyId.includes('your_actual_key_id') &&
+            keySecret !== 'rzp_secret_mock' &&
+            keySecret !== 'your_actual_key_secret');
+        const isProduction = process.env.NODE_ENV === 'production';
+        const allowSimulatedPayments = !isProduction &&
+            (process.env.ALLOW_SIMULATED_PAYMENTS === 'true' || process.env.ENABLE_SIMULATED_PAYMENTS === 'true');
+        if (!isLiveGateway && !allowSimulatedPayments) {
+            return res.status(503).json({
+                success: false,
+                message: 'Payment gateway service is not configured or currently unavailable. Please contact support.',
+            });
+        }
         let order = null;
-        let isSimulated = !isLiveGateway;
-        // If live/test Razorpay API credentials are configured, attempt real order creation
+        let isSimulated = false;
+        // If live/test Razorpay credentials are configured, create real gateway order
         if (isLiveGateway) {
             try {
                 const razorpay = new razorpay_1.default({
                     key_id: keyId,
                     key_secret: keySecret,
                 });
+                const safeReceipt = `rcpt_${String(userId).slice(-12)}_${Date.now()}`;
                 order = await razorpay.orders.create({
                     amount: Math.round(payableAmount * 100),
                     currency: 'INR',
-                    receipt: `rcpt_${userId}_${Date.now()}`,
+                    receipt: safeReceipt,
                     payment_capture: true,
                     notes: {
                         planKey: plan.key,
@@ -594,13 +611,19 @@ async function createOrder(req, res, next) {
                 });
             }
             catch (rzpErr) {
-                console.warn('Razorpay order creation via gateway API failed, falling back to simulated order:', rzpErr?.message || rzpErr);
-                isSimulated = true;
+                console.error('Razorpay gateway order creation failed:', rzpErr?.message || rzpErr);
+                // Never silently fall back to simulated orders when live gateway credentials are configured
+                return res.status(502).json({
+                    success: false,
+                    message: 'Payment gateway order creation failed. Please try again shortly.',
+                    error: process.env.NODE_ENV === 'development' ? rzpErr?.message : undefined,
+                });
             }
         }
-        // Fallback or Sandbox Simulated Order
-        if (!order) {
+        else if (allowSimulatedPayments) {
+            isSimulated = true;
             const orderId = `order_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+            const safeReceipt = `rcpt_${String(userId).slice(-12)}_${Date.now()}`;
             order = {
                 id: orderId,
                 entity: 'order',
@@ -608,7 +631,7 @@ async function createOrder(req, res, next) {
                 amount_paid: 0,
                 amount_due: Math.round(payableAmount * 100),
                 currency: 'INR',
-                receipt: `rcpt_${userId}_${Date.now()}`,
+                receipt: safeReceipt,
                 status: 'created',
                 attempts: 0,
                 notes: {
@@ -623,42 +646,68 @@ async function createOrder(req, res, next) {
         }
         const durationDays = plan.durationDays || (plan.key === 'PREMIUM_VIP' ? 180 : 90);
         const calculatedExpiry = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+        // Invalidate stale PENDING subscriptions & payments for this user/plan to prevent duplicate pending orders on retry
+        try {
+            await Subscription_1.Subscription.updateMany({ user: userId, plan: plan.key, status: 'PENDING' }, { status: 'CANCELLED' });
+            if (plan.planId) {
+                await Payment_1.Payment.updateMany({ user: userId, planId: plan.planId, status: 'PENDING' }, { status: 'CANCELLED' });
+            }
+        }
+        catch {
+            // Non-fatal if cleanup of older pending orders encounters an issue
+        }
         // Create a pending subscription record for tracking
         const pendingSubscription = await Subscription_1.Subscription.create({
             user: userId,
             plan: plan.key,
+            planId: plan.slug,
             status: 'PENDING',
             startDate: new Date(),
             expiryDate: calculatedExpiry,
         });
-        // Create a pending Payment record with full audit metadata
-        const payment = await Payment_1.Payment.create({
-            user: userId,
-            subscription: pendingSubscription._id,
-            orderId: order.id,
-            provider: 'razorpay',
-            providerPaymentId: order.id,
-            amount: payableAmount,
-            currency: 'INR',
-            planId: plan.planId,
-            planName: plan.name,
-            status: 'PENDING',
-            receipt: order.receipt,
-            isSimulated,
-            metadata: {
-                planKey: plan.key,
-                duration: plan.duration,
-                userEmail: user.email,
-                originalAmount: offerResult.originalPrice,
-                discountAmount: offerResult.discountAmount,
-                finalAmount: payableAmount,
-                campaignId: offerResult.campaign?.id,
-                campaignName: offerResult.campaign?.name,
-                couponId: offerResult.coupon?.id,
-                couponCode: offerResult.coupon?.code,
-                initiatedAt: new Date().toISOString(),
-            },
-        });
+        let payment = null;
+        try {
+            // Create a pending Payment record with full audit metadata
+            payment = await Payment_1.Payment.create({
+                user: userId,
+                subscription: pendingSubscription._id,
+                orderId: order.id,
+                provider: isSimulated ? 'simulated' : 'razorpay',
+                providerPaymentId: order.id,
+                amount: payableAmount,
+                currency: 'INR',
+                planId: plan.planId,
+                planName: plan.name,
+                status: 'PENDING',
+                receipt: order.receipt,
+                isSimulated,
+                metadata: {
+                    planKey: plan.key,
+                    planSlug: plan.slug,
+                    duration: plan.duration,
+                    durationDays,
+                    userEmail: user.email,
+                    originalAmount: offerResult.originalPrice,
+                    discountAmount: offerResult.discountAmount,
+                    finalAmount: payableAmount,
+                    campaignId: offerResult.campaign?.id,
+                    campaignName: offerResult.campaign?.name,
+                    couponId: offerResult.coupon?.id,
+                    couponCode: offerResult.coupon?.code,
+                    initiatedAt: new Date().toISOString(),
+                },
+            });
+        }
+        catch (payErr) {
+            // Rollback orphaned pending subscription to prevent partial records
+            try {
+                await Subscription_1.Subscription.deleteOne({ _id: pendingSubscription._id });
+            }
+            catch {
+                // ignore rollback error
+            }
+            throw payErr;
+        }
         res.json({
             success: true,
             message: `Order for ${plan.name} initiated successfully.`,
@@ -666,7 +715,7 @@ async function createOrder(req, res, next) {
                 order,
                 plan,
                 offerResult,
-                keyId: isLiveGateway ? keyId : 'rzp_test_mock',
+                keyId: isLiveGateway ? keyId : undefined,
                 isSimulated,
                 subscriptionId: pendingSubscription._id,
                 paymentId: payment._id,
@@ -676,6 +725,59 @@ async function createOrder(req, res, next) {
     catch (error) {
         console.error('Error in createOrder:', error);
         next(error);
+    }
+}
+/**
+ * Helper to reconcile a successful payment whose subscription activation remained pending or failed.
+ * This guarantees safe recovery without reverting verified payments to PENDING.
+ */
+async function reconcileVerifiedPaymentSubscription(userId, targetPayment) {
+    try {
+        const payment = targetPayment || await Payment_1.Payment.findOne({
+            user: userId,
+            status: 'SUCCESS',
+        }).sort({ createdAt: -1 });
+        if (!payment || !payment.subscription)
+            return null;
+        const existingSub = await Subscription_1.Subscription.findById(payment.subscription);
+        if (!existingSub || existingSub.status === 'ACTIVE')
+            return existingSub;
+        const targetPlanKey = payment.metadata?.planKey || payment.planId;
+        const plan = (await findPlanDynamic(targetPlanKey)) || exports.plans.find((p) => p.key === targetPlanKey);
+        if (!plan)
+            return null;
+        const durationDays = payment.metadata?.durationDays || plan.durationDays || 90;
+        const expiryDate = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+        const contactCredits = getContactCreditLimit(plan.slug, plan);
+        existingSub.status = 'ACTIVE';
+        existingSub.plan = plan.key;
+        existingSub.planId = plan.slug;
+        existingSub.startDate = new Date();
+        existingSub.expiryDate = expiryDate;
+        existingSub.contactRequestsRemaining = contactCredits;
+        existingSub.contactRequestsUsed = 0;
+        existingSub.paymentReference = payment.paymentId || payment.providerPaymentId || payment.orderId;
+        await existingSub.save();
+        await Payment_1.Payment.updateOne({ _id: payment._id }, {
+            $set: {
+                'metadata.subscriptionActivationFailed': false,
+                'metadata.reconciledAt': new Date().toISOString(),
+            },
+        }).catch(() => { });
+        await AuditLog_1.AuditLog.create({
+            adminEmail: 'system@wonderfuljodi.com',
+            action: 'PAYMENT_SUBSCRIPTION_RECONCILED',
+            targetModel: 'Subscription',
+            targetId: String(existingSub._id),
+            targetUserId: userId,
+            details: `Reconciled and activated pending subscription for verified payment ${payment.orderId}. Plan: ${plan.name}`,
+            status: 'SUCCESS',
+        }).catch(() => { });
+        return existingSub;
+    }
+    catch (err) {
+        console.error('Error during payment subscription reconciliation:', err);
+        return null;
     }
 }
 /**
@@ -691,131 +793,312 @@ async function verifyPayment(req, res, next) {
                 message: 'Authentication required. Please sign in.',
             });
         }
-        const { paymentId, orderId, signature, planKey, subscriptionId } = req.body;
-        if (!orderId && !paymentId) {
+        const { orderId, paymentId, signature, paymentMethod } = req.body;
+        // Require orderId - never search by arbitrary paymentId alone
+        if (!orderId || typeof orderId !== 'string' || !orderId.trim()) {
             return res.status(400).json({
                 success: false,
-                message: 'Missing order and payment identification.',
+                message: 'Order ID is required for payment verification.',
             });
         }
-        const keySecret = process.env.RAZORPAY_KEY_SECRET || process.env.RAPIDPAY_KEY_SECRET || '';
-        const isLiveKey = Boolean(keySecret && keySecret !== 'rzp_secret_mock');
-        // If signature provided and live key present, verify HMAC signature
-        if (isLiveKey && signature && orderId && paymentId) {
-            const generatedSignature = crypto_1.default
+        const cleanOrderId = orderId.trim();
+        // Locate the existing pending payment belonging to this authenticated user using server-issued order ID
+        const payment = await Payment_1.Payment.findOne({
+            orderId: cleanOrderId,
+            user: userId,
+        });
+        if (!payment) {
+            // Check if order exists under another user to distinguish ownership mismatch
+            const foreignPayment = await Payment_1.Payment.findOne({ orderId: cleanOrderId });
+            if (foreignPayment) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Payment record does not belong to the authenticated user.',
+                });
+            }
+            return res.status(404).json({
+                success: false,
+                message: 'Payment record not found for the provided order ID.',
+            });
+        }
+        // Handle already processed payments idempotently and reconcile any partial activation failure
+        if (payment.status === 'SUCCESS') {
+            const existingSub = payment.subscription ? await Subscription_1.Subscription.findById(payment.subscription) : null;
+            // RECONCILIATION: If payment is SUCCESS but subscription was not yet activated (e.g. earlier save failure),
+            // safely activate the subscription now rather than returning an inactive membership!
+            if (existingSub && existingSub.status !== 'ACTIVE') {
+                const reconciledSub = await reconcileVerifiedPaymentSubscription(userId, payment);
+                if (reconciledSub) {
+                    const targetPlanKey = payment.metadata?.planKey || payment.planId;
+                    const plan = (await findPlanDynamic(targetPlanKey)) || exports.plans.find((p) => p.key === targetPlanKey);
+                    return res.status(200).json({
+                        success: true,
+                        message: `Congratulations! Your ${plan?.name || 'membership'} has been activated successfully.`,
+                        reconciled: true,
+                        data: {
+                            payment,
+                            subscription: reconciledSub,
+                            plan,
+                        },
+                    });
+                }
+            }
+            return res.status(200).json({
+                success: true,
+                message: 'Payment has already been verified and processed.',
+                alreadyProcessed: true,
+                data: {
+                    payment,
+                    subscription: existingSub,
+                },
+            });
+        }
+        // Reject any invalid payment state (CANCELLED, FAILED, REFUNDED)
+        if (payment.status !== 'PENDING') {
+            return res.status(400).json({
+                success: false,
+                message: `Payment cannot be verified because it is currently in '${payment.status}' state.`,
+            });
+        }
+        // Verify associated pending subscription exists and belongs to the authenticated user
+        if (!payment.subscription) {
+            return res.status(400).json({
+                success: false,
+                message: 'No associated pending subscription found for this payment.',
+            });
+        }
+        const subscription = await Subscription_1.Subscription.findById(payment.subscription);
+        if (!subscription) {
+            return res.status(404).json({
+                success: false,
+                message: 'Associated pending subscription record not found.',
+            });
+        }
+        const subUserId = String(subscription.user || subscription.userId);
+        if (subUserId !== String(userId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Associated subscription does not belong to the authenticated user.',
+            });
+        }
+        let finalPaymentId;
+        // In live/test Razorpay gateway mode
+        if (!payment.isSimulated) {
+            if (!paymentId || typeof paymentId !== 'string' || !paymentId.trim()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Payment ID is required for gateway verification.',
+                });
+            }
+            if (!signature || typeof signature !== 'string' || !signature.trim()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Payment signature is required for gateway verification.',
+                });
+            }
+            const keySecret = process.env.RAZORPAY_KEY_SECRET || process.env.RAPIDPAY_KEY_SECRET || '';
+            if (!keySecret) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Payment gateway configuration error: secret key not configured.',
+                });
+            }
+            const cleanPaymentId = paymentId.trim();
+            const cleanSignature = signature.trim();
+            // Validate signature hex format and exact 64-character SHA256 length
+            if (!/^[0-9a-fA-F]{64}$/.test(cleanSignature)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Payment verification failed: Malformed signature format.',
+                });
+            }
+            // Generate expected HMAC-SHA256 signature using ${orderId}|${paymentId}
+            const expectedSignature = crypto_1.default
                 .createHmac('sha256', keySecret)
-                .update(`${orderId}|${paymentId}`)
+                .update(`${cleanOrderId}|${cleanPaymentId}`)
                 .digest('hex');
-            if (generatedSignature !== signature) {
+            const sigBuffer = Buffer.from(cleanSignature, 'hex');
+            const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+            // Timing-safe signature comparison
+            if (sigBuffer.length !== expectedBuffer.length || !crypto_1.default.timingSafeEqual(sigBuffer, expectedBuffer)) {
                 return res.status(400).json({
                     success: false,
                     message: 'Payment verification failed: Invalid transaction signature.',
                 });
             }
-        }
-        // Locate the Payment record
-        const payment = await Payment_1.Payment.findOne({
-            $or: [
-                { orderId: orderId },
-                { providerPaymentId: orderId },
-                { paymentId: paymentId },
-                { providerPaymentId: paymentId },
-            ],
-        });
-        const targetPlanKey = planKey || payment?.metadata?.planKey || 'PREMIUM';
-        const plan = (await findPlanDynamic(targetPlanKey)) || exports.plans.find((p) => p.key === targetPlanKey) || exports.plans[1];
-        const durationDays = plan.durationDays || (targetPlanKey === 'PREMIUM_VIP' ? 180 : 90);
-        const expiryDate = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
-        const finalPaymentId = paymentId || `pay_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        if (payment) {
-            payment.status = 'SUCCESS';
-            payment.paymentId = finalPaymentId;
-            payment.providerPaymentId = finalPaymentId;
-            payment.paymentMethod = req.body.paymentMethod || payment.paymentMethod || 'UPI';
-            if (signature)
-                payment.razorpaySignature = signature;
-            await payment.save();
+            finalPaymentId = cleanPaymentId;
         }
         else {
-            // Create payment record if not found
-            await Payment_1.Payment.create({
-                user: userId,
-                orderId: orderId || `order_${Date.now()}`,
-                paymentId: finalPaymentId,
-                provider: 'razorpay',
-                providerPaymentId: finalPaymentId,
-                amount: plan.amount,
-                currency: 'INR',
-                planId: plan.planId,
-                planName: plan.name,
-                status: 'SUCCESS',
-                isSimulated: !isLiveKey,
-                razorpaySignature: signature,
+            // Simulated payment verification (development/testing only)
+            const isProduction = process.env.NODE_ENV === 'production';
+            const allowSimulatedPayments = !isProduction &&
+                (process.env.ALLOW_SIMULATED_PAYMENTS === 'true' || process.env.ENABLE_SIMULATED_PAYMENTS === 'true');
+            if (!allowSimulatedPayments) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Simulated payments are strictly forbidden in this environment.',
+                });
+            }
+            finalPaymentId = (typeof paymentId === 'string' && paymentId.trim())
+                ? paymentId.trim()
+                : `sim_${cleanOrderId}`;
+        }
+        // Derive plan, amount, duration, and credits strictly from stored server-side payment records
+        const targetPlanKey = payment.metadata?.planKey || payment.planId;
+        const plan = (await findPlanDynamic(targetPlanKey)) || exports.plans.find((p) => p.key === targetPlanKey);
+        if (!plan) {
+            return res.status(400).json({
+                success: false,
+                message: 'Associated membership plan could not be resolved from payment records.',
             });
         }
-        // Atomically record coupon redemption if coupon was applied
-        if (payment?.metadata?.couponCode && payment?.metadata?.couponId) {
-            await CouponRedemption_1.CouponRedemption.create({
-                couponId: payment.metadata.couponId,
-                couponCode: payment.metadata.couponCode,
-                userId,
-                campaignId: payment.metadata.campaignId,
-                planKey: targetPlanKey,
-                originalAmount: payment.metadata.originalAmount || payment.amount,
-                discountAmount: payment.metadata.discountAmount || 0,
-                finalAmount: payment.metadata.finalAmount || payment.amount,
-                paymentId: finalPaymentId,
-                orderId,
-                status: 'SUCCESS',
+        const durationDays = payment.metadata?.durationDays || plan.durationDays || 90;
+        const expiryDate = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+        const contactCredits = getContactCreditLimit(plan.slug, plan);
+        // Atomically transition payment status from PENDING to SUCCESS to prevent race conditions
+        const updateRes = await Payment_1.Payment.updateOne({ _id: payment._id, status: 'PENDING' }, {
+            status: 'SUCCESS',
+            paymentId: finalPaymentId,
+            providerPaymentId: finalPaymentId,
+            paymentMethod: paymentMethod || payment.paymentMethod || 'UPI',
+            ...(signature ? { razorpaySignature: signature.trim() } : {}),
+        });
+        if (updateRes.modifiedCount === 0) {
+            // Concurrently processed by a duplicate or parallel request
+            const refreshedPayment = await Payment_1.Payment.findById(payment._id);
+            if (refreshedPayment?.status === 'SUCCESS') {
+                let existingSub = refreshedPayment.subscription ? await Subscription_1.Subscription.findById(refreshedPayment.subscription) : null;
+                if (existingSub && existingSub.status !== 'ACTIVE') {
+                    // Concurrently arrived while first request had failed subscription activation: reconcile!
+                    existingSub = (await reconcileVerifiedPaymentSubscription(userId, refreshedPayment)) || existingSub;
+                }
+                return res.status(200).json({
+                    success: true,
+                    message: 'Payment has already been verified and processed.',
+                    alreadyProcessed: true,
+                    data: {
+                        payment: refreshedPayment,
+                        subscription: existingSub,
+                        plan,
+                    },
+                });
+            }
+            return res.status(400).json({
+                success: false,
+                message: 'Payment could not be updated or is no longer pending.',
             });
-            await Coupon_1.Coupon.findByIdAndUpdate(payment.metadata.couponId, { $inc: { usedCount: 1 } });
+        }
+        // Activate the user's subscription with safe error handling and resilient fallback
+        let activationSucceeded = false;
+        try {
+            subscription.status = 'ACTIVE';
+            subscription.plan = plan.key;
+            subscription.planId = plan.slug;
+            subscription.startDate = new Date();
+            subscription.expiryDate = expiryDate;
+            subscription.contactRequestsRemaining = contactCredits;
+            subscription.contactRequestsUsed = 0;
+            subscription.paymentReference = finalPaymentId;
+            await subscription.save();
+            activationSucceeded = true;
+        }
+        catch (subSaveErr) {
+            console.error('Subscription save failed after payment verification:', subSaveErr?.message || subSaveErr);
+            // Resilient fallback: attempt direct update on Subscription model
+            try {
+                await Subscription_1.Subscription.updateOne({ _id: subscription._id }, {
+                    status: 'ACTIVE',
+                    plan: plan.key,
+                    planId: plan.slug,
+                    startDate: new Date(),
+                    expiryDate,
+                    contactRequestsRemaining: contactCredits,
+                    contactRequestsUsed: 0,
+                    paymentReference: finalPaymentId,
+                });
+                subscription.status = 'ACTIVE';
+                subscription.plan = plan.key;
+                subscription.planId = plan.slug;
+                subscription.expiryDate = expiryDate;
+                subscription.contactRequestsRemaining = contactCredits;
+                activationSucceeded = true;
+            }
+            catch (fallbackErr) {
+                console.error('Subscription update fallback also failed:', fallbackErr?.message || fallbackErr);
+                // Flag payment metadata so reconciliation picks it up without reverting payment status to PENDING
+                try {
+                    await Payment_1.Payment.updateOne({ _id: payment._id }, {
+                        $set: {
+                            'metadata.subscriptionActivationFailed': true,
+                            'metadata.subscriptionActivationError': fallbackErr?.message || subSaveErr?.message,
+                        },
+                    });
+                }
+                catch {
+                    // non-fatal
+                }
+            }
+        }
+        if (!activationSucceeded) {
+            // Do not return false success. Do not revert payment to PENDING (funds were already captured).
+            // Alert client that payment is recorded but activation needs retry reconciliation.
+            return res.status(500).json({
+                success: false,
+                message: 'Payment verified successfully, but membership activation encountered a database error. Please retry verification to complete activation.',
+                error: 'SUBSCRIPTION_ACTIVATION_FAILED',
+                retryable: true,
+                data: {
+                    orderId: cleanOrderId,
+                    paymentId: finalPaymentId,
+                    paymentStatus: 'SUCCESS',
+                    subscriptionStatus: 'PENDING',
+                },
+            });
+        }
+        // Atomically record coupon redemption if coupon was applied (executed only once per order)
+        if (payment.metadata?.couponCode && payment.metadata?.couponId) {
+            try {
+                await CouponRedemption_1.CouponRedemption.create({
+                    couponId: payment.metadata.couponId,
+                    couponCode: payment.metadata.couponCode,
+                    userId,
+                    campaignId: payment.metadata.campaignId,
+                    planKey: plan.key,
+                    originalAmount: payment.metadata.originalAmount || payment.amount,
+                    discountAmount: payment.metadata.discountAmount || 0,
+                    finalAmount: payment.metadata.finalAmount || payment.amount,
+                    paymentId: finalPaymentId,
+                    orderId: cleanOrderId,
+                    status: 'SUCCESS',
+                });
+                await Coupon_1.Coupon.findByIdAndUpdate(payment.metadata.couponId, { $inc: { usedCount: 1 } });
+            }
+            catch (couponErr) {
+                console.error('Error recording coupon redemption:', couponErr);
+            }
         }
         // Increment campaign analytics
-        if (payment?.metadata?.campaignId) {
-            const profile = await Profile_1.Profile.findOne({ user: userId });
-            const gender = profile?.gender || 'Male';
-            const updateObj = {
-                $inc: {
-                    usedCount: 1,
-                    'analytics.timesClaimed': 1,
-                    'analytics.totalDiscountGiven': payment.metadata.discountAmount || 0,
-                    'analytics.totalRevenueGenerated': payment.metadata.finalAmount || payment.amount,
-                },
-            };
-            if (gender === 'Female')
-                updateObj.$inc['genderUsageLimit.femaleUsed'] = 1;
-            if (gender === 'Male')
-                updateObj.$inc['genderUsageLimit.maleUsed'] = 1;
-            await Campaign_1.Campaign.findByIdAndUpdate(payment.metadata.campaignId, updateObj);
-        }
-        // Activate the user's subscription
-        let subscription = null;
-        const targetSubId = payment?.subscription || subscriptionId;
-        const contactCredits = getContactCreditLimit(plan.slug);
-        if (targetSubId) {
-            subscription = await Subscription_1.Subscription.findByIdAndUpdate(targetSubId, {
-                status: 'ACTIVE',
-                plan: plan.key,
-                planId: plan.slug,
-                startDate: new Date(),
-                expiryDate,
-                contactRequestsRemaining: contactCredits,
-                contactRequestsUsed: 0,
-                paymentReference: finalPaymentId,
-            }, { new: true });
-        }
-        if (!subscription) {
-            subscription = await Subscription_1.Subscription.create({
-                user: userId,
-                plan: plan.key,
-                planId: plan.slug,
-                status: 'ACTIVE',
-                startDate: new Date(),
-                expiryDate,
-                contactRequestsRemaining: contactCredits,
-                contactRequestsUsed: 0,
-                paymentReference: finalPaymentId,
-            });
+        if (payment.metadata?.campaignId) {
+            try {
+                const profile = await Profile_1.Profile.findOne({ user: userId });
+                const gender = profile?.gender || 'Male';
+                const updateObj = {
+                    $inc: {
+                        usedCount: 1,
+                        'analytics.timesClaimed': 1,
+                        'analytics.totalDiscountGiven': payment.metadata.discountAmount || 0,
+                        'analytics.totalRevenueGenerated': payment.metadata.finalAmount || payment.amount,
+                    },
+                };
+                if (gender === 'Female')
+                    updateObj.$inc['genderUsageLimit.femaleUsed'] = 1;
+                if (gender === 'Male')
+                    updateObj.$inc['genderUsageLimit.maleUsed'] = 1;
+                await Campaign_1.Campaign.findByIdAndUpdate(payment.metadata.campaignId, updateObj);
+            }
+            catch (campaignErr) {
+                console.error('Error updating campaign analytics:', campaignErr);
+            }
         }
         // Log to AuditLog
         await AuditLog_1.AuditLog.create({
@@ -823,7 +1106,8 @@ async function verifyPayment(req, res, next) {
             action: 'PAYMENT_SUCCESS',
             targetModel: 'Subscription',
             targetId: String(subscription._id),
-            details: `Activated ${plan.name} (₹${payment?.amount ?? plan.amount}) with ${contactCredits} contact credits for user ${userId}. Expiry: ${expiryDate.toISOString()}`,
+            targetUserId: userId,
+            details: `Verified payment ${finalPaymentId} for order ${cleanOrderId}. Activated ${plan.name} (₹${payment.amount}) with ${contactCredits} contact credits for user ${userId}. Expiry: ${expiryDate.toISOString()}`,
             ipAddress: req.ip || '127.0.0.1',
             status: 'SUCCESS',
         }).catch(() => { });
@@ -831,7 +1115,12 @@ async function verifyPayment(req, res, next) {
             success: true,
             message: `Congratulations! Your ${plan.name} membership has been activated successfully.`,
             data: {
-                payment,
+                payment: {
+                    ...(payment.toObject ? payment.toObject() : payment),
+                    status: 'SUCCESS',
+                    paymentId: finalPaymentId,
+                    providerPaymentId: finalPaymentId,
+                },
                 subscription,
                 plan,
             },
@@ -852,11 +1141,15 @@ async function getMyMembershipStatus(req, res, next) {
         if (!userId) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
-        const subscription = await Subscription_1.Subscription.findOne({
+        let subscription = await Subscription_1.Subscription.findOne({
             user: userId,
             status: 'ACTIVE',
             $or: [{ expiryDate: { $gt: new Date() } }, { expiryDate: null }],
         }).sort({ createdAt: -1 });
+        // Self-healing reconciliation: If user has a verified SUCCESS payment whose subscription was never activated
+        if (!subscription) {
+            subscription = await reconcileVerifiedPaymentSubscription(userId);
+        }
         const activePlan = exports.plans.find((p) => p.key === subscription?.plan ||
             p.slug === subscription?.planId ||
             p.slug === (subscription?.plan || '').toLowerCase()) || exports.plans[0];
@@ -899,11 +1192,15 @@ async function getMySubscription(req, res, next) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
         const now = new Date();
-        const subscription = await Subscription_1.Subscription.findOne({
+        let subscription = await Subscription_1.Subscription.findOne({
             user: userId,
             status: 'ACTIVE',
             $or: [{ expiryDate: { $gt: now } }, { expiryDate: null }],
         }).sort({ createdAt: -1 });
+        // Self-healing reconciliation: If user has a verified SUCCESS payment whose subscription was never activated
+        if (!subscription) {
+            subscription = await reconcileVerifiedPaymentSubscription(userId);
+        }
         const activePlan = exports.plans.find((p) => p.key === subscription?.plan ||
             p.slug === subscription?.planId ||
             p.slug === (subscription?.plan || '').toLowerCase()) || exports.plans[0];

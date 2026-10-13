@@ -148,10 +148,13 @@ export async function resolvePlan(planKeyOrSlug: string): Promise<any> {
   });
 
   if (dbPlan) {
-    const originalPrice = dbPlan.originalPrice || dbPlan.price || 0;
+    const rawOrig = dbPlan.originalPrice ?? dbPlan.amount;
+    const originalPrice = typeof rawOrig === 'number'
+      ? rawOrig
+      : (typeof dbPlan.price === 'number' ? dbPlan.price : (parseFloat(String(rawOrig).replace(/[^0-9.]/g, '')) || 0));
     const discountedPrice =
       dbPlan.discountedPrice !== undefined && dbPlan.discountedPrice !== null
-        ? dbPlan.discountedPrice
+        ? Number(dbPlan.discountedPrice)
         : originalPrice;
 
     return {
@@ -169,6 +172,15 @@ export async function resolvePlan(planKeyOrSlug: string): Promise<any> {
 
   // Fallback defaults for standard plans
   const fallbackPlans: Record<string, any> = {
+    'free': {
+      key: 'FREE',
+      slug: 'free',
+      name: 'Free',
+      originalPrice: 0,
+      discountedPrice: 0,
+      durationDays: 3650,
+      contactRequestLimit: 0,
+    },
     'doctor-connect': {
       key: 'DOCTOR_CONNECT',
       slug: 'doctor-connect',

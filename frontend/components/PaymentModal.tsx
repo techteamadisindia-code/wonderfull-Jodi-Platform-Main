@@ -70,8 +70,9 @@ export function PaymentModal({ isOpen, orderData, onClose, onSuccess }: PaymentM
           await new Promise((resolve, reject) => {
             const script = document.createElement('script');
             script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+            script.async = true;
             script.onload = resolve;
-            script.onerror = reject;
+            script.onerror = () => reject(new Error('Failed to load Razorpay SDK'));
             document.body.appendChild(script);
           });
         }
@@ -83,14 +84,17 @@ export function PaymentModal({ isOpen, orderData, onClose, onSuccess }: PaymentM
           name: 'Wonderful Jodi',
           description: `${plan.name} Matrimonial Membership`,
           order_id: order.id,
+          modal: {
+            ondismiss: function () {
+              setLoading(false);
+            },
+          },
           handler: async function (response: any) {
             try {
               const verifyRes = await api.post('/memberships/verify', {
-                paymentId: response.razorpay_payment_id,
                 orderId: response.razorpay_order_id || order.id,
+                paymentId: response.razorpay_payment_id,
                 signature: response.razorpay_signature,
-                planKey: plan.key,
-                subscriptionId,
                 paymentMethod,
               });
 
@@ -98,10 +102,14 @@ export function PaymentModal({ isOpen, orderData, onClose, onSuccess }: PaymentM
                 setSuccessMode(true);
                 onSuccess(plan.name);
               } else {
-                setErrorMsg(verifyRes.data?.message || 'Payment verification failed.');
+                setErrorMsg(verifyRes.data?.message || 'Payment verification failed. Please contact support.');
               }
             } catch (vErr: any) {
-              setErrorMsg(vErr.response?.data?.message || 'Failed to verify payment with server.');
+              setErrorMsg(
+                vErr.response?.data?.message ||
+                  'Payment was received by gateway but server verification failed. Please contact support with Order ID: ' +
+                    order.id
+              );
             } finally {
               setLoading(false);
             }
@@ -118,38 +126,45 @@ export function PaymentModal({ isOpen, orderData, onClose, onSuccess }: PaymentM
 
         const rzp = new (window as any).Razorpay(options);
         rzp.on('payment.failed', function (resp: any) {
-          setErrorMsg(resp.error?.description || 'Payment was cancelled or failed at bank.');
+          setErrorMsg(resp.error?.description || 'Payment was cancelled or declined by your bank.');
           setLoading(false);
         });
         rzp.open();
         return;
       } catch (err: any) {
-        console.warn('Live Razorpay popup failed, proceeding with verified activation:', err);
+        console.error('Razorpay initialization error:', err);
+        setErrorMsg('Unable to initialize payment checkout. Please check your connection and try again.');
+        setLoading(false);
+        return;
       }
     }
 
-    // Sandbox / Instant Activation Fallback
-    try {
-      const verifyRes = await api.post('/memberships/verify', {
-        orderId: order.id,
-        paymentId: `pay_sim_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        planKey: plan.key,
-        subscriptionId,
-        paymentMethod,
-      });
+    // In development/test mode only: handle server-issued simulated order
+    if (orderData.isSimulated) {
+      try {
+        const verifyRes = await api.post('/memberships/verify', {
+          orderId: order.id,
+          paymentMethod,
+        });
 
-      if (verifyRes.data?.success) {
-        setSuccessMode(true);
-        onSuccess(plan.name);
-      } else {
-        setErrorMsg(verifyRes.data?.message || 'Unable to activate membership.');
+        if (verifyRes.data?.success) {
+          setSuccessMode(true);
+          onSuccess(plan.name);
+        } else {
+          setErrorMsg(verifyRes.data?.message || 'Unable to activate membership in test mode.');
+        }
+      } catch (err: any) {
+        console.error('Test payment processing error:', err);
+        setErrorMsg(err.response?.data?.message || 'Failed to process test payment.');
+      } finally {
+        setLoading(false);
       }
-    } catch (err: any) {
-      console.error('Payment processing error:', err);
-      setErrorMsg(err.response?.data?.message || 'Failed to process payment. Please try again.');
-    } finally {
-      setLoading(false);
+      return;
     }
+
+    // Gateway not available and simulation not enabled
+    setErrorMsg('Payment gateway service is currently unavailable. Please contact support.');
+    setLoading(false);
   };
 
   return (

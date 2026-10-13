@@ -13,6 +13,6 @@ const subscriptionSchema = new prismaBridge_1.Schema({
     contactRequestsRemaining: { type: Number, default: 0 },
     paymentReference: { type: String },
 }, { timestamps: true });
-exports.Subscription = (0, prismaBridge_1.createPrismaModelAdapter)('subscription', { "user": "userId", "planId": "membershipPlanId" });
+exports.Subscription = (0, prismaBridge_1.createPrismaModelAdapter)('subscription', { user: 'userId' });
 exports.UserSubscription = exports.Subscription;
 //# sourceMappingURL=Subscription.js.map

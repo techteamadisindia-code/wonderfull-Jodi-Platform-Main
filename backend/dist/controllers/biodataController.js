@@ -20,11 +20,9 @@ const crypto_1 = __importDefault(require("crypto"));
 const Biodata_1 = require("../models/Biodata");
 const Profile_1 = require("../models/Profile");
 const biodataPdfService_1 = require("../services/biodataPdfService");
-// Ensure uploads/biodatas directory exists
-const BIODATA_UPLOADS_DIR = path_1.default.join(process.cwd(), 'uploads', 'biodatas');
-if (!fs_1.default.existsSync(BIODATA_UPLOADS_DIR)) {
-    fs_1.default.mkdirSync(BIODATA_UPLOADS_DIR, { recursive: true });
-}
+const uploadPaths_1 = require("../utils/uploadPaths");
+// Ensure uploads/biodatas directory exists via shared upload-path utility
+const BIODATA_UPLOADS_DIR = (0, uploadPaths_1.getPrimaryUploadDir)('biodatas');
 function calculateAge(dob) {
     const birth = new Date(dob);
     if (isNaN(birth.getTime()))
@@ -332,14 +330,17 @@ async function deleteBiodata(req, res, next) {
         if (biodata.userId.toString() !== userId) {
             return res.status(403).json({ success: false, message: 'Access denied: You do not own this biodata' });
         }
-        // Remove local file if present
-        const filePath = path_1.default.join(BIODATA_UPLOADS_DIR, `${biodata.publicId}.pdf`);
-        if (fs_1.default.existsSync(filePath)) {
-            try {
-                fs_1.default.unlinkSync(filePath);
-            }
-            catch (e) {
-                console.warn('Failed to delete biodata PDF file:', e);
+        // Remove local file if present across all candidate directories
+        const safeFilename = path_1.default.basename(`${biodata.publicId}.pdf`);
+        for (const dir of (0, uploadPaths_1.getUploadDirectories)('biodatas')) {
+            const candidate = path_1.default.join(dir, safeFilename);
+            if (fs_1.default.existsSync(candidate)) {
+                try {
+                    fs_1.default.unlinkSync(candidate);
+                }
+                catch (e) {
+                    console.warn('Failed to delete biodata PDF file:', e);
+                }
             }
         }
         await Biodata_1.Biodata.findByIdAndDelete(id);
@@ -376,8 +377,12 @@ async function generateBiodataPdf(req, res, next) {
             biodata.sectionVisibility = { ...biodata.sectionVisibility, ...req.body.sectionVisibility };
         }
         const pdfBuffer = await (0, biodataPdfService_1.generateBiodataPdfBuffer)(biodata);
-        const filename = `${biodata.publicId}.pdf`;
-        const filePath = path_1.default.join(BIODATA_UPLOADS_DIR, filename);
+        const safeFilename = path_1.default.basename(`${biodata.publicId}.pdf`);
+        if (!(0, uploadPaths_1.isValidUploadFilename)(safeFilename)) {
+            return res.status(400).json({ success: false, message: 'Invalid biodata filename' });
+        }
+        const primaryDir = (0, uploadPaths_1.getPrimaryUploadDir)('biodatas');
+        const filePath = path_1.default.join(primaryDir, safeFilename);
         fs_1.default.writeFileSync(filePath, pdfBuffer);
         biodata.generatedPdfUrl = `/api/biodata/${biodata._id}/pdf`;
         biodata.pdfGeneratedAt = new Date();
@@ -415,10 +420,16 @@ async function downloadBiodataPdf(req, res, next) {
         if (biodata.userId.toString() !== userId) {
             return res.status(403).json({ success: false, message: 'Access denied: You do not own this biodata' });
         }
-        const filename = `${biodata.publicId}.pdf`;
-        const filePath = path_1.default.join(BIODATA_UPLOADS_DIR, filename);
-        // If PDF doesn't exist on disk, generate it on demand
-        if (!fs_1.default.existsSync(filePath)) {
+        const safeFilename = path_1.default.basename(`${biodata.publicId}.pdf`);
+        if (!(0, uploadPaths_1.isValidUploadFilename)(safeFilename)) {
+            return res.status(400).json({ success: false, message: 'Invalid biodata filename' });
+        }
+        // Attempt to locate existing file across candidate upload directories (canonical first, then legacy fallback)
+        let filePath = (0, uploadPaths_1.findUploadedFile)(`biodatas/${safeFilename}`);
+        // If PDF doesn't exist on disk, generate it on demand in the canonical writable directory
+        if (!filePath || !fs_1.default.existsSync(filePath)) {
+            const primaryDir = (0, uploadPaths_1.getPrimaryUploadDir)('biodatas');
+            filePath = path_1.default.join(primaryDir, safeFilename);
             const pdfBuffer = await (0, biodataPdfService_1.generateBiodataPdfBuffer)(biodata);
             fs_1.default.writeFileSync(filePath, pdfBuffer);
             biodata.generatedPdfUrl = `/api/biodata/${biodata._id}/pdf`;
@@ -429,6 +440,7 @@ async function downloadBiodataPdf(req, res, next) {
         const downloadFilename = `Marriage_Biodata_${cleanName}.pdf`;
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
+        res.setHeader('Cache-Control', 'private, no-store');
         const fileStream = fs_1.default.createReadStream(filePath);
         fileStream.pipe(res);
     }

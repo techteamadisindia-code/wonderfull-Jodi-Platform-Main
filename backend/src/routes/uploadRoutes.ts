@@ -5,13 +5,11 @@ import crypto from 'crypto';
 import { requireAuth, AuthRequest } from '../middleware/authMiddleware';
 import { uploadLimiter } from '../middleware/rateLimiters';
 import { validateImageBuffer } from '../utils/securityUtils';
+import { getPrimaryUploadDir, getUploadDirectories } from '../utils/uploadPaths';
 
 const router = Router();
 
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads', 'profiles');
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
+const UPLOADS_DIR = getPrimaryUploadDir('profiles');
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB

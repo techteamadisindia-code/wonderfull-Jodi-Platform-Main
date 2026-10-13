@@ -4,6 +4,7 @@ import path from 'path';
 import { CookieOptions, Request } from 'express';
 import { SecurityLog, ISecurityLog } from '../models/SecurityLog';
 import { formatHeightDisplay } from './doctorValidation';
+import { getPrimaryUploadDir, getUploadDirectories } from './uploadPaths';
 
 /**
  * Generate cryptographically secure random token in hex format
@@ -162,11 +163,7 @@ export function resolveProfilePhotoUrl(
       if (check.detectedMime === 'image/png') ext = 'png';
       else if (check.detectedMime === 'image/webp') ext = 'webp';
 
-      const UPLOADS_DIR = path.join(process.cwd(), 'uploads', 'profiles');
-      if (!fs.existsSync(UPLOADS_DIR)) {
-        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-      }
-
+      const UPLOADS_DIR = getPrimaryUploadDir('profiles');
       const filename = `candidate-${candidateId}.${ext}`;
       const filePath = path.join(UPLOADS_DIR, filename);
 

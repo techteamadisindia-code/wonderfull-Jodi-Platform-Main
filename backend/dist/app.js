@@ -57,6 +57,12 @@ const seed_1 = require("./config/seed");
 const rateLimiters_1 = require("./middleware/rateLimiters");
 const errorHandler_1 = require("./middleware/errorHandler");
 const maintenanceMiddleware_1 = require("./middleware/maintenanceMiddleware");
+const uploadPaths_1 = require("./utils/uploadPaths");
+// When running in development via ts-node-dev or npm run dev, ensure NODE_ENV defaults to 'development'
+// so that local development runs with dev-appropriate settings (e.g. relaxed rate limits, non-secure cookies on http://localhost)
+if (process.env.TS_NODE_DEV && (!process.env.NODE_ENV || process.env.NODE_ENV === 'production')) {
+    process.env.NODE_ENV = 'development';
+}
 dotenv_1.default.config();
 dotenv_1.default.config({ path: path_1.default.resolve(process.cwd(), 'backend', '.env') });
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '..', '.env') });
@@ -213,6 +219,8 @@ app.use((0, cors_1.default)({
         'Accept',
         'Cache-Control',
         'Pragma',
+        'x-resume-token',
+        'resume-token',
     ],
 }));
 /*
@@ -235,10 +243,63 @@ app.use((0, morgan_1.default)(process.env.NODE_ENV === 'production'
 |--------------------------------------------------------------------------
 | STATIC UPLOADS
 |--------------------------------------------------------------------------
+|
+| Mount all candidate upload directories (e.g. root /uploads and
+| backend/uploads) across all subcategories (profiles, blogs, awards,
+| biodatas, verifications). If a profile photo does not exist on disk,
+| return a graceful SVG fallback avatar with HTTP 404 so that image tags
+| never display raw HTML errors.
+|
 */
-app.use('/uploads/profiles', express_1.default.static(path_1.default.join(process.cwd(), 'uploads', 'profiles')));
-app.use('/uploads/blogs', express_1.default.static(path_1.default.join(process.cwd(), 'uploads', 'blogs')));
-app.use('/uploads/awards', express_1.default.static(path_1.default.join(process.cwd(), 'uploads', 'awards')));
+const uploadBaseDirs = (0, uploadPaths_1.getUploadBaseDirectories)();
+// Explicitly protect private upload categories from any direct static access.
+// Sensitive KYC verifications must only be streamed via /api/verifications/document/:key
+// with strict authentication and IDOR ownership/admin role verification.
+// Biodatas must only be streamed via /api/biodata/:id/pdf with ownership checks.
+app.all(/^\/uploads\/(verifications|biodatas)(\/.*)?$/i, (_req, res) => {
+    res.status(403).json({
+        success: false,
+        message: 'Access forbidden: Private documents require authenticated API access.',
+    });
+});
+// Mount ONLY public upload categories across all candidate upload directories:
+// - /uploads/profiles (public profile photos)
+// - /uploads/blogs (public blog images)
+// - /uploads/awards (public award badges)
+const PUBLIC_UPLOAD_SUBDIRS = ['profiles', 'blogs', 'awards'];
+for (const baseDir of uploadBaseDirs) {
+    if (!fs_1.default.existsSync(baseDir))
+        continue;
+    for (const sub of PUBLIC_UPLOAD_SUBDIRS) {
+        const targetPath = path_1.default.join(baseDir, sub);
+        if (fs_1.default.existsSync(targetPath)) {
+            app.use(`/uploads/${sub}`, express_1.default.static(targetPath, {
+                maxAge: '7d',
+                fallthrough: true,
+                index: false,
+                dotfiles: 'ignore',
+            }));
+        }
+    }
+}
+// Graceful 404 Fallback for missing profile images
+// Sends a clean SVG doctor avatar with status 404 so the client onError event fires
+// while still providing a well-formed image body if rendered directly.
+const DEFAULT_PROFILE_FALLBACK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <rect width="128" height="128" rx="64" fill="#FFEBEF"/>
+  <circle cx="64" cy="48" r="22" fill="#E51F3E" opacity="0.8"/>
+  <path d="M26 106C26 86 42 70 64 70C86 70 102 86 102 106" stroke="#E51F3E" stroke-width="6" stroke-linecap="round"/>
+</svg>`.trim();
+app.all(/^\/uploads\/profiles(\/.*)?$/i, (_req, res) => {
+    res.status(404).setHeader('Content-Type', 'image/svg+xml; charset=utf-8').send(DEFAULT_PROFILE_FALLBACK_SVG);
+});
+// Clean 404 response for any other missing upload assets
+app.all(/^\/uploads(\/.*)?$/i, (_req, res) => {
+    res.status(404).json({
+        success: false,
+        message: 'Upload file not found',
+    });
+});
 /*
 |--------------------------------------------------------------------------
 | HEALTH CHECK

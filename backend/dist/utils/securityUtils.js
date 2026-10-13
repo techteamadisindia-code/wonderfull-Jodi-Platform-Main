@@ -22,6 +22,8 @@ const crypto_1 = __importDefault(require("crypto"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const SecurityLog_1 = require("../models/SecurityLog");
+const doctorValidation_1 = require("./doctorValidation");
+const uploadPaths_1 = require("./uploadPaths");
 /**
  * Generate cryptographically secure random token in hex format
  */
@@ -157,10 +159,7 @@ function resolveProfilePhotoUrl(candidateId, primaryPhoto, photos) {
                 ext = 'png';
             else if (check.detectedMime === 'image/webp')
                 ext = 'webp';
-            const UPLOADS_DIR = path_1.default.join(process.cwd(), 'uploads', 'profiles');
-            if (!fs_1.default.existsSync(UPLOADS_DIR)) {
-                fs_1.default.mkdirSync(UPLOADS_DIR, { recursive: true });
-            }
+            const UPLOADS_DIR = (0, uploadPaths_1.getPrimaryUploadDir)('profiles');
             const filename = `candidate-${candidateId}.${ext}`;
             const filePath = path_1.default.join(UPLOADS_DIR, filename);
             if (!fs_1.default.existsSync(filePath) || fs_1.default.statSync(filePath).size === 0) {
@@ -248,7 +247,7 @@ function serializeUserPublic(user, options) {
     };
 }
 exports.sanitizeUser = serializeUserPublic;
-const doctorValidation_1 = require("./doctorValidation");
+const doctorValidation_2 = require("./doctorValidation");
 /**
  * Safe public profile serializer (strips contact details, private notes, raw credentials,
  * and masks candidate identity for unauthenticated visitors)
@@ -379,7 +378,7 @@ function serializePublicProfile(profile, options) {
         safeLastName = null;
         safeFullName = null;
     }
-    const completionPercentage = (0, doctorValidation_1.calculateProfileCompletion)(p, p.user);
+    const completionPercentage = (0, doctorValidation_2.calculateProfileCompletion)(p, p.user);
     // For unauthenticated viewers, strip exact locations and family details
     const safeCurrentLocation = isAuthenticatedViewer
         ? (p.currentLocation || null)
@@ -429,7 +428,7 @@ function serializePublicProfile(profile, options) {
         age,
         gender: p.gender,
         dob: safeDob,
-        height: p.height,
+        height: (0, doctorValidation_1.formatHeightDisplay)(p.height) || p.height,
         maritalStatus: p.maritalStatus,
         motherTongue: p.motherTongue,
         religion: p.religion,
@@ -464,8 +463,8 @@ function serializePublicProfile(profile, options) {
                 email: p.user.email,
             }
             : undefined,
-        medicalCollege: p.medicalCollege,
-        medicalUniversity: p.medicalUniversity,
+        medicalCollege: isAuthenticatedViewer ? p.medicalCollege : undefined,
+        medicalUniversity: isAuthenticatedViewer ? p.medicalUniversity : undefined,
         graduationYear: p.graduationYear,
         additionalQualification: p.additionalQualification,
         currentRole: p.currentRole,
@@ -521,7 +520,43 @@ function serializePublicProfile(profile, options) {
         careerGoals: p.careerGoals,
         familyBackground: isAuthenticatedViewer ? p.familyBackground : undefined,
         siblingsDetails: isAuthenticatedViewer ? p.siblingsDetails : undefined,
-        medicalQualifications: p.medicalQualifications,
+        medicalQualifications: (() => {
+            const medQuals = p.medicalQualifications;
+            if (!medQuals || typeof medQuals !== 'object')
+                return null;
+            const sanitizeEntry = (entry) => {
+                if (!entry || typeof entry !== 'object')
+                    return null;
+                return {
+                    qualification: entry.qualification,
+                    specialization: entry.specialization,
+                    completionYear: entry.completionYear || entry.year || entry.passingYear,
+                    status: entry.status || 'Completed',
+                    college: isAuthenticatedViewer ? (entry.college || entry.institution) : undefined,
+                    institution: isAuthenticatedViewer ? (entry.institution || entry.college) : undefined,
+                };
+            };
+            const getArray = (val) => {
+                if (Array.isArray(val))
+                    return val;
+                if (val && typeof val === 'object' && (val.qualification || val.degree)) {
+                    return [{ ...val, qualification: val.qualification || val.degree }];
+                }
+                return [];
+            };
+            return {
+                undergraduate: getArray(medQuals.undergraduate || medQuals.ug)
+                    .map(sanitizeEntry)
+                    .filter(Boolean),
+                postgraduate: getArray(medQuals.postgraduate || medQuals.pg)
+                    .map(sanitizeEntry)
+                    .filter(Boolean),
+                doctorate: getArray(medQuals.doctorate || medQuals.superSpeciality)
+                    .map(sanitizeEntry)
+                    .filter(Boolean),
+            };
+        })(),
+        previousMarriageDetails: isAuthenticatedViewer ? (p.previousMarriageDetails || undefined) : undefined,
         partnerExpectations: p.partnerExpectations,
         photos: safePhotos,
         primaryPhoto: safePrimaryPhoto,
@@ -539,7 +574,7 @@ function serializePrivateProfile(profile, user, subscription) {
     if (!profile)
         return null;
     const p = typeof profile.toObject === 'function' ? profile.toObject() : profile;
-    const completionResult = (0, doctorValidation_1.calculateProfileCompletionDetails)(p, user);
+    const completionResult = (0, doctorValidation_2.calculateProfileCompletionDetails)(p, user);
     const candidateId = p.candidateId || (p._id ? `WJ-${p._id.toString().slice(-6).toUpperCase()}` : 'WJ-100000');
     return {
         _id: p._id,
@@ -626,6 +661,7 @@ function serializePrivateProfile(profile, user, subscription) {
         familyBackground: p.familyBackground,
         siblingsDetails: p.siblingsDetails,
         medicalQualifications: p.medicalQualifications,
+        previousMarriageDetails: p.previousMarriageDetails || undefined,
         partnerExpectations: p.partnerExpectations,
         photos: p.photos || [],
         primaryPhoto: p.primaryPhoto,

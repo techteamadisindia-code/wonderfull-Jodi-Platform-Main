@@ -6,9 +6,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateBiodataPdfBuffer = generateBiodataPdfBuffer;
 const pdfkit_1 = __importDefault(require("pdfkit"));
 const fs_1 = __importDefault(require("fs"));
-const path_1 = __importDefault(require("path"));
 const http_1 = __importDefault(require("http"));
 const https_1 = __importDefault(require("https"));
+const uploadPaths_1 = require("../utils/uploadPaths");
 const THEMES = {
     traditional: {
         primaryColor: '#7B1113', // Deep Royal Maroon
@@ -79,18 +79,18 @@ const THEMES = {
 async function getImageBuffer(urlOrPath) {
     if (!urlOrPath || typeof urlOrPath !== 'string')
         return null;
-    // Local filesystem check
+    // Local filesystem check across candidate upload directories
     if (urlOrPath.startsWith('/uploads/') || urlOrPath.startsWith('uploads/')) {
-        const localRel = urlOrPath.replace(/^\//, '');
-        const localAbs = path_1.default.join(process.cwd(), localRel);
-        if (fs_1.default.existsSync(localAbs)) {
+        const foundPath = (0, uploadPaths_1.findUploadedFile)(urlOrPath);
+        if (foundPath && fs_1.default.existsSync(foundPath)) {
             try {
-                return fs_1.default.readFileSync(localAbs);
+                return fs_1.default.readFileSync(foundPath);
             }
             catch (err) {
                 console.warn('Failed to read local image file:', err);
             }
         }
+        return null;
     }
     // Remote HTTP/HTTPS download
     if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://')) {

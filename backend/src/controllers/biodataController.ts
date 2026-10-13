@@ -6,12 +6,10 @@ import crypto from 'crypto';
 import { Biodata, IBiodata } from '../models/Biodata';
 import { Profile } from '../models/Profile';
 import { generateBiodataPdfBuffer } from '../services/biodataPdfService';
+import { getPrimaryUploadDir, getUploadDirectories, findUploadedFile, isValidUploadFilename } from '../utils/uploadPaths';
 
-// Ensure uploads/biodatas directory exists
-const BIODATA_UPLOADS_DIR = path.join(process.cwd(), 'uploads', 'biodatas');
-if (!fs.existsSync(BIODATA_UPLOADS_DIR)) {
-  fs.mkdirSync(BIODATA_UPLOADS_DIR, { recursive: true });
-}
+// Ensure uploads/biodatas directory exists via shared upload-path utility
+const BIODATA_UPLOADS_DIR = getPrimaryUploadDir('biodatas');
 
 function calculateAge(dob: Date | string): number {
   const birth = new Date(dob);
@@ -348,13 +346,16 @@ export async function deleteBiodata(req: Request, res: Response, next: NextFunct
       return res.status(403).json({ success: false, message: 'Access denied: You do not own this biodata' });
     }
 
-    // Remove local file if present
-    const filePath = path.join(BIODATA_UPLOADS_DIR, `${biodata.publicId}.pdf`);
-    if (fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-      } catch (e) {
-        console.warn('Failed to delete biodata PDF file:', e);
+    // Remove local file if present across all candidate directories
+    const safeFilename = path.basename(`${biodata.publicId}.pdf`);
+    for (const dir of getUploadDirectories('biodatas')) {
+      const candidate = path.join(dir, safeFilename);
+      if (fs.existsSync(candidate)) {
+        try {
+          fs.unlinkSync(candidate);
+        } catch (e) {
+          console.warn('Failed to delete biodata PDF file:', e);
+        }
       }
     }
 
@@ -399,8 +400,13 @@ export async function generateBiodataPdf(req: Request, res: Response, next: Next
 
     const pdfBuffer = await generateBiodataPdfBuffer(biodata);
 
-    const filename = `${biodata.publicId}.pdf`;
-    const filePath = path.join(BIODATA_UPLOADS_DIR, filename);
+    const safeFilename = path.basename(`${biodata.publicId}.pdf`);
+    if (!isValidUploadFilename(safeFilename)) {
+      return res.status(400).json({ success: false, message: 'Invalid biodata filename' });
+    }
+
+    const primaryDir = getPrimaryUploadDir('biodatas');
+    const filePath = path.join(primaryDir, safeFilename);
     fs.writeFileSync(filePath, pdfBuffer);
 
     biodata.generatedPdfUrl = `/api/biodata/${biodata._id}/pdf`;
@@ -444,13 +450,21 @@ export async function downloadBiodataPdf(req: Request, res: Response, next: Next
       return res.status(403).json({ success: false, message: 'Access denied: You do not own this biodata' });
     }
 
-    const filename = `${biodata.publicId}.pdf`;
-    const filePath = path.join(BIODATA_UPLOADS_DIR, filename);
+    const safeFilename = path.basename(`${biodata.publicId}.pdf`);
+    if (!isValidUploadFilename(safeFilename)) {
+      return res.status(400).json({ success: false, message: 'Invalid biodata filename' });
+    }
 
-    // If PDF doesn't exist on disk, generate it on demand
-    if (!fs.existsSync(filePath)) {
+    // Attempt to locate existing file across candidate upload directories (canonical first, then legacy fallback)
+    let filePath = findUploadedFile(`biodatas/${safeFilename}`);
+
+    // If PDF doesn't exist on disk, generate it on demand in the canonical writable directory
+    if (!filePath || !fs.existsSync(filePath)) {
+      const primaryDir = getPrimaryUploadDir('biodatas');
+      filePath = path.join(primaryDir, safeFilename);
       const pdfBuffer = await generateBiodataPdfBuffer(biodata);
       fs.writeFileSync(filePath, pdfBuffer);
+
       biodata.generatedPdfUrl = `/api/biodata/${biodata._id}/pdf`;
       biodata.pdfGeneratedAt = new Date();
       await biodata.save();
@@ -461,6 +475,7 @@ export async function downloadBiodataPdf(req: Request, res: Response, next: Next
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
 
     const fileStream = fs.createReadStream(filePath);
     fileStream.pipe(res);

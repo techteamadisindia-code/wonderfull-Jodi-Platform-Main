@@ -4,6 +4,7 @@ import path from 'path';
 import http from 'http';
 import https from 'https';
 import { IBiodata } from '../models/Biodata';
+import { findUploadedFile } from '../utils/uploadPaths';
 
 interface TemplateTheme {
   primaryColor: string;
@@ -93,17 +94,17 @@ const THEMES: Record<string, TemplateTheme> = {
 async function getImageBuffer(urlOrPath?: string): Promise<Buffer | null> {
   if (!urlOrPath || typeof urlOrPath !== 'string') return null;
 
-  // Local filesystem check
+  // Local filesystem check across candidate upload directories
   if (urlOrPath.startsWith('/uploads/') || urlOrPath.startsWith('uploads/')) {
-    const localRel = urlOrPath.replace(/^\//, '');
-    const localAbs = path.join(process.cwd(), localRel);
-    if (fs.existsSync(localAbs)) {
+    const foundPath = findUploadedFile(urlOrPath);
+    if (foundPath && fs.existsSync(foundPath)) {
       try {
-        return fs.readFileSync(localAbs);
+        return fs.readFileSync(foundPath);
       } catch (err) {
         console.warn('Failed to read local image file:', err);
       }
     }
+    return null;
   }
 
   // Remote HTTP/HTTPS download

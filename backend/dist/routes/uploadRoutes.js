@@ -10,11 +10,9 @@ const crypto_1 = __importDefault(require("crypto"));
 const authMiddleware_1 = require("../middleware/authMiddleware");
 const rateLimiters_1 = require("../middleware/rateLimiters");
 const securityUtils_1 = require("../utils/securityUtils");
+const uploadPaths_1 = require("../utils/uploadPaths");
 const router = (0, express_1.Router)();
-const UPLOADS_DIR = path_1.default.join(process.cwd(), 'uploads', 'profiles');
-if (!fs_1.default.existsSync(UPLOADS_DIR)) {
-    fs_1.default.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
+const UPLOADS_DIR = (0, uploadPaths_1.getPrimaryUploadDir)('profiles');
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 // Authenticated and Rate Limited Upload Endpoint

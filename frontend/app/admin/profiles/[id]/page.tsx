@@ -149,6 +149,7 @@ function AdminProfileDetailsContent() {
 
   // Global Toast
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [headerPhotoError, setHeaderPhotoError] = useState(false);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -180,6 +181,10 @@ function AdminProfileDetailsContent() {
   useEffect(() => {
     loadProfile();
   }, [loadProfile]);
+
+  useEffect(() => {
+    setHeaderPhotoError(false);
+  }, [data?.primaryPhoto]);
 
   useEffect(() => {
     const tabParam = searchParams?.get('tab') as TabKey;
@@ -672,10 +677,11 @@ function AdminProfileDetailsContent() {
           {/* Left: Avatar & Identity */}
           <div className="flex items-start sm:items-center gap-4 sm:gap-5 w-full lg:w-auto">
             <div className="relative group shrink-0">
-              {data.primaryPhoto || (data.photos && data.photos[0]) ? (
+              {(data.primaryPhoto || (data.photos && data.photos[0])) && !headerPhotoError ? (
                 <img
                   src={data.primaryPhoto || data.photos?.[0] || ''}
                   alt={data.displayName || 'Doctor Profile'}
+                  onError={() => setHeaderPhotoError(true)}
                   onClick={() => setLightboxPhoto(data.primaryPhoto || data.photos?.[0] || null)}
                   className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover border-2 border-slate-200 shadow-xs cursor-pointer group-hover:opacity-90 transition"
                 />
@@ -684,7 +690,7 @@ function AdminProfileDetailsContent() {
                   {(data.displayName || user?.fullName || 'U').charAt(0).toUpperCase()}
                 </div>
               )}
-              {(data.primaryPhoto || (data.photos && data.photos[0])) && (
+              {(data.primaryPhoto || (data.photos && data.photos[0])) && !headerPhotoError && (
                 <button
                   type="button"
                   onClick={() => setLightboxPhoto(data.primaryPhoto || data.photos?.[0] || null)}
@@ -1583,6 +1589,10 @@ function AdminProfileDetailsContent() {
                       <img
                         src={photo}
                         alt={`Profile photo ${idx + 1}`}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src =
+                            'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" fill="%23f8fafc"><rect width="200" height="200" fill="%23f1f5f9"/><circle cx="100" cy="80" r="30" fill="%23cbd5e1"/><path d="M40 170c0-33.137 26.863-60 60-60s60 26.863 60 60" fill="%23cbd5e1"/><text x="50%" y="90%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="600" fill="%2394a3b8">Photo Unavailable</text></svg>';
+                        }}
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                       />
                       {isPrimary && (
@@ -2445,6 +2455,10 @@ function AdminProfileDetailsContent() {
             <img
               src={lightboxPhoto}
               alt="High resolution preview"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src =
+                  'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" fill="%23f8fafc"><rect width="400" height="400" fill="%23f1f5f9"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="bold" fill="%2394a3b8">Photo Unavailable</text></svg>';
+              }}
               className="max-w-full max-h-[85vh] rounded-2xl object-contain shadow-2xl"
             />
           </div>

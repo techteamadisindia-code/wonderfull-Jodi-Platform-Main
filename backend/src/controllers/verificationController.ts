@@ -7,11 +7,9 @@ import { Verification } from '../models/Verification';
 import { User } from '../models/User';
 import { Profile } from '../models/Profile';
 import { validateDocumentBuffer, isValidObjectId, sanitizeUser } from '../utils/securityUtils';
+import { getPrimaryUploadDir, getUploadDirectories, findUploadedFile, isValidUploadFilename } from '../utils/uploadPaths';
 
-const VERIFICATIONS_DIR = path.join(process.cwd(), 'uploads', 'verifications');
-if (!fs.existsSync(VERIFICATIONS_DIR)) {
-  fs.mkdirSync(VERIFICATIONS_DIR, { recursive: true });
-}
+const VERIFICATIONS_DIR = getPrimaryUploadDir('verifications');
 
 const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -108,7 +106,8 @@ export async function submitVerification(req: AuthRequest, res: Response, next: 
     const randomHex = crypto.randomBytes(16).toString('hex');
     const safeType = normalizedDocType.toLowerCase().replace(/[^a-z0-9]/g, '');
     const storageKey = `doc-${safeType}-${Date.now()}-${randomHex}.${ext}`;
-    const filePath = path.join(VERIFICATIONS_DIR, storageKey);
+    const primaryDir = getPrimaryUploadDir('verifications');
+    const filePath = path.join(primaryDir, storageKey);
 
     await fs.promises.writeFile(filePath, buffer);
 
@@ -237,13 +236,11 @@ export async function getUserVerificationById(req: AuthRequest, res: Response, n
 export async function serveVerificationDocument(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const { filename } = req.params;
-    if (!filename || typeof filename !== 'string') {
+    if (!isValidUploadFilename(filename)) {
       return res.status(400).json({ success: false, message: 'Invalid document filename' });
     }
 
-    // Prevent path traversal
     const safeFilename = path.basename(filename);
-    const filePath = path.join(VERIFICATIONS_DIR, safeFilename);
 
     // Look up verification record
     const verification = await Verification.findOne({
@@ -269,7 +266,9 @@ export async function serveVerificationDocument(req: AuthRequest, res: Response,
       });
     }
 
-    if (!fs.existsSync(filePath)) {
+    // Search across candidate upload directories with symlink and traversal protection
+    const filePath = findUploadedFile(`verifications/${safeFilename}`);
+    if (!filePath || !fs.existsSync(filePath)) {
       return res.status(404).json({ success: false, message: 'Document file is missing on storage.' });
     }
 
@@ -277,7 +276,7 @@ export async function serveVerificationDocument(req: AuthRequest, res: Response,
     res.setHeader('Content-Type', verification.fileType || 'application/pdf');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
-    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Cache-Control', 'private, no-store');
 
     // Stream file
     const fileStream = fs.createReadStream(filePath);

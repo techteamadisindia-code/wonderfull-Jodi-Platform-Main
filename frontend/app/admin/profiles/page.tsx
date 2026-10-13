@@ -48,6 +48,77 @@ import {
 import { DobInput } from '../../../components/DobInput';
 import AdminEditProfileModal from '../../../components/admin/AdminEditProfileModal';
 
+function AdminProfileAvatar({
+  photoUrl,
+  displayName,
+}: {
+  photoUrl?: string | null;
+  displayName?: string | null;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [photoUrl]);
+
+  if (!photoUrl || hasError) {
+    return (
+      <div
+        className="w-11 h-11 rounded-full bg-gradient-to-tr from-rose-100 via-rose-50 to-red-100 text-[#E51F3E] flex items-center justify-center font-bold text-sm border border-rose-200/60 shadow-2xs"
+        title={displayName ? `${displayName} (Fallback Avatar)` : 'Profile'}
+      >
+        {displayName?.charAt(0)?.toUpperCase() || 'P'}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={photoUrl}
+      alt={displayName || 'Profile'}
+      onError={() => setHasError(true)}
+      className="w-11 h-11 rounded-full object-cover border border-slate-200/90 shadow-2xs"
+      loading="lazy"
+    />
+  );
+}
+
+function AdminModalPhoto({
+  photoUrl,
+  displayName,
+}: {
+  photoUrl?: string | null;
+  displayName?: string | null;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [photoUrl]);
+
+  if (photoUrl && !hasError) {
+    return (
+      <img
+        src={photoUrl}
+        alt={displayName || 'Profile'}
+        onError={() => setHasError(true)}
+        className="w-full h-full object-cover"
+      />
+    );
+  }
+
+  return (
+    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-tr from-rose-100 via-rose-50 to-red-100 text-[#E51F3E]">
+      <span className="font-bold text-5xl mb-2">
+        {displayName?.charAt(0)?.toUpperCase() || 'P'}
+      </span>
+      <span className="text-xs font-semibold text-slate-500">
+        {hasError ? 'Photo Unavailable' : 'No Photo Uploaded'}
+      </span>
+    </div>
+  );
+}
+
 export default function AdminProfilesPage() {
   const [profiles, setProfiles] = useState<AdminProfileItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -465,17 +536,10 @@ export default function AdminProfilesPage() {
                         <div className="flex items-center gap-3">
                           {/* Profile Avatar */}
                           <div className="relative shrink-0">
-                            {profile.primaryPhoto ? (
-                              <img
-                                src={profile.primaryPhoto}
-                                alt={profile.displayName || 'Profile'}
-                                className="w-11 h-11 rounded-full object-cover border border-slate-200/90 shadow-2xs"
-                              />
-                            ) : (
-                              <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-rose-100 via-rose-50 to-red-100 text-[#E51F3E] flex items-center justify-center font-bold text-sm border border-rose-200/60 shadow-2xs">
-                                {profile.displayName?.charAt(0)?.toUpperCase() || 'P'}
-                              </div>
-                            )}
+                            <AdminProfileAvatar
+                              photoUrl={profile.primaryPhoto}
+                              displayName={profile.displayName}
+                            />
 
                             {/* User Active / Inactive Status Shield Indicator */}
                             <span
@@ -720,22 +784,11 @@ export default function AdminProfilesPage() {
                         : [];
                       const displayImg = allPhotos[activePhotoIdx] || selectedProfile.primaryPhoto;
 
-                      if (displayImg) {
-                        return (
-                          <img
-                            src={displayImg}
-                            alt={selectedProfile.displayName || 'Profile'}
-                            className="w-full h-full object-cover"
-                          />
-                        );
-                      }
                       return (
-                        <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-tr from-rose-100 via-rose-50 to-red-100 text-[#E51F3E]">
-                          <span className="font-bold text-5xl mb-2">
-                            {selectedProfile.displayName?.charAt(0)?.toUpperCase() || 'P'}
-                          </span>
-                          <span className="text-xs font-semibold text-slate-500">No Photo Uploaded</span>
-                        </div>
+                        <AdminModalPhoto
+                          photoUrl={displayImg}
+                          displayName={selectedProfile.displayName}
+                        />
                       );
                     })()}
 
@@ -782,6 +835,10 @@ export default function AdminProfilesPage() {
                             <img
                               src={photoUrl}
                               alt="Thumbnail"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src =
+                                  'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44" fill="%23fee2e2"><rect width="44" height="44" rx="8" fill="%23fee2e2"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="bold" fill="%23e11d48">?</text></svg>';
+                              }}
                               className="w-full h-full object-cover"
                             />
                           </button>

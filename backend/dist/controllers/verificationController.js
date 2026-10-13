@@ -14,10 +14,8 @@ const Verification_1 = require("../models/Verification");
 const User_1 = require("../models/User");
 const Profile_1 = require("../models/Profile");
 const securityUtils_1 = require("../utils/securityUtils");
-const VERIFICATIONS_DIR = path_1.default.join(process.cwd(), 'uploads', 'verifications');
-if (!fs_1.default.existsSync(VERIFICATIONS_DIR)) {
-    fs_1.default.mkdirSync(VERIFICATIONS_DIR, { recursive: true });
-}
+const uploadPaths_1 = require("../utils/uploadPaths");
+const VERIFICATIONS_DIR = (0, uploadPaths_1.getPrimaryUploadDir)('verifications');
 const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_DOCUMENT_TYPES = [
     'GOVERNMENT_ID',
@@ -98,7 +96,8 @@ async function submitVerification(req, res, next) {
         const randomHex = crypto_1.default.randomBytes(16).toString('hex');
         const safeType = normalizedDocType.toLowerCase().replace(/[^a-z0-9]/g, '');
         const storageKey = `doc-${safeType}-${Date.now()}-${randomHex}.${ext}`;
-        const filePath = path_1.default.join(VERIFICATIONS_DIR, storageKey);
+        const primaryDir = (0, uploadPaths_1.getPrimaryUploadDir)('verifications');
+        const filePath = path_1.default.join(primaryDir, storageKey);
         await fs_1.default.promises.writeFile(filePath, buffer);
         const documentUrl = `/api/verifications/document/${storageKey}`;
         const verification = await Verification_1.Verification.create({
@@ -212,12 +211,10 @@ async function getUserVerificationById(req, res, next) {
 async function serveVerificationDocument(req, res, next) {
     try {
         const { filename } = req.params;
-        if (!filename || typeof filename !== 'string') {
+        if (!(0, uploadPaths_1.isValidUploadFilename)(filename)) {
             return res.status(400).json({ success: false, message: 'Invalid document filename' });
         }
-        // Prevent path traversal
         const safeFilename = path_1.default.basename(filename);
-        const filePath = path_1.default.join(VERIFICATIONS_DIR, safeFilename);
         // Look up verification record
         const verification = await Verification_1.Verification.findOne({
             $or: [
@@ -238,14 +235,16 @@ async function serveVerificationDocument(req, res, next) {
                 message: 'Access forbidden: You are not authorized to access this verification document.',
             });
         }
-        if (!fs_1.default.existsSync(filePath)) {
+        // Search across candidate upload directories with symlink and traversal protection
+        const filePath = (0, uploadPaths_1.findUploadedFile)(`verifications/${safeFilename}`);
+        if (!filePath || !fs_1.default.existsSync(filePath)) {
             return res.status(404).json({ success: false, message: 'Document file is missing on storage.' });
         }
         // Set secure response headers
         res.setHeader('Content-Type', verification.fileType || 'application/pdf');
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
-        res.setHeader('Cache-Control', 'private, max-age=3600');
+        res.setHeader('Cache-Control', 'private, no-store');
         // Stream file
         const fileStream = fs_1.default.createReadStream(filePath);
         fileStream.pipe(res);

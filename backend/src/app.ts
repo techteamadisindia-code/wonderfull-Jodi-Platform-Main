@@ -279,6 +279,8 @@ app.use(
       'Accept',
       'Cache-Control',
       'Pragma',
+      'x-resume-token',
+      'resume-token',
     ],
   })
 );

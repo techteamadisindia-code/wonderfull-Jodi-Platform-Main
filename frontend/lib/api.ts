@@ -117,6 +117,7 @@ export function clearAuthToken() {
   if (typeof window !== 'undefined') {
     localStorage.removeItem(AUTH_TOKEN_KEY);
     localStorage.removeItem('wj_registration_id');
+    localStorage.removeItem('wj_resume_token');
     localStorage.removeItem('wj_reg_form_backup');
   }
 }

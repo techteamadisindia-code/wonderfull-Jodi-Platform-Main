@@ -680,9 +680,26 @@ function RegisterForm() {
         }
       }
 
-      if (savedRegId) {
+      // Both registration ID and resume token must be present together to restore a session securely
+      if (savedRegId && !savedToken) {
+        // Orphaned draft ID without resume token cannot be restored securely:
+        // Silently clear the stale storage and start fresh without making an unauthenticated request
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem(TOKEN_STORAGE_KEY);
+          localStorage.removeItem(BACKUP_KEY);
+        }
+        clearStoredResumeToken();
+        setRegistrationId('');
+        setResumeToken('');
+        setIsResumed(false);
+        if (isMounted) setInitialLoading(false);
+        return;
+      }
+
+      if (savedRegId && savedToken) {
         try {
-          const session = await getRegistrationSession(savedRegId, savedToken || undefined);
+          const session = await getRegistrationSession(savedRegId, savedToken);
           if (session && (session.status === 'IN_PROGRESS' || session.status === 'STARTED')) {
             setRegistrationId(session.registrationId);
             if (session.resumeToken) {
@@ -944,19 +961,13 @@ function RegisterForm() {
             const targetStep = Math.min(4, Math.max(1, session.currentStep)) as RegistrationStep;
             setStep(targetStep);
           } else if (session?.status === 'COMPLETED') {
-            if (typeof window !== 'undefined') {
-              localStorage.removeItem(STORAGE_KEY);
-              localStorage.removeItem(TOKEN_STORAGE_KEY);
-            }
-            clearStoredResumeToken();
+            handleStartFresh();
+          } else {
+            handleStartFresh();
           }
-        } catch (err) {
-          console.warn('Failed to restore previous registration session:', err);
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem(STORAGE_KEY);
-            localStorage.removeItem(TOKEN_STORAGE_KEY);
-          }
-          clearStoredResumeToken();
+        } catch (err: any) {
+          console.warn('Failed to restore previous registration session (starting fresh):', err?.response?.status || err?.message || 'Unauthorized');
+          handleStartFresh();
         } finally {
           if (isMounted) setInitialLoading(false);
         }
@@ -976,7 +987,9 @@ function RegisterForm() {
   // ─── 2. Safe Debounced Auto-Save Trigger ───
   const triggerAutoSave = useCallback(
     (section: string, data: Record<string, any>) => {
-      if (!registrationId) return;
+      // Must possess both an active registration ID and resume token to auto-save to database
+      const activeToken = resumeToken || getStoredResumeToken();
+      if (!registrationId || !activeToken) return;
 
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
@@ -984,10 +997,19 @@ function RegisterForm() {
 
       setSaveStatus('saving');
       autoSaveTimerRef.current = setTimeout(async () => {
+        // Re-validate that both registration ID and token are still present at execution time
+        // in case the user clicked start fresh or logged out while the debounce timer was counting down
+        const currentToken = resumeToken || getStoredResumeToken();
+        const currentRegId = registrationId || (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null);
+        if (!currentRegId || !currentToken) {
+          setSaveStatus('idle');
+          return;
+        }
+
         try {
           const res = await autoSaveRegistration({
-            registrationId,
-            resumeToken: resumeToken || undefined,
+            registrationId: currentRegId,
+            resumeToken: currentToken,
             section,
             data,
             rawFormData: {
@@ -1008,8 +1030,12 @@ function RegisterForm() {
           } else {
             setSaveStatus('error');
           }
-        } catch (err) {
-          console.warn('Auto-save network notice:', err);
+        } catch (err: any) {
+          if (err?.response?.status === 401 || err?.response?.status === 403) {
+            console.warn('Auto-save authorization notice: draft session token is missing or expired.');
+          } else {
+            console.warn('Auto-save network notice:', err);
+          }
           setSaveStatus('error');
         }
       }, 900);
@@ -1043,6 +1069,11 @@ function RegisterForm() {
 
   // Reset form / Start Fresh
   const handleStartFresh = () => {
+    // Invalidate any pending debounced auto-save so stale operations cannot execute or overwrite a new draft
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
     clearStoredResumeToken();
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORAGE_KEY);

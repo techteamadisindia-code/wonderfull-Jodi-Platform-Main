@@ -1,12 +1,17 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DOCTOR_SPECIALIZATIONS = exports.DOCTOR_QUALIFICATIONS = void 0;
+exports.DOCTOR_SPECIALIZATIONS = exports.ALL_SUPER_SPECIALIZATIONS = exports.SUPER_SPECIALITY_PATHWAYS = exports.DNB_SPECIALIZATIONS = exports.MDS_SPECIALIZATIONS = exports.MS_SPECIALIZATIONS = exports.MD_SPECIALIZATIONS = exports.DOCTORATE_MEDICAL_QUALIFICATIONS = exports.PG_MEDICAL_QUALIFICATIONS = exports.UG_MEDICAL_QUALIFICATIONS = exports.HEIGHT_RAW_VALUES = exports.ANNUAL_INCOME_OPTIONS = exports.DOCTOR_QUALIFICATIONS = void 0;
+exports.formatHeightDisplay = formatHeightDisplay;
+exports.validateHeight = validateHeight;
+exports.validateAnnualIncome = validateAnnualIncome;
+exports.validateDegreeYearSequence = validateDegreeYearSequence;
 exports.validateMedicalQualification = validateMedicalQualification;
 exports.validatePassingYear = validatePassingYear;
 exports.validateMedicalQualificationEntry = validateMedicalQualificationEntry;
 exports.validateDateOfBirth = validateDateOfBirth;
 exports.calculateProfileCompletionDetails = calculateProfileCompletionDetails;
 exports.calculateProfileCompletion = calculateProfileCompletion;
+exports.validatePreviousMarriageDetails = validatePreviousMarriageDetails;
 exports.DOCTOR_QUALIFICATIONS = [
     'MBBS',
     'BDS',
@@ -14,11 +19,13 @@ exports.DOCTOR_QUALIFICATIONS = [
     'BHMS',
     'BUMS',
     'BSMS',
+    'BNYS',
     'MD',
     'MS',
     'DNB',
     'DM',
     'MCh',
+    'DrNB',
     'MDS',
     'MD/MS',
     'MBBS + MD',
@@ -29,6 +36,287 @@ exports.DOCTOR_QUALIFICATIONS = [
     'PhD (Medical/Clinical)',
     'Other Medical Qualification',
 ];
+exports.ANNUAL_INCOME_OPTIONS = [
+    'Below ₹5 Lakh',
+    '₹ 5 - 10 Lakhs',
+    '₹ 10 - 15 Lakhs',
+    '₹ 15 - 25 Lakhs',
+    '₹ 25 - 35 Lakhs',
+    '₹ 35 - 50 Lakhs',
+    '₹ 50 Lakhs - 1 Crore',
+    '₹ 1 Crore+',
+];
+exports.HEIGHT_RAW_VALUES = [
+    '2.1', '2.2', '2.4', '2.5', '2.6', '2.7', '2.8', '2.9',
+    '3.1', '3.2', '3.3', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10',
+    '4.1', '4.2', '4.3', '4.4', '4.5', '4.6', '4.7', '4.8', '4.9', '4.10',
+    '5.1', '5.2', '5.3', '5.4', '5.5', '5.6', '5.7', '5.8', '5.9', '5.10',
+    '6.1', '6.2', '6.3', '6.4', '6.5', '6.6', '6.7', '6.8', '6.9', '6.10',
+    '7.1', '7.2', '7.3', '7.4', '7.5', '7.6', '7.7', '7.8', '7.9', '7.10',
+    '8+'
+];
+function formatHeightDisplay(height) {
+    if (!height || typeof height !== 'string')
+        return '';
+    const trimmed = height.trim();
+    if (!trimmed)
+        return '';
+    if (trimmed === '8+' || trimmed === '8ft+' || trimmed === '8′+') {
+        return '8′+';
+    }
+    const decimalMatch = trimmed.match(/^(\d+)[\.,](\d+)$/);
+    if (decimalMatch) {
+        return `${decimalMatch[1]}′ ${decimalMatch[2]}″`;
+    }
+    const feetInchMatch = trimmed.match(/^(\d+)['′]\s*(\d+)["″]?$/);
+    if (feetInchMatch) {
+        return `${feetInchMatch[1]}′ ${feetInchMatch[2]}″`;
+    }
+    const ftInMatch = trimmed.match(/^(\d+)\s*ft\s*(\d+)\s*(?:in)?$/i);
+    if (ftInMatch) {
+        return `${ftInMatch[1]}′ ${ftInMatch[2]}″`;
+    }
+    return trimmed;
+}
+function validateHeight(height) {
+    if (!height || typeof height !== 'string' || !height.trim()) {
+        return { isValid: false, error: 'Height is required.' };
+    }
+    const normalized = formatHeightDisplay(height);
+    if (!normalized) {
+        return { isValid: false, error: 'Please select a valid height.' };
+    }
+    return { isValid: true, normalized };
+}
+function validateAnnualIncome(income) {
+    if (!income || typeof income !== 'string' || !income.trim()) {
+        return { isValid: true }; // optional if unselected, but if provided must match
+    }
+    const clean = income.trim();
+    const exists = exports.ANNUAL_INCOME_OPTIONS.some((opt) => opt.toLowerCase() === clean.toLowerCase());
+    if (exists || clean.includes('Lakh') || clean.includes('Crore')) {
+        return { isValid: true };
+    }
+    return { isValid: false, error: 'Please select a valid annual income range.' };
+}
+exports.UG_MEDICAL_QUALIFICATIONS = [
+    'MBBS',
+    'BDS',
+    'BAMS',
+    'BHMS',
+    'BUMS',
+    'BSMS',
+    'BNYS',
+    'Other Medical UG',
+];
+exports.PG_MEDICAL_QUALIFICATIONS = [
+    'MD',
+    'MS',
+    'MDS',
+    'DNB',
+    'Other Medical PG',
+];
+exports.DOCTORATE_MEDICAL_QUALIFICATIONS = [
+    'DM',
+    'MCh',
+    'DrNB',
+    'Other Doctorate / Super-Speciality',
+];
+exports.MD_SPECIALIZATIONS = [
+    'General Medicine',
+    'Paediatrics',
+    'Anaesthesiology',
+    'Radiodiagnosis',
+    'Dermatology',
+    'Psychiatry',
+    'Respiratory Medicine',
+    'Emergency Medicine',
+    'Pathology',
+    'Microbiology',
+    'Pharmacology',
+    'Community Medicine',
+    'Forensic Medicine',
+    'Nuclear Medicine',
+    'Radiation Oncology',
+    'Physical Medicine and Rehabilitation',
+    'Geriatrics',
+    'Ayurvedic Medicine',
+    'Homeopathic Medicine',
+    'Unani Medicine',
+    'Other MD Specialization',
+];
+exports.MS_SPECIALIZATIONS = [
+    'General Surgery',
+    'Orthopaedics',
+    'Obstetrics and Gynaecology',
+    'Ophthalmology',
+    'ENT (Otorhinolaryngology)',
+    'Other MS Specialization',
+];
+exports.MDS_SPECIALIZATIONS = [
+    'Master of Dental Surgery (General MDS)',
+    'Prosthodontics',
+    'Periodontics',
+    'Oral and Maxillofacial Surgery',
+    'Conservative Dentistry and Endodontics',
+    'Orthodontics and Dentofacial Orthopaedics',
+    'Pedodontics and Preventive Dentistry',
+    'Oral Pathology and Microbiology',
+    'Public Health Dentistry',
+    'Oral Medicine and Radiology',
+    'Other MDS Specialization',
+];
+exports.DNB_SPECIALIZATIONS = [
+    'General Medicine',
+    'Paediatrics',
+    'Anaesthesiology',
+    'Radiodiagnosis',
+    'Dermatology',
+    'Psychiatry',
+    'Respiratory Medicine',
+    'Emergency Medicine',
+    'Pathology',
+    'General Surgery',
+    'Orthopaedics',
+    'Obstetrics and Gynaecology',
+    'Ophthalmology',
+    'ENT (Otorhinolaryngology)',
+    'Other DNB Specialization',
+];
+exports.SUPER_SPECIALITY_PATHWAYS = {
+    'General Medicine': {
+        degrees: ['DM'],
+        specialities: [
+            'Cardiology',
+            'Neurology',
+            'Nephrology',
+            'Medical Gastroenterology',
+            'Endocrinology',
+            'Medical Oncology',
+            'Clinical Haematology',
+            'Critical Care Medicine',
+            'Infectious Diseases',
+            'Hepatology',
+        ],
+    },
+    'Paediatrics': {
+        degrees: ['DM'],
+        specialities: [
+            'Neonatology',
+            'Paediatric Neurology',
+            'Paediatric Nephrology',
+            'Paediatric Gastroenterology',
+            'Paediatric Critical Care',
+        ],
+    },
+    'Respiratory Medicine': {
+        degrees: ['DM', 'DrNB'],
+        specialities: ['Critical Care Medicine', 'Pulmonary Medicine'],
+    },
+    'Anaesthesiology': {
+        degrees: ['DM', 'DrNB'],
+        specialities: ['Critical Care Medicine'],
+    },
+    'Radiodiagnosis': {
+        degrees: ['DM', 'DrNB'],
+        specialities: ['Interventional Radiology'],
+    },
+    'General Surgery': {
+        degrees: ['MCh', 'DrNB'],
+        specialities: [
+            'Cardiovascular and Thoracic Surgery',
+            'Neurosurgery',
+            'Urology',
+            'Plastic and Reconstructive Surgery',
+            'Surgical Gastroenterology',
+            'Surgical Oncology',
+            'Endocrine Surgery',
+            'Vascular Surgery',
+            'Paediatric Surgery',
+        ],
+    },
+    'Orthopaedics': {
+        degrees: ['MCh', 'DrNB'],
+        specialities: [
+            'Hand Surgery',
+            'Paediatric Orthopaedics',
+            'Surgical Oncology',
+        ],
+    },
+    'Obstetrics and Gynaecology': {
+        degrees: ['MCh', 'DrNB'],
+        specialities: [
+            'Gynaecological Oncology',
+            'Reproductive Medicine and Surgery',
+        ],
+    },
+    'ENT (Otorhinolaryngology)': {
+        degrees: ['MCh', 'DrNB'],
+        specialities: [
+            'Head and Neck Surgery',
+            'Neurosurgery',
+            'Plastic and Reconstructive Surgery',
+        ],
+    },
+};
+exports.ALL_SUPER_SPECIALIZATIONS = [
+    'Cardiology',
+    'Neurology',
+    'Nephrology',
+    'Medical Gastroenterology',
+    'Endocrinology',
+    'Medical Oncology',
+    'Clinical Haematology',
+    'Critical Care Medicine',
+    'Infectious Diseases',
+    'Hepatology',
+    'Neonatology',
+    'Paediatric Neurology',
+    'Paediatric Nephrology',
+    'Paediatric Gastroenterology',
+    'Paediatric Critical Care',
+    'Pulmonary Medicine',
+    'Interventional Radiology',
+    'Cardiovascular and Thoracic Surgery',
+    'Neurosurgery',
+    'Urology',
+    'Plastic and Reconstructive Surgery',
+    'Surgical Gastroenterology',
+    'Surgical Oncology',
+    'Endocrine Surgery',
+    'Vascular Surgery',
+    'Paediatric Surgery',
+    'Hand Surgery',
+    'Paediatric Orthopaedics',
+    'Gynaecological Oncology',
+    'Reproductive Medicine and Surgery',
+    'Head and Neck Surgery',
+    'Other Super-Speciality',
+];
+function validateDegreeYearSequence(ugYear, pgYear, docYear) {
+    const ug = ugYear ? Number(ugYear) : null;
+    const pg = pgYear ? Number(pgYear) : null;
+    const doc = docYear ? Number(docYear) : null;
+    if (ug && pg && pg < ug) {
+        return {
+            isValid: false,
+            error: `PG completion year (${pg}) cannot be earlier than UG completion year (${ug}).`,
+        };
+    }
+    if (pg && doc && doc < pg) {
+        return {
+            isValid: false,
+            error: `Doctorate/Super-speciality completion year (${doc}) cannot be earlier than PG completion year (${pg}).`,
+        };
+    }
+    if (ug && doc && !pg && doc < ug) {
+        return {
+            isValid: false,
+            error: `Doctorate completion year (${doc}) cannot be earlier than UG completion year (${ug}).`,
+        };
+    }
+    return { isValid: true };
+}
 exports.DOCTOR_SPECIALIZATIONS = [
     'General Physician',
     'Cardiologist',
@@ -367,5 +655,200 @@ function calculateProfileCompletionDetails(profile, user) {
  */
 function calculateProfileCompletion(profile, user) {
     return calculateProfileCompletionDetails(profile, user).score;
+}
+/**
+ * Validates and sanitizes conditional Previous Marriage & Family Details for Divorced and Widowed candidates
+ */
+function validatePreviousMarriageDetails(maritalStatus, details) {
+    const status = String(maritalStatus || '').trim();
+    // For Never Married, or non-divorced/non-widowed status:
+    if (status !== 'Divorced' && status !== 'Widowed') {
+        return { isValid: true, sanitized: null };
+    }
+    if (!details || typeof details !== 'object') {
+        return {
+            isValid: false,
+            error: 'Please complete the Previous Marriage & Family Details section.',
+        };
+    }
+    // 1. Children from previous marriage (Required: Yes / No)
+    const rawHasChildren = details.hasChildren;
+    if (rawHasChildren === undefined ||
+        rawHasChildren === null ||
+        (typeof rawHasChildren === 'string' && !rawHasChildren.trim())) {
+        return {
+            isValid: false,
+            error: 'Please specify whether you have children from previous marriage (Yes/No).',
+        };
+    }
+    const hasChildren = rawHasChildren === true ||
+        rawHasChildren === 'Yes' ||
+        rawHasChildren === 'true' ||
+        rawHasChildren === 1 ||
+        rawHasChildren === '1';
+    let childrenCount = 0;
+    const children = [];
+    if (hasChildren) {
+        const rawCount = Number(details.childrenCount);
+        if (isNaN(rawCount) || rawCount < 1 || rawCount > 10 || !Number.isInteger(rawCount)) {
+            return {
+                isValid: false,
+                error: 'Please select a valid number of children (between 1 and 10).',
+            };
+        }
+        childrenCount = rawCount;
+        if (!Array.isArray(details.children)) {
+            return {
+                isValid: false,
+                error: 'Please provide details for all ' + childrenCount + ' children.',
+            };
+        }
+        const rawChildren = details.children;
+        if (rawChildren.length !== childrenCount) {
+            return {
+                isValid: false,
+                error: 'Please provide details for all ' + childrenCount + ' children matching the count.',
+            };
+        }
+        const validGenders = ['Boy', 'Girl', 'Prefer not to disclose'];
+        const validArrangements = ['With me', 'With former spouse', 'Shared custody', 'Other', ''];
+        for (let i = 0; i < childrenCount; i++) {
+            const child = rawChildren[i];
+            if (!child || typeof child !== 'object') {
+                return {
+                    isValid: false,
+                    error: 'Details for child #' + (i + 1) + ' are malformed or missing.',
+                };
+            }
+            const gender = String(child.gender || '').trim();
+            if (!gender || !validGenders.includes(gender)) {
+                return {
+                    isValid: false,
+                    error: 'Please select a valid gender (Boy, Girl, or Prefer not to disclose) for child #' + (i + 1) + '.',
+                };
+            }
+            const rawArrangement = child.livingArrangement !== undefined && child.livingArrangement !== null
+                ? String(child.livingArrangement).trim()
+                : '';
+            if (rawArrangement && !validArrangements.includes(rawArrangement)) {
+                return {
+                    isValid: false,
+                    error: 'Please select a valid living arrangement for child #' + (i + 1) + '.',
+                };
+            }
+            const ageOrDob = child.ageOrDob ? String(child.ageOrDob).trim().slice(0, 50) : '';
+            children.push({
+                gender,
+                ageOrDob,
+                livingArrangement: rawArrangement,
+            });
+        }
+    }
+    const currentYear = new Date().getFullYear();
+    // 2. Marital Status Specific Validations
+    if (status === 'Divorced') {
+        const settlementStatus = String(details.divorceSettlementStatus || '').trim();
+        const validSettlementStatuses = [
+            'Completed',
+            'Pending',
+            'Mutual Consent Filed',
+            'Contested / In Process',
+            'Not applicable',
+            'Other',
+        ];
+        if (!settlementStatus || !validSettlementStatuses.includes(settlementStatus)) {
+            return {
+                isValid: false,
+                error: 'Please select a valid divorce settlement status.',
+            };
+        }
+        let finalizationYear = undefined;
+        let finalizationDate = undefined;
+        let pendingCaseDetails = undefined;
+        let expectedCompletionYear = undefined;
+        if (settlementStatus === 'Completed') {
+            const rawYear = String(details.divorceFinalizationYear || '').trim();
+            if (!rawYear) {
+                return {
+                    isValid: false,
+                    error: 'Divorce finalization year is required for completed settlements.',
+                };
+            }
+            const yearNum = Number(rawYear);
+            if (!/^\d{4}$/.test(rawYear) || isNaN(yearNum) || yearNum < 1950 || yearNum > currentYear) {
+                return {
+                    isValid: false,
+                    error: 'Divorce finalization year must be a 4-digit year between 1950 and ' + currentYear + '.',
+                };
+            }
+            finalizationYear = rawYear;
+            if (details.divorceFinalizationDate) {
+                finalizationDate = String(details.divorceFinalizationDate).trim();
+            }
+        }
+        else {
+            // Pending, Mutual Consent Filed, Contested / In Process, Not applicable, Other
+            if (details.pendingCaseDetails) {
+                pendingCaseDetails = String(details.pendingCaseDetails).trim();
+            }
+            if (details.expectedCompletionYear) {
+                const expYearStr = String(details.expectedCompletionYear).trim();
+                if (expYearStr) {
+                    const expYear = Number(expYearStr);
+                    if (!/^\d{4}$/.test(expYearStr) || isNaN(expYear) || expYear < currentYear - 5 || expYear > currentYear + 20) {
+                        return {
+                            isValid: false,
+                            error: 'Expected completion year must be a valid 4-digit year.',
+                        };
+                    }
+                    expectedCompletionYear = expYearStr;
+                }
+            }
+            if (details.divorceFinalizationDate) {
+                finalizationDate = String(details.divorceFinalizationDate).trim();
+            }
+        }
+        return {
+            isValid: true,
+            sanitized: {
+                hasChildren,
+                childrenCount,
+                children,
+                divorceSettlementStatus: settlementStatus,
+                divorceFinalizationYear: finalizationYear,
+                divorceFinalizationDate: finalizationDate,
+                pendingCaseDetails,
+                expectedCompletionYear,
+                additionalNotes: details.additionalNotes ? String(details.additionalNotes).trim() : undefined,
+            },
+        };
+    }
+    if (status === 'Widowed') {
+        const rawPassingYear = String(details.spousePassingYear || '').trim();
+        if (!rawPassingYear) {
+            return {
+                isValid: false,
+                error: 'Year of spouse\'s passing is required.',
+            };
+        }
+        const passingYearNum = Number(rawPassingYear);
+        if (!/^\d{4}$/.test(rawPassingYear) || isNaN(passingYearNum) || passingYearNum < 1950 || passingYearNum > currentYear) {
+            return {
+                isValid: false,
+                error: 'Year of spouse\'s passing must be a 4-digit year between 1950 and ' + currentYear + '.',
+            };
+        }
+        return {
+            isValid: true,
+            sanitized: {
+                hasChildren,
+                childrenCount,
+                children,
+                spousePassingYear: rawPassingYear,
+                additionalNotes: details.additionalNotes ? String(details.additionalNotes).trim() : undefined,
+            },
+        };
+    }
+    return { isValid: true, sanitized: null };
 }
 //# sourceMappingURL=doctorValidation.js.map

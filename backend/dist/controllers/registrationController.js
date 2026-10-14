@@ -36,6 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.extractResumeToken = extractResumeToken;
+exports.verifyResumeToken = verifyResumeToken;
 exports.startRegistration = startRegistration;
 exports.saveStep = saveStep;
 exports.autoSave = autoSave;
@@ -140,7 +142,57 @@ function sanitizeRegistration(regDoc) {
     if (obj.stepData?.rawFormData?.confirmPassword) {
         delete obj.stepData.rawFormData.confirmPassword;
     }
+    delete obj.resumeToken;
     return obj;
+}
+/**
+ * Extract resume token from request headers or body only.
+ *
+ * NOTE: URL query parameters are intentionally NOT accepted as a token source.
+ * Query parameters appear in server access logs, browser history, and Referer
+ * headers, making them unsuitable for bearer credentials.
+ *
+ * Accepted sources (checked in priority order):
+ *   1. x-resume-token  request header  (preferred -- set by the frontend API client)
+ *   2. resume-token    request header  (legacy alias)
+ *   3. req.body.resumeToken / req.body.draftToken  (POST body only)
+ */
+function extractResumeToken(req) {
+    // 1. Header (preferred)
+    const headerToken = req.headers['x-resume-token'] || req.headers['resume-token'];
+    if (headerToken && typeof headerToken === 'string' && headerToken.trim()) {
+        return headerToken.trim();
+    }
+    // 2. Request body (POST / PUT payloads)
+    const bodyToken = req.body?.resumeToken || req.body?.draftToken;
+    if (bodyToken && typeof bodyToken === 'string' && bodyToken.trim()) {
+        return bodyToken.trim();
+    }
+    // URL query parameters are deliberately excluded -- see JSDoc above.
+    return null;
+}
+/**
+ * Timing-safe comparison of resume tokens
+ */
+function verifyResumeToken(storedToken, clientToken) {
+    if (!storedToken || typeof storedToken !== 'string')
+        return false;
+    if (!clientToken || typeof clientToken !== 'string')
+        return false;
+    const stored = storedToken.trim();
+    const client = clientToken.trim();
+    if (!stored || !client)
+        return false;
+    const storedBuf = Buffer.from(stored, 'utf8');
+    const clientBuf = Buffer.from(client, 'utf8');
+    if (storedBuf.length !== clientBuf.length)
+        return false;
+    try {
+        return crypto_1.default.timingSafeEqual(storedBuf, clientBuf);
+    }
+    catch {
+        return false;
+    }
 }
 // ─────────────────────────────────────────────────────────────────────────────
 // USER REGISTRATION FLOW CONTROLLERS
@@ -228,6 +280,15 @@ async function startRegistration(req, res, next) {
             '127.0.0.1';
         const userAgent = req.headers['user-agent'] || 'Unknown';
         if (registration) {
+            // If an existing draft is found, only allow updating if the caller possesses the matching resumeToken
+            const clientToken = extractResumeToken(req);
+            if (!clientToken || !verifyResumeToken(registration.resumeToken, clientToken)) {
+                return res.status(409).json({
+                    success: false,
+                    code: 'DRAFT_ALREADY_EXISTS',
+                    message: 'An in-progress registration draft already exists for this email address or mobile number. Please resume your existing registration session.',
+                });
+            }
             // Update existing draft with latest data
             registration.candidateName = cleanName || registration.candidateName;
             registration.email = normalizedEmail || registration.email;
@@ -377,6 +438,21 @@ async function saveStep(req, res, next) {
                 message: 'No registration session found for the provided Registration ID',
             });
         }
+        const clientToken = extractResumeToken(req);
+        if (!clientToken) {
+            return res.status(401).json({
+                success: false,
+                code: 'RESUME_TOKEN_REQUIRED',
+                message: 'Registration resume token is required to save progress.',
+            });
+        }
+        if (!verifyResumeToken(registration.resumeToken, clientToken)) {
+            return res.status(403).json({
+                success: false,
+                code: 'INVALID_RESUME_TOKEN',
+                message: 'Invalid or expired registration resume token.',
+            });
+        }
         if (registration.status === 'COMPLETED') {
             return res.status(400).json({
                 success: false,
@@ -472,6 +548,28 @@ async function saveStep(req, res, next) {
                     }
                 }
             }
+            // Validate conditional Previous Marriage Details for Divorced and Widowed candidates
+            const activeMaritalStatus = (data.maritalStatus !== undefined ? data.maritalStatus : (registration.stepData.personalInfo?.maritalStatus || rawFormData.maritalStatus || ''));
+            if (activeMaritalStatus === 'Divorced' || activeMaritalStatus === 'Widowed') {
+                const pDetails = data.previousMarriageDetails !== undefined
+                    ? data.previousMarriageDetails
+                    : (rawFormData.previousMarriageDetails || registration.stepData.personalInfo?.previousMarriageDetails);
+                const pValidation = (0, doctorValidation_1.validatePreviousMarriageDetails)(activeMaritalStatus, pDetails);
+                if (!pValidation.isValid) {
+                    return res.status(400).json({
+                        success: false,
+                        message: pValidation.error || 'Please fill in required details for previous marriage.',
+                    });
+                }
+                data.previousMarriageDetails = pValidation.sanitized;
+            }
+            else if (activeMaritalStatus) {
+                // If candidate selects Never Married or any other status, clear previous marriage fields
+                data.previousMarriageDetails = undefined;
+                if (registration.stepData.personalInfo) {
+                    delete registration.stepData.personalInfo.previousMarriageDetails;
+                }
+            }
             // Validate Sibling Details if provided
             const sibs = data.siblings || rawFormData.siblings;
             if (sibs && typeof sibs === 'object') {
@@ -563,17 +661,49 @@ async function saveStep(req, res, next) {
                             }
                         }
                     }
+                    // Validate chronological sequence of completion years
+                    const ugYear = medQuals.undergraduate?.[0]?.completionYear || medQuals.undergraduate?.[0]?.passingYear || medQuals.undergraduate?.[0]?.year;
+                    const pgYear = medQuals.postgraduate?.[0]?.completionYear || medQuals.postgraduate?.[0]?.passingYear || medQuals.postgraduate?.[0]?.year;
+                    const docYear = medQuals.doctorate?.[0]?.completionYear || medQuals.doctorate?.[0]?.passingYear || medQuals.doctorate?.[0]?.year;
+                    const seqCheck = (0, doctorValidation_1.validateDegreeYearSequence)(ugYear, pgYear, docYear);
+                    if (!seqCheck.isValid) {
+                        return res.status(400).json({
+                            success: false,
+                            message: seqCheck.error,
+                        });
+                    }
                 }
                 registration.stepData.medicalQualifications = medQuals;
-                // Populate primary degree into legacy educationProfession
-                const primaryEntry = medQuals.undergraduate?.[0] || medQuals.postgraduate?.[0] || medQuals.doctorate?.[0];
-                if (primaryEntry && primaryEntry.qualification) {
+                // Populate highest degree into legacy educationProfession
+                const docEntry = medQuals.doctorate?.[0];
+                const pgEntry = medQuals.postgraduate?.[0];
+                const ugEntry = medQuals.undergraduate?.[0];
+                const highestEntry = docEntry || pgEntry || ugEntry;
+                if (highestEntry && highestEntry.qualification) {
+                    const qualParts = [
+                        ugEntry?.qualification,
+                        pgEntry?.qualification,
+                        docEntry?.qualification,
+                    ].filter(Boolean);
+                    const compositeQual = qualParts.join(' + ') || highestEntry.qualification;
+                    const displayDegree = highestEntry.specialization
+                        ? `${highestEntry.qualification} (${highestEntry.specialization})`
+                        : highestEntry.qualification;
                     registration.stepData.educationProfession = {
                         ...(registration.stepData.educationProfession || {}),
-                        education: primaryEntry.qualification,
-                        degree: primaryEntry.qualification,
-                        medicalCollege: primaryEntry.college || registration.stepData.educationProfession?.medicalCollege,
+                        education: compositeQual,
+                        degree: displayDegree,
+                        medicalCollege: highestEntry.college || ugEntry?.college || registration.stepData.educationProfession?.medicalCollege,
                     };
+                }
+            }
+            if (data.annualIncome !== undefined && String(data.annualIncome).trim()) {
+                const incomeCheck = (0, doctorValidation_1.validateAnnualIncome)(data.annualIncome);
+                if (!incomeCheck.isValid) {
+                    return res.status(400).json({
+                        success: false,
+                        message: incomeCheck.error || 'Please select a valid annual income range.',
+                    });
                 }
             }
             const eduInput = data.education ?? data.degree ?? data.qualification ?? rawFormData.qualification;
@@ -728,16 +858,43 @@ async function saveStep(req, res, next) {
  */
 async function autoSave(req, res, next) {
     try {
-        const { registrationId, section, data = {}, rawFormData = {} } = req.body;
-        if (!registrationId) {
+        const rawRegId = req.params.registrationId || req.body.registrationId;
+        const { section, data = {}, rawFormData = {} } = req.body;
+        if (!rawRegId) {
             return res.status(400).json({ success: false, message: 'registrationId is required' });
         }
         const registration = await Registration_1.Registration.findOne({
-            registrationId: String(registrationId).trim().toUpperCase(),
+            registrationId: String(rawRegId).trim().toUpperCase(),
             isDeleted: false,
         });
-        if (!registration || registration.status === 'COMPLETED') {
-            return res.status(200).json({ success: false, message: 'Draft not editable' });
+        if (!registration) {
+            return res.status(404).json({
+                success: false,
+                code: 'REGISTRATION_NOT_FOUND',
+                message: 'No registration session found for the provided Registration ID',
+            });
+        }
+        const clientToken = extractResumeToken(req);
+        if (!clientToken) {
+            return res.status(401).json({
+                success: false,
+                code: 'RESUME_TOKEN_REQUIRED',
+                message: 'Registration resume token is required for auto-save.',
+            });
+        }
+        if (!verifyResumeToken(registration.resumeToken, clientToken)) {
+            return res.status(403).json({
+                success: false,
+                code: 'INVALID_RESUME_TOKEN',
+                message: 'Invalid or expired registration resume token.',
+            });
+        }
+        if (registration.status === 'COMPLETED') {
+            return res.status(400).json({
+                success: false,
+                code: 'ALREADY_COMPLETED',
+                message: 'Draft not editable. This registration has already been completed.',
+            });
         }
         if (data.dob) {
             const dobResult = (0, doctorValidation_1.validateDateOfBirth)(data.dob, data.gender || registration.gender);
@@ -777,6 +934,24 @@ async function autoSave(req, res, next) {
                 hobbiesInterests: data.hobbiesInterests ?? registration.stepData.personalInfo?.hobbiesInterests,
                 careerGoals: data.careerGoals ?? registration.stepData.personalInfo?.careerGoals,
             };
+        }
+        if (data.maritalStatus !== undefined) {
+            const activeStatus = String(data.maritalStatus || '').trim();
+            if (activeStatus !== 'Divorced' && activeStatus !== 'Widowed') {
+                delete data.previousMarriageDetails;
+                if (registration.stepData.personalInfo) {
+                    delete registration.stepData.personalInfo.previousMarriageDetails;
+                }
+            }
+            else if (data.previousMarriageDetails) {
+                const v = (0, doctorValidation_1.validatePreviousMarriageDetails)(activeStatus, data.previousMarriageDetails);
+                if (v.isValid && v.sanitized) {
+                    if (!registration.stepData.personalInfo) {
+                        registration.stepData.personalInfo = {};
+                    }
+                    registration.stepData.personalInfo.previousMarriageDetails = v.sanitized;
+                }
+            }
         }
         const fam = data.familyBackground || data.familyDetails || {};
         if (data.familyType || data.fatherOccupation || data.motherOccupation || data.siblings || Object.keys(fam).length > 0) {
@@ -841,6 +1016,21 @@ async function getRegistrationById(req, res, next) {
                 message: 'Registration record not found for the given ID',
             });
         }
+        const clientToken = extractResumeToken(req);
+        if (!clientToken) {
+            return res.status(401).json({
+                success: false,
+                code: 'RESUME_TOKEN_REQUIRED',
+                message: 'Registration resume token is required to access draft data.',
+            });
+        }
+        if (!verifyResumeToken(registration.resumeToken, clientToken)) {
+            return res.status(403).json({
+                success: false,
+                code: 'INVALID_RESUME_TOKEN',
+                message: 'Invalid or expired registration resume token.',
+            });
+        }
         // Touch lastActiveAt when resuming
         registration.lastActiveAt = new Date();
         await registration.save();
@@ -889,6 +1079,21 @@ async function validateRegistrationDraft(req, res, next) {
                 message: 'Registration session not found',
             });
         }
+        const clientToken = extractResumeToken(req);
+        if (!clientToken) {
+            return res.status(401).json({
+                success: false,
+                code: 'RESUME_TOKEN_REQUIRED',
+                message: 'Registration resume token is required to validate draft.',
+            });
+        }
+        if (!verifyResumeToken(registration.resumeToken, clientToken)) {
+            return res.status(403).json({
+                success: false,
+                code: 'INVALID_RESUME_TOKEN',
+                message: 'Invalid or expired registration resume token.',
+            });
+        }
         const basic = registration.stepData?.basicInfo || {};
         const personal = registration.stepData?.personalInfo || {};
         const edu = registration.stepData?.educationProfession || {};
@@ -927,6 +1132,18 @@ async function validateRegistrationDraft(req, res, next) {
         const maritalStatus = (personal.maritalStatus || raw.maritalStatus || '').trim();
         if (!maritalStatus) {
             missingFields.push({ step: 2, field: 'maritalStatus', label: 'Marital Status', message: 'Candidate marital status is required.' });
+        }
+        else if (maritalStatus === 'Divorced' || maritalStatus === 'Widowed') {
+            const pDetails = personal.previousMarriageDetails || raw.previousMarriageDetails;
+            const v = (0, doctorValidation_1.validatePreviousMarriageDetails)(maritalStatus, pDetails);
+            if (!v.isValid) {
+                missingFields.push({
+                    step: 2,
+                    field: 'previousMarriageDetails',
+                    label: 'Previous Marriage & Family Details',
+                    message: v.error || 'Please complete the Previous Marriage & Family Details section.',
+                });
+            }
         }
         const religion = (personal.religion || raw.religion || '').trim();
         if (!religion) {
@@ -994,6 +1211,21 @@ async function completeRegistration(req, res, next) {
                 success: false,
                 code: 'NOT_FOUND',
                 message: 'Registration session not found',
+            });
+        }
+        const clientToken = extractResumeToken(req);
+        if (!clientToken) {
+            return res.status(401).json({
+                success: false,
+                code: 'RESUME_TOKEN_REQUIRED',
+                message: 'Registration resume token is required to complete registration.',
+            });
+        }
+        if (!verifyResumeToken(registration.resumeToken, clientToken)) {
+            return res.status(403).json({
+                success: false,
+                code: 'INVALID_RESUME_TOKEN',
+                message: 'Invalid or expired registration resume token.',
             });
         }
         if (registration.status === 'COMPLETED') {
@@ -1120,6 +1352,18 @@ async function completeRegistration(req, res, next) {
                 message: 'Religion is required to complete registration.',
             });
         }
+        let finalPreviousMarriageDetails = null;
+        if (finalMaritalStatus === 'Divorced' || finalMaritalStatus === 'Widowed') {
+            const pDetails = personal.previousMarriageDetails || raw.previousMarriageDetails || finalData.previousMarriageDetails;
+            const v = (0, doctorValidation_1.validatePreviousMarriageDetails)(finalMaritalStatus, pDetails);
+            if (!v.isValid) {
+                return res.status(400).json({
+                    success: false,
+                    message: v.error || 'Please complete the required Previous Marriage & Family Details.',
+                });
+            }
+            finalPreviousMarriageDetails = v.sanitized;
+        }
         const finalCity = (personal.city || raw.city || '').trim();
         if (!finalCity) {
             return res.status(400).json({
@@ -1186,7 +1430,7 @@ async function completeRegistration(req, res, next) {
             displayName: candidateFullName,
             gender: candidateGender === 'Male' ? 'Male' : 'Female',
             dob: validDobDate,
-            height: personal.height || `5' 7"`,
+            height: (personal.height && (0, doctorValidation_1.formatHeightDisplay)(personal.height)) || personal.height || `5′ 7″`,
             maritalStatus: finalMaritalStatus,
             motherTongue: personal.motherTongue || '',
             religion: finalReligion,
@@ -1217,6 +1461,7 @@ async function completeRegistration(req, res, next) {
             personalityValues: personal.personalityValues || raw.personalityValues || '',
             hobbiesInterests: personal.hobbiesInterests || raw.hobbiesInterests || '',
             careerGoals: personal.careerGoals || raw.careerGoals || '',
+            previousMarriageDetails: finalPreviousMarriageDetails || undefined,
             familyBackground: {
                 familyType: family.familyType || personal.familyType || raw.familyType || '',
                 familyStatus: family.familyStatus || raw.familyStatus || '',
@@ -1267,11 +1512,15 @@ async function completeRegistration(req, res, next) {
             city: finalCity,
             currentLocation: personal.currentLocation || {
                 countryId: personal.countryId,
+                countryName: personal.countryName || 'India',
                 stateId: personal.stateId,
+                stateName: personal.state,
                 districtId: personal.districtId,
+                districtName: personal.district || personal.districtName,
                 cityId: personal.cityId,
+                cityName: finalCity,
                 pincode: personal.pinCode || personal.pincode,
-                formattedAddress: [finalCity, personal.state, 'India'].filter(Boolean).join(', '),
+                formattedAddress: [finalCity, personal.district, personal.state, 'India'].filter(Boolean).join(', '),
             },
             primaryPhoto: primaryPhotoUrl,
             photos: photoList,

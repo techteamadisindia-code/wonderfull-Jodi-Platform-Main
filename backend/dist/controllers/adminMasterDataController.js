@@ -26,17 +26,31 @@ const securityUtils_1 = require("../utils/securityUtils");
  */
 async function getMasterDataSummary(req, res, next) {
     try {
+        const safeCount = async (model) => {
+            if (!model || typeof model.countDocuments !== 'function')
+                return 0;
+            try {
+                return await model.countDocuments();
+            }
+            catch (err) {
+                if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+                    console.warn('[MasterDataSummary] Missing table encountered during count, reporting 0:', err.message || err);
+                    return 0;
+                }
+                throw err;
+            }
+        };
         const [countries, states, districts, subDistricts, cities, villages, languages, religions, castes, subCastes,] = await Promise.all([
-            Location_1.Country.countDocuments(),
-            Location_1.State.countDocuments(),
-            Location_1.District.countDocuments(),
-            Location_1.SubDistrict.countDocuments(),
-            Location_1.City.countDocuments(),
-            Location_1.Village.countDocuments(),
-            CommunityMaster_1.Language.countDocuments(),
-            CommunityMaster_1.Religion.countDocuments(),
-            CommunityMaster_1.Caste.countDocuments(),
-            CommunityMaster_1.SubCaste.countDocuments(),
+            safeCount(Location_1.Country),
+            safeCount(Location_1.State),
+            safeCount(Location_1.District),
+            safeCount(Location_1.SubDistrict),
+            safeCount(Location_1.City),
+            safeCount(Location_1.Village),
+            safeCount(CommunityMaster_1.Language),
+            safeCount(CommunityMaster_1.Religion),
+            safeCount(CommunityMaster_1.Caste),
+            safeCount(CommunityMaster_1.SubCaste),
         ]);
         return res.json({
             success: true,

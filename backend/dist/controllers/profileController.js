@@ -32,7 +32,12 @@ const profileSchema = zod_1.z.object({
         const result = (0, doctorValidation_1.validateDateOfBirth)(val);
         return { message: result.error || 'Date of birth year must be exactly 4 digits.' };
     }),
-    height: zod_1.z.string().trim().min(1).max(50),
+    height: zod_1.z
+        .string()
+        .trim()
+        .min(1)
+        .max(50)
+        .transform((val) => (0, doctorValidation_1.formatHeightDisplay)(val) || val),
     maritalStatus: zod_1.z.string().trim().min(1).max(50),
     motherTongue: zod_1.z.string().trim().min(1).max(50),
     religion: zod_1.z.string().trim().min(1).max(50),
@@ -53,7 +58,14 @@ const profileSchema = zod_1.z.object({
     profession: zod_1.z.string().trim().min(1).max(100),
     company: zod_1.z.string().trim().max(100).optional(),
     workLocation: zod_1.z.string().trim().max(100).optional(),
-    annualIncome: zod_1.z.string().trim().max(50).optional(),
+    annualIncome: zod_1.z
+        .string()
+        .trim()
+        .max(50)
+        .optional()
+        .refine((val) => !val || (0, doctorValidation_1.validateAnnualIncome)(val).isValid, {
+        message: 'Please select a valid annual income range.',
+    }),
     country: zod_1.z.string().trim().min(1).max(50),
     state: zod_1.z.string().trim().min(1).max(50),
     city: zod_1.z.string().trim().min(1).max(50),
@@ -89,14 +101,19 @@ const profileSchema = zod_1.z.object({
     currentLocation: zod_1.z
         .object({
         countryId: zod_1.z.string().optional(),
+        countryName: zod_1.z.string().optional(),
         stateId: zod_1.z.string().optional(),
+        stateName: zod_1.z.string().optional(),
         districtId: zod_1.z.string().optional(),
+        districtName: zod_1.z.string().optional(),
         subDistrictId: zod_1.z.string().optional(),
         cityId: zod_1.z.string().optional(),
+        cityName: zod_1.z.string().optional(),
         villageId: zod_1.z.string().optional(),
         pincode: zod_1.z.string().max(20).optional(),
         formattedAddress: zod_1.z.string().max(300).optional(),
     })
+        .passthrough()
         .optional(),
     nativePlaceDetails: zod_1.z
         .object({
@@ -329,60 +346,41 @@ async function updateMyProfile(req, res, next) {
         }
         let profile = await Profile_1.Profile.findOne({ user: userId });
         if (!profile) {
-            const userDoc = await User_1.User.findById(userId);
-            profile = new Profile_1.Profile({
-                user: userId,
-                displayName: userDoc?.fullName || 'Doctor Candidate',
-                gender: 'Female',
-                dob: new Date('1996-05-15'),
-                height: `5' 6"`,
-                maritalStatus: 'Never Married',
-                motherTongue: data.motherTongue || '',
-                religion: data.religion || '',
-                caste: data.caste || '',
-                education: data.education || 'MBBS',
-                degree: data.degree || 'MBBS',
-                profession: data.profession || 'General Physician',
-                country: data.country || 'India',
-                state: data.state || '',
-                city: 'Mumbai',
-                verificationStatus: 'UNVERIFIED',
-                lastActiveAt: new Date(),
-                ...data,
+            return res.status(404).json({
+                success: false,
+                message: 'Profile not found. Please complete profile registration first.',
             });
         }
-        else {
-            // Deep merge partnerPreferences and privacySettings if provided
-            if (data.partnerPreferences) {
-                profile.partnerPreferences = {
-                    ...(profile.partnerPreferences?.toObject?.() || profile.partnerPreferences || {}),
-                    ...data.partnerPreferences,
-                };
-                delete data.partnerPreferences;
-            }
-            if (data.privacySettings) {
-                profile.privacySettings = {
-                    ...(profile.privacySettings?.toObject?.() || profile.privacySettings || {}),
-                    ...data.privacySettings,
-                };
-                delete data.privacySettings;
-            }
-            if (data.horoscope) {
-                profile.horoscope = {
-                    ...(profile.horoscope?.toObject?.() || profile.horoscope || {}),
-                    ...data.horoscope,
-                };
-                delete data.horoscope;
-            }
-            if (data.lifestyleInterests) {
-                profile.lifestyleInterests = {
-                    ...(profile.lifestyleInterests?.toObject?.() || profile.lifestyleInterests || {}),
-                    ...data.lifestyleInterests,
-                };
-                delete data.lifestyleInterests;
-            }
-            Object.assign(profile, data);
+        // Deep merge partnerPreferences and privacySettings if provided
+        if (data.partnerPreferences) {
+            profile.partnerPreferences = {
+                ...(profile.partnerPreferences?.toObject?.() || profile.partnerPreferences || {}),
+                ...data.partnerPreferences,
+            };
+            delete data.partnerPreferences;
         }
+        if (data.privacySettings) {
+            profile.privacySettings = {
+                ...(profile.privacySettings?.toObject?.() || profile.privacySettings || {}),
+                ...data.privacySettings,
+            };
+            delete data.privacySettings;
+        }
+        if (data.horoscope) {
+            profile.horoscope = {
+                ...(profile.horoscope?.toObject?.() || profile.horoscope || {}),
+                ...data.horoscope,
+            };
+            delete data.horoscope;
+        }
+        if (data.lifestyleInterests) {
+            profile.lifestyleInterests = {
+                ...(profile.lifestyleInterests?.toObject?.() || profile.lifestyleInterests || {}),
+                ...data.lifestyleInterests,
+            };
+            delete data.lifestyleInterests;
+        }
+        Object.assign(profile, data);
         if (data.dob) {
             const parsedDob = (0, doctorValidation_1.validateDateOfBirth)(data.dob, data.gender || profile.gender);
             if (!parsedDob.isValid) {

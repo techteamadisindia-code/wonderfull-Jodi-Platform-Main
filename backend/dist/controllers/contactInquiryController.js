@@ -373,7 +373,7 @@ async function replyToContactInquiry(req, res, next) {
         let emailError;
         if (isEmailConfigured) {
             try {
-                await (0, emailService_1.sendMail)({
+                const mailRes = await (0, emailService_1.sendMail)({
                     to: inquiry.email,
                     subject: `Re: Your Inquiry ${inquiry.inquiryId} – Wonderful Jodi Support`,
                     text: `Dear ${inquiry.name},\n\n${parsed.data.replyText}\n\nYour inquiry reference: ${inquiry.inquiryId}\n\nBest regards,\nWonderful Jodi Support Team`,
@@ -412,7 +412,13 @@ async function replyToContactInquiry(req, res, next) {
 </body>
 </html>`.trim(),
                 });
-                emailSent = true;
+                if (mailRes && mailRes.delivered) {
+                    emailSent = true;
+                }
+                else {
+                    emailSent = false;
+                    emailError = (mailRes && mailRes.error) || 'Email delivery failed';
+                }
             }
             catch (err) {
                 emailError = err.message || 'Email delivery failed';

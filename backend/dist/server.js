@@ -130,15 +130,18 @@ io.on('connection', (socket) => {
  * Start Server (Next.js in-process + Express)
  */
 async function startServer() {
-    const isProduction = process.env.NODE_ENV === 'production';
+    const isDevProcess = Boolean(process.env.TS_NODE_DEV) || process.env.NODE_ENV === 'development';
+    const isProduction = process.env.NODE_ENV === 'production' && !isDevProcess;
     const resolvedFrontendDir = fs_1.default.existsSync(path_1.default.resolve(__dirname, '../../frontend'))
         ? path_1.default.resolve(__dirname, '../../frontend')
         : path_1.default.resolve(process.cwd(), 'frontend');
     const nextBuildDir = path_1.default.join(resolvedFrontendDir, '.next');
-    // In production or whenever prebuilt frontend exists, mount Next.js in-process
-    if (isProduction || fs_1.default.existsSync(nextBuildDir)) {
+    const hasProductionBuild = fs_1.default.existsSync(path_1.default.join(nextBuildDir, 'BUILD_ID'));
+    // In production with a verified prebuilt frontend, mount Next.js in-process for unified single-port hosting.
+    // In development mode, Next.js runs standalone via `next dev` on port 3000 to prevent filesystem conflicts over `.next`.
+    if (isProduction && hasProductionBuild) {
         try {
-            console.log('[Next.js] Preparing in-process Next.js server...');
+            console.log('[Next.js] Preparing in-process Next.js production server...');
             const nextModulePath = require.resolve('next', { paths: [resolvedFrontendDir, process.cwd()] });
             const nextModule = require(nextModulePath);
             const next = typeof nextModule === 'function' ? nextModule : (nextModule.default || nextModule);
@@ -154,8 +157,11 @@ async function startServer() {
             console.error('[Next.js] ❌ Failed to initialize Next.js in-process:', err.message || err);
         }
     }
+    else if (isProduction && !hasProductionBuild) {
+        console.log('[Next.js] In-process Next.js skipped: No production build found in frontend/.next (run "npm run build" to generate).');
+    }
     else {
-        console.log('[Next.js] In-process Next.js skipped (dev mode without production build).');
+        console.log('[Next.js] In-process Next.js skipped (development mode: frontend runs standalone via "next dev" on port 3000).');
     }
     server.listen(PORT, HOST, async () => {
         const lanIp = getHostLanIp();
@@ -168,9 +174,16 @@ async function startServer() {
         console.log('Server:');
         console.log(`  Host: ${HOST}`);
         console.log(`  Port: ${PORT}`);
-        console.log('Unified Server:');
-        console.log(`  Local: http://localhost:${PORT}`);
-        console.log(`  LAN:   http://${lanIp}:${PORT}`);
+        if (isProduction && hasProductionBuild) {
+            console.log('Unified Server:');
+            console.log(`  Local: http://localhost:${PORT}`);
+            console.log(`  LAN:   http://${lanIp}:${PORT}`);
+        }
+        else {
+            console.log('Backend API Server:');
+            console.log(`  Local: http://localhost:${PORT}`);
+            console.log(`  LAN:   http://${lanIp}:${PORT}`);
+        }
         console.log('API Health:');
         console.log(`  http://localhost:${PORT}/api/health`);
         console.log('Email / SMTP:');

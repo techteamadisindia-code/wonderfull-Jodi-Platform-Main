@@ -39,6 +39,7 @@ const profileSchema = new prismaBridge_1.Schema({
     familyStatus: { type: String, trim: true },
     familyValues: { type: String, trim: true },
     nativePlace: { type: String, trim: true },
+    previousMarriageDetails: { type: prismaBridge_1.Schema.Types.Mixed, default: undefined },
     familyLocation: { type: String, trim: true },
     profileManagedBy: { type: String, trim: true, default: 'Self' },
     currentLocation: {

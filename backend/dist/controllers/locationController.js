@@ -101,16 +101,24 @@ async function getStates(req, res, next) {
  */
 async function getDistricts(req, res, next) {
     try {
-        const { stateId, search } = req.query;
-        if (!stateId || !prismaBridge_1.default.isValidObjectId(stateId)) {
+        const { stateId, stateName, search } = req.query;
+        const targetState = stateId || stateName || req.query.state;
+        if (!targetState) {
             return res.status(400).json({ success: false, message: 'Valid stateId query parameter is required.' });
         }
-        // Verify state exists
-        const stateExists = await Location_1.State.exists({ _id: stateId });
-        if (!stateExists) {
+        let stateDoc = null;
+        if (prismaBridge_1.default.isValidObjectId(targetState)) {
+            stateDoc = await Location_1.State.findById(targetState);
+        }
+        if (!stateDoc) {
+            stateDoc = await Location_1.State.findOne({
+                name: { $regex: new RegExp(`^${(0, securityUtils_1.escapeRegex)(String(targetState).trim())}$`, 'i') },
+            });
+        }
+        if (!stateDoc) {
             return res.status(404).json({ success: false, message: 'Specified state not found.' });
         }
-        const filter = { stateId, isActive: true };
+        const filter = { stateId: stateDoc._id.toString(), isActive: true };
         if (search && typeof search === 'string' && search.trim()) {
             filter.name = { $regex: new RegExp((0, securityUtils_1.escapeRegex)(search.trim()), 'i') };
         }
@@ -132,8 +140,8 @@ async function getSubDistricts(req, res, next) {
         if (!districtId || !prismaBridge_1.default.isValidObjectId(districtId)) {
             return res.status(400).json({ success: false, message: 'Valid districtId query parameter is required.' });
         }
-        const districtExists = await Location_1.District.exists({ _id: districtId });
-        if (!districtExists) {
+        const districtDoc = await Location_1.District.findById(districtId);
+        if (!districtDoc) {
             return res.status(404).json({ success: false, message: 'Specified district not found.' });
         }
         const filter = { districtId, isActive: true };
@@ -156,12 +164,6 @@ async function getCities(req, res, next) {
     try {
         const { districtId, subDistrictId, stateId, search, page = '1', limit = '30' } = req.query;
         const filter = { isActive: true };
-        if (districtId && prismaBridge_1.default.isValidObjectId(districtId)) {
-            filter.districtId = districtId;
-        }
-        if (subDistrictId && prismaBridge_1.default.isValidObjectId(subDistrictId)) {
-            filter.subDistrictId = subDistrictId;
-        }
         const targetState = stateId || req.query.state;
         if (targetState) {
             if (prismaBridge_1.default.isValidObjectId(targetState)) {
@@ -183,13 +185,31 @@ async function getCities(req, res, next) {
                 }
             }
         }
+        const targetDistrict = districtId || req.query.district;
+        if (targetDistrict) {
+            if (prismaBridge_1.default.isValidObjectId(targetDistrict)) {
+                filter.districtId = targetDistrict;
+            }
+            else {
+                const distDoc = await Location_1.District.findOne({
+                    name: { $regex: new RegExp(`^${(0, securityUtils_1.escapeRegex)(String(targetDistrict).trim())}$`, 'i') },
+                    ...(filter.stateId ? { stateId: filter.stateId } : {}),
+                });
+                if (distDoc) {
+                    filter.districtId = distDoc._id;
+                }
+            }
+        }
+        if (subDistrictId && prismaBridge_1.default.isValidObjectId(subDistrictId)) {
+            filter.subDistrictId = subDistrictId;
+        }
         if (search && typeof search === 'string' && search.trim()) {
             filter.name = { $regex: new RegExp((0, securityUtils_1.escapeRegex)(search.trim()), 'i') };
         }
         const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
         const limitNum = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 30));
         const skip = (pageNum - 1) * limitNum;
-        const [total, cities] = await Promise.all([
+        let [total, cities] = await Promise.all([
             Location_1.City.countDocuments(filter),
             Location_1.City.find(filter)
                 .populate('districtId', 'name')
@@ -199,6 +219,26 @@ async function getCities(req, res, next) {
                 .limit(limitNum)
                 .lean(),
         ]);
+        // Fallback: If no municipal cities are found in DB for a specific district,
+        // provide the district headquarters/name as a valid city option so user is not blocked
+        if ((!cities || cities.length === 0) && filter.districtId) {
+            const dist = await Location_1.District.findById(filter.districtId).lean();
+            if (dist) {
+                cities = [
+                    {
+                        _id: dist._id,
+                        id: dist._id.toString(),
+                        name: dist.headquarters || dist.name,
+                        districtId: dist._id,
+                        stateId: dist.stateId,
+                        type: 'District City',
+                        isActive: true,
+                        sortOrder: 1,
+                    },
+                ];
+                total = 1;
+            }
+        }
         return res.json({
             success: true,
             data: cities,
@@ -206,7 +246,7 @@ async function getCities(req, res, next) {
                 total,
                 page: pageNum,
                 limit: limitNum,
-                pages: Math.ceil(total / limitNum),
+                pages: Math.ceil(total / limitNum) || 1,
             },
         });
     }
@@ -309,15 +349,40 @@ async function validateLocationHierarchy(data) {
             resolved.subDistrictType = subDistrict.type;
         }
         if (data.cityId) {
-            if (!prismaBridge_1.default.isValidObjectId(data.cityId))
-                return { isValid: false, error: 'Invalid cityId' };
-            const city = await Location_1.City.findById(data.cityId);
-            if (!city)
-                return { isValid: false, error: 'City not found' };
-            if (data.districtId && city.districtId.toString() !== data.districtId) {
-                return { isValid: false, error: 'Selected City does not belong to the selected District.' };
+            const isHqPrefix = typeof data.cityId === 'string' && data.cityId.startsWith('hq-');
+            const cleanCityId = isHqPrefix ? data.cityId.replace('hq-', '') : data.cityId;
+            if (isHqPrefix || cleanCityId === data.districtId) {
+                if (prismaBridge_1.default.isValidObjectId(cleanCityId)) {
+                    const district = await Location_1.District.findById(cleanCityId);
+                    if (district) {
+                        resolved.city = district.headquarters || district.name;
+                    }
+                    else {
+                        return { isValid: false, error: 'District not found for headquarters fallback' };
+                    }
+                }
             }
-            resolved.city = city.name;
+            else {
+                if (!prismaBridge_1.default.isValidObjectId(cleanCityId))
+                    return { isValid: false, error: 'Invalid cityId' };
+                const city = await Location_1.City.findById(cleanCityId);
+                if (!city) {
+                    // Check if cleanCityId points to a District as fallback
+                    const distFallback = await Location_1.District.findById(cleanCityId);
+                    if (distFallback) {
+                        resolved.city = distFallback.headquarters || distFallback.name;
+                    }
+                    else {
+                        return { isValid: false, error: 'City not found' };
+                    }
+                }
+                else {
+                    if (data.districtId && city.districtId.toString() !== data.districtId) {
+                        return { isValid: false, error: 'Selected City does not belong to the selected District.' };
+                    }
+                    resolved.city = city.name;
+                }
+            }
         }
         if (data.villageId) {
             if (!prismaBridge_1.default.isValidObjectId(data.villageId))

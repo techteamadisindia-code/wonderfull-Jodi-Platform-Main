@@ -85,6 +85,7 @@ const registrationSchema = new prismaBridge_1.Schema({
             foodPreference: { type: String },
             smoking: { type: String },
             drinking: { type: String },
+            previousMarriageDetails: { type: prismaBridge_1.Schema.Types.Mixed, default: undefined },
         },
         educationProfession: {
             education: { type: String },

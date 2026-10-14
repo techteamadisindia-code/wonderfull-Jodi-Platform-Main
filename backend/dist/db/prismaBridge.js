@@ -624,6 +624,42 @@ async function resolveVirtualPopulates(records, populates, delegateName) {
         const rawPath = typeof pop === 'string' ? pop : pop.path;
         const selectStr = typeof pop === 'object' ? pop.select : undefined;
         const selectObj = parseSelectFields(selectStr);
+        // Generic user populate (for Profile, Admin, Payment, Subscription, etc.)
+        if (rawPath === 'user') {
+            const userIds = new Set();
+            for (const rec of records) {
+                if (!rec)
+                    continue;
+                const val = rec.userId ||
+                    rec.user_id ||
+                    (typeof rec.user === 'string' ? rec.user : rec.user?.id || rec.user?._id);
+                if (val && typeof val === 'string')
+                    userIds.add(val);
+            }
+            if (userIds.size > 0) {
+                const users = await client_2.prisma.user.findMany({
+                    where: { id: { in: Array.from(userIds) } },
+                    select: selectObj ? { id: true, ...selectObj } : undefined,
+                });
+                const userMap = new Map(users.map((u) => [u.id, (0, client_2.toClient)(u)]));
+                for (const rec of records) {
+                    if (!rec)
+                        continue;
+                    const val = rec.userId ||
+                        rec.user_id ||
+                        (typeof rec.user === 'string' ? rec.user : rec.user?.id || rec.user?._id);
+                    rec.user = (val && userMap.get(val)) || null;
+                }
+            }
+            else {
+                for (const rec of records) {
+                    if (!rec)
+                        continue;
+                    rec.user = null;
+                }
+            }
+            continue;
+        }
         // 1. Report relations (reporter, reportedUser, reportedProfile, moderator, handledByAdminId)
         // Handled virtually to safely tolerate orphaned foreign keys without Prisma Inconsistent query result crash
         if (delegateName === 'report' && (rawPath === 'reporter' || rawPath === 'reportedUser')) {
@@ -918,8 +954,9 @@ class PrismaQueryBuilder {
         const selectObj = parseSelectFields(targetSelect);
         const leafValue = selectObj ? { select: selectObj } : true;
         if (!isDotted) {
-            if (this.delegateName === 'report' &&
-                ['reporter', 'reportedUser', 'reportedProfile', 'moderator', 'handledByAdminId'].includes(targetPath)) {
+            if ((this.delegateName === 'report' &&
+                ['reporter', 'reportedUser', 'reportedProfile', 'moderator', 'handledByAdminId'].includes(targetPath)) ||
+                ((this.delegateName === 'profile' || this.delegateName === 'admin') && targetPath === 'user')) {
                 this.virtualPopulates.push({ path: targetPath, select: targetSelect });
                 return this;
             }
@@ -1040,23 +1077,63 @@ class PrismaQueryBuilder {
             }
             return rec;
         };
-        if (this.isFindOne) {
-            const record = await this.prismaDelegate.findFirst(args);
-            if (!record)
-                return null;
-            if (this.virtualPopulates.length > 0) {
-                await resolveVirtualPopulates([record], this.virtualPopulates, this.delegateName);
+        try {
+            if (this.isFindOne) {
+                const record = await this.prismaDelegate.findFirst(args);
+                if (!record)
+                    return null;
+                if (this.virtualPopulates.length > 0) {
+                    await resolveVirtualPopulates([record], this.virtualPopulates, this.delegateName);
+                }
+                const clientRecord = formatRecord((0, client_2.toClient)(record));
+                return attachSave(clientRecord, this.prismaDelegate, this.fieldMap, this.delegateName);
             }
-            const clientRecord = formatRecord((0, client_2.toClient)(record));
-            return attachSave(clientRecord, this.prismaDelegate, this.fieldMap, this.delegateName);
+            else {
+                const records = await this.prismaDelegate.findMany(args);
+                if (records.length > 0 && this.virtualPopulates.length > 0) {
+                    await resolveVirtualPopulates(records, this.virtualPopulates, this.delegateName);
+                }
+                const clientRecords = (0, client_2.toClientArray)(records).map((r) => attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap, this.delegateName));
+                return clientRecords;
+            }
         }
-        else {
-            const records = await this.prismaDelegate.findMany(args);
-            if (records.length > 0 && this.virtualPopulates.length > 0) {
-                await resolveVirtualPopulates(records, this.virtualPopulates, this.delegateName);
+        catch (err) {
+            if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+                console.warn(`[PrismaBridge] Missing table encountered for delegate '${this.delegateName}' (P2021). Returning empty fallback result.`);
+                return (this.isFindOne ? null : []);
             }
-            const clientRecords = (0, client_2.toClientArray)(records).map((r) => attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap, this.delegateName));
-            return clientRecords;
+            if ((err.message && (err.message.includes('Inconsistent query result') || err.message.includes('Field user is required'))) ||
+                err.code === 'P2025') {
+                if (cleanInclude) {
+                    const fallbackArgs = { ...args };
+                    delete fallbackArgs.include;
+                    if (fallbackArgs.select) {
+                        for (const k of Object.keys(cleanInclude)) {
+                            delete fallbackArgs.select[k];
+                        }
+                    }
+                    const allPopulates = this.populatedRelations.map((r) => ({ path: r.path })).concat(this.virtualPopulates);
+                    if (this.isFindOne) {
+                        const record = await this.prismaDelegate.findFirst(fallbackArgs);
+                        if (!record)
+                            return null;
+                        if (allPopulates.length > 0) {
+                            await resolveVirtualPopulates([record], allPopulates, this.delegateName);
+                        }
+                        const clientRecord = formatRecord((0, client_2.toClient)(record));
+                        return attachSave(clientRecord, this.prismaDelegate, this.fieldMap, this.delegateName);
+                    }
+                    else {
+                        const records = await this.prismaDelegate.findMany(fallbackArgs);
+                        if (records.length > 0 && allPopulates.length > 0) {
+                            await resolveVirtualPopulates(records, allPopulates, this.delegateName);
+                        }
+                        const clientRecords = (0, client_2.toClientArray)(records).map((r) => attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap, this.delegateName));
+                        return clientRecords;
+                    }
+                }
+            }
+            throw err;
         }
     }
     then(onfulfilled, onrejected) {
@@ -1542,9 +1619,33 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
         }
     };
     ModelConstructor.countDocuments = async function (filter = {}) {
-        const delegate = getDelegate();
-        const where = normalizeFilter(filter, fieldMap);
-        return delegate.count({ where });
+        try {
+            const delegate = getDelegate();
+            if (!delegate)
+                return 0;
+            const where = normalizeFilter(filter, fieldMap);
+            return await delegate.count({ where });
+        }
+        catch (err) {
+            if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+                console.warn(`[PrismaBridge] Table for delegate '${String(delegateName)}' does not exist yet. Returning 0 count.`);
+                return 0;
+            }
+            throw err;
+        }
+    };
+    ModelConstructor.exists = async function (filter = {}) {
+        try {
+            const count = await this.countDocuments(filter);
+            return count > 0 ? { _id: true } : null;
+        }
+        catch (err) {
+            if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+                console.warn(`[PrismaBridge] Table for delegate '${String(delegateName)}' does not exist yet. Returning null for exists.`);
+                return null;
+            }
+            throw err;
+        }
     };
     ModelConstructor.estimatedDocumentCount = async function () {
         return getDelegate().count();

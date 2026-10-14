@@ -5,6 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.submitVerification = submitVerification;
 exports.getUserVerifications = getUserVerifications;
+exports.getVerificationOwnerId = getVerificationOwnerId;
+exports.getDocumentContentType = getDocumentContentType;
 exports.getUserVerificationById = getUserVerificationById;
 exports.serveVerificationDocument = serveVerificationDocument;
 const fs_1 = __importDefault(require("fs"));
@@ -183,6 +185,41 @@ async function getUserVerifications(req, res, next) {
     }
 }
 /**
+ * Helper to safely extract owner User ID from a verification document
+ * supporting both Prisma (userId) and legacy Mongoose/populated (user) structures.
+ */
+function getVerificationOwnerId(verification) {
+    if (!verification)
+        return '';
+    if (verification.userId)
+        return String(verification.userId);
+    if (verification.user) {
+        if (typeof verification.user === 'object') {
+            const u = verification.user;
+            return String(u._id || u.id || '');
+        }
+        return String(verification.user);
+    }
+    return '';
+}
+/**
+ * Determine safe Content-Type header based on declared fileType or safeFilename extension.
+ */
+function getDocumentContentType(safeFilename, storedFileType) {
+    if (storedFileType && storedFileType.includes('/')) {
+        return storedFileType;
+    }
+    const allowedTypes = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.webp': 'image/webp',
+        '.pdf': 'application/pdf',
+    };
+    const ext = path_1.default.extname(safeFilename).toLowerCase();
+    return allowedTypes[ext] || 'application/octet-stream';
+}
+/**
  * Get a single verification record for the user (with IDOR check)
  */
 async function getUserVerificationById(req, res, next) {
@@ -196,12 +233,23 @@ async function getUserVerificationById(req, res, next) {
             return res.status(404).json({ success: false, message: 'Verification record not found' });
         }
         // IDOR check: only owner or admin
-        if (req.user?.role !== 'admin' && verification.user.toString() !== req.user?.userId) {
+        const requesterId = String(req.user?.userId || req.user?.id || '');
+        const ownerId = getVerificationOwnerId(verification);
+        const isOwner = Boolean(requesterId && ownerId && requesterId === ownerId);
+        const isAdmin = Boolean(req.user && req.user.role === 'admin');
+        if (!isOwner && !isAdmin) {
             return res.status(403).json({ success: false, message: 'Access forbidden: You do not own this document.' });
         }
         return res.json({ success: true, data: verification });
     }
     catch (error) {
+        console.error('[Verification] Unexpected error retrieving verification by ID:', error?.message || 'Internal error');
+        if (!res.headersSent) {
+            return res.status(500).json({
+                success: false,
+                message: 'An unexpected internal error occurred while retrieving verification details.',
+            });
+        }
         next(error);
     }
 }
@@ -210,12 +258,16 @@ async function getUserVerificationById(req, res, next) {
  */
 async function serveVerificationDocument(req, res, next) {
     try {
-        const { filename } = req.params;
-        if (!(0, uploadPaths_1.isValidUploadFilename)(filename)) {
+        // 1. Validate route parameter before string operations or filesystem access
+        const rawFilename = req.params?.filename;
+        if (!rawFilename || typeof rawFilename !== 'string' || !(0, uploadPaths_1.isValidUploadFilename)(rawFilename)) {
             return res.status(400).json({ success: false, message: 'Invalid document filename' });
         }
-        const safeFilename = path_1.default.basename(filename);
-        // Look up verification record
+        const safeFilename = path_1.default.basename(rawFilename);
+        if (!(0, uploadPaths_1.isValidUploadFilename)(safeFilename)) {
+            return res.status(400).json({ success: false, message: 'Invalid document filename' });
+        }
+        // 2. Look up verification record
         const verification = await Verification_1.Verification.findOne({
             $or: [
                 { storageKey: safeFilename },
@@ -225,31 +277,51 @@ async function serveVerificationDocument(req, res, next) {
         if (!verification) {
             return res.status(404).json({ success: false, message: 'Verification document not found' });
         }
-        // IDOR / BOLA Authorization check:
+        // 3. IDOR / BOLA Authorization check:
         // Requester must be either the owner or an authenticated admin
-        const isOwner = req.user && verification.user.toString() === req.user.userId;
-        const isAdmin = req.user && req.user.role === 'admin';
+        const requesterId = String(req.user?.userId || req.user?.id || '');
+        const ownerId = getVerificationOwnerId(verification);
+        const isOwner = Boolean(requesterId && ownerId && requesterId === ownerId);
+        const isAdmin = Boolean(req.user && req.user.role === 'admin');
         if (!isOwner && !isAdmin) {
             return res.status(403).json({
                 success: false,
                 message: 'Access forbidden: You are not authorized to access this verification document.',
             });
         }
-        // Search across candidate upload directories with symlink and traversal protection
+        // 4. Resolve file through existing safe upload-path utility (symlink, realpath, and traversal protection)
         const filePath = (0, uploadPaths_1.findUploadedFile)(`verifications/${safeFilename}`);
         if (!filePath || !fs_1.default.existsSync(filePath)) {
             return res.status(404).json({ success: false, message: 'Document file is missing on storage.' });
         }
-        // Set secure response headers
-        res.setHeader('Content-Type', verification.fileType || 'application/pdf');
+        // 5. Set secure headers: private/no-store caching, strict CSP, and verified Content-Type
+        const contentType = getDocumentContentType(safeFilename, verification.fileType);
+        res.setHeader('Content-Type', contentType);
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
         res.setHeader('Cache-Control', 'private, no-store');
-        // Stream file
+        // 6. Stream file with error handling to avoid unhandled stream errors
         const fileStream = fs_1.default.createReadStream(filePath);
+        fileStream.on('error', (streamErr) => {
+            console.error('[Verification] Error reading document stream:', streamErr?.message || 'Stream error');
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    message: 'An error occurred while streaming the document.',
+                });
+            }
+        });
         fileStream.pipe(res);
     }
     catch (error) {
+        // Sanitized diagnostic logging that excludes document payload and personal details
+        console.error('[Verification] Unexpected error serving verification document:', error?.message || 'Internal error');
+        if (!res.headersSent) {
+            return res.status(500).json({
+                success: false,
+                message: 'An unexpected internal error occurred while retrieving the document.',
+            });
+        }
         next(error);
     }
 }

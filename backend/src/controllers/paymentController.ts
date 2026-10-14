@@ -6,14 +6,14 @@ import { Payment, IPayment } from '../models/Payment';
 import { Subscription } from '../models/Subscription';
 import { User } from '../models/User';
 import { AuditLog } from '../models/AuditLog';
+import { getRazorpayCredentials } from './membershipController';
 
 /**
  * Helper to get Razorpay instance
  */
 function getRazorpayInstance() {
-  const keyId = process.env.RAZORPAY_KEY_ID || process.env.RAPIDPAY_KEY_ID || '';
-  const keySecret = process.env.RAZORPAY_KEY_SECRET || process.env.RAPIDPAY_KEY_SECRET || '';
-  if (!keyId || !keySecret) {
+  const { keyId, keySecret, isConfigured } = getRazorpayCredentials();
+  if (!isConfigured || !keyId || !keySecret) {
     return null;
   }
   return new Razorpay({

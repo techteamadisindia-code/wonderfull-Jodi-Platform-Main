@@ -441,6 +441,10 @@ async function findCanonicalProfile(rawIdentifier, options) {
         profile = await populateQuery(Profile_1.Profile.findOne({ _id: id, isDeleted: { $ne: true } }));
         if (profile)
             return profile;
+        // Check if the provided ID corresponds to a User ID
+        profile = await populateQuery(Profile_1.Profile.findOne({ user: id, isDeleted: { $ne: true } }));
+        if (profile)
+            return profile;
     }
     // 3. Legacy hex-suffix lookup: WJ-[6 hex chars] (e.g. WJ-CCE711 matches _id ending with cce711)
     const legacyMatch = id.match(/^WJ-([0-9A-Fa-f]{6})$/i);

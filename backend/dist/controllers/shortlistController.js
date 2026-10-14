@@ -4,27 +4,31 @@ exports.addShortlist = addShortlist;
 exports.removeShortlist = removeShortlist;
 exports.getShortlisted = getShortlisted;
 const Shortlist_1 = require("../models/Shortlist");
-const Profile_1 = require("../models/Profile");
 const securityUtils_1 = require("../utils/securityUtils");
+const profileController_1 = require("./profileController");
 async function addShortlist(req, res, next) {
     try {
         const userId = req.user?.userId;
         if (!userId) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
-        const { profileId } = req.body;
-        if (!(0, securityUtils_1.isValidObjectId)(profileId)) {
+        const rawProfileId = (req.body.profileId || '').trim();
+        if (!rawProfileId || rawProfileId.length < 3 || rawProfileId.length > 50) {
             return res.status(400).json({ success: false, message: 'Invalid profile ID' });
         }
-        const profileExists = await Profile_1.Profile.findById(profileId);
+        const profileExists = await (0, profileController_1.findCanonicalProfile)(rawProfileId);
         if (!profileExists) {
             return res.status(404).json({ success: false, message: 'Profile not found' });
         }
-        const existing = await Shortlist_1.Shortlist.findOne({ user: userId, profile: profileId });
+        const canonicalProfileId = String(profileExists._id || profileExists.id);
+        const existing = await Shortlist_1.Shortlist.findOne({
+            user: userId,
+            $or: [{ profile: canonicalProfileId }, { profile: rawProfileId }],
+        });
         if (existing) {
             return res.status(400).json({ success: false, message: 'Profile already shortlisted' });
         }
-        const shortlist = await Shortlist_1.Shortlist.create({ user: userId, profile: profileId });
+        const shortlist = await Shortlist_1.Shortlist.create({ user: userId, profile: canonicalProfileId });
         res.status(201).json({ success: true, data: shortlist });
     }
     catch (error) {
@@ -37,11 +41,18 @@ async function removeShortlist(req, res, next) {
         if (!userId) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
-        const { profileId } = req.params;
-        if (!(0, securityUtils_1.isValidObjectId)(profileId)) {
+        const rawProfileId = (req.params.profileId || '').trim();
+        if (!rawProfileId || rawProfileId.length < 3 || rawProfileId.length > 50) {
             return res.status(400).json({ success: false, message: 'Invalid profile ID' });
         }
-        const shortlist = await Shortlist_1.Shortlist.findOneAndDelete({ user: userId, profile: profileId });
+        const profile = await (0, profileController_1.findCanonicalProfile)(rawProfileId);
+        const canonicalProfileId = profile ? String(profile._id || profile.id) : null;
+        const shortlist = await Shortlist_1.Shortlist.findOneAndDelete({
+            user: userId,
+            ...(canonicalProfileId
+                ? { $or: [{ profile: canonicalProfileId }, { profile: rawProfileId }] }
+                : { profile: rawProfileId }),
+        });
         if (!shortlist) {
             return res.status(404).json({ success: false, message: 'Shortlist entry not found' });
         }

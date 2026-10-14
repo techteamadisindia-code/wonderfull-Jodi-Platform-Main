@@ -527,6 +527,50 @@ export async function claimFreeMembership(req: AuthRequest, res: Response, next:
   }
 }
 
+export interface RazorpayCredentials {
+  keyId: string;
+  keySecret: string;
+  isConfigured: boolean;
+  isLiveGateway: boolean;
+}
+
+export function getRazorpayCredentials(envSource: Record<string, string | undefined> = process.env): RazorpayCredentials {
+  const keyId = (
+    envSource.RAZORPAY_KEY_ID ||
+    envSource.RAZORPAY_KEY ||
+    envSource.RAPIDPAY_KEY_ID ||
+    ''
+  ).trim();
+
+  // Secret must remain strictly server-side (never read from NEXT_PUBLIC_*)
+  const keySecret = (
+    envSource.RAZORPAY_KEY_SECRET ||
+    envSource.RAZORPAY_SECRET ||
+    envSource.RAPIDPAY_KEY_SECRET ||
+    ''
+  ).trim();
+
+  const isPlaceholderKey =
+    !keyId ||
+    keyId === 'rzp_test_mock' ||
+    keyId.includes('your_actual_key_id') ||
+    keyId.includes('YOUR_ACTUAL_KEY_ID') ||
+    keyId.includes('YOUR_KEY_ID') ||
+    keyId === 'rzp_live_your_actual_key_id';
+
+  const isPlaceholderSecret =
+    !keySecret ||
+    keySecret === 'rzp_secret_mock' ||
+    keySecret.includes('your_actual_key_secret') ||
+    keySecret.includes('YOUR_ACTUAL_KEY_SECRET') ||
+    keySecret.includes('YOUR_KEY_SECRET');
+
+  const isConfigured = Boolean(keyId && keySecret && !isPlaceholderKey && !isPlaceholderSecret);
+  const isLiveGateway = Boolean(isConfigured && keyId.startsWith('rzp_'));
+
+  return { keyId, keySecret, isConfigured, isLiveGateway };
+}
+
 /**
  * 4. Create Membership Order (Initiate Upgrade)
  * POST /api/memberships/create-order
@@ -618,18 +662,7 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
     const payableAmount = offerResult.finalPrice;
 
     // Detect payment gateway configuration
-    const keyId = process.env.RAZORPAY_KEY_ID || process.env.RAPIDPAY_KEY_ID || '';
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || process.env.RAPIDPAY_KEY_SECRET || '';
-
-    const isLiveGateway = Boolean(
-      keyId &&
-      keySecret &&
-      keyId.startsWith('rzp_') &&
-      keyId !== 'rzp_test_mock' &&
-      !keyId.includes('your_actual_key_id') &&
-      keySecret !== 'rzp_secret_mock' &&
-      keySecret !== 'your_actual_key_secret'
-    );
+    const { keyId, keySecret, isConfigured, isLiveGateway } = getRazorpayCredentials();
 
     const isProduction = process.env.NODE_ENV === 'production';
     const allowSimulatedPayments =
@@ -637,6 +670,11 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
       (process.env.ALLOW_SIMULATED_PAYMENTS === 'true' || process.env.ENABLE_SIMULATED_PAYMENTS === 'true');
 
     if (!isLiveGateway && !allowSimulatedPayments) {
+      console.warn(
+        `[Membership/Payment] Gateway not configured for production order creation: isConfigured=${isConfigured}, keyPrefix=${
+          keyId ? keyId.slice(0, 8) + '...' : 'none'
+        }, hasSecret=${Boolean(keySecret)}, isProduction=${isProduction}`
+      );
       return res.status(503).json({
         success: false,
         message: 'Payment gateway service is not configured or currently unavailable. Please contact support.',
@@ -669,11 +707,18 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
           },
         });
       } catch (rzpErr: any) {
-        console.error('Razorpay gateway order creation failed:', rzpErr?.message || rzpErr);
+        const correlationId = `rzp_err_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        console.error(`[Membership/Payment] Razorpay gateway order creation failed [correlationId=${correlationId}]:`, {
+          statusCode: rzpErr?.statusCode,
+          errorDescription: rzpErr?.error?.description || rzpErr?.message,
+          code: rzpErr?.error?.code,
+          field: rzpErr?.error?.field,
+        });
         // Never silently fall back to simulated orders when live gateway credentials are configured
         return res.status(502).json({
           success: false,
           message: 'Payment gateway order creation failed. Please try again shortly.',
+          correlationId,
           error: process.env.NODE_ENV === 'development' ? rzpErr?.message : undefined,
         });
       }
@@ -985,8 +1030,9 @@ export async function verifyPayment(req: AuthRequest, res: Response, next: NextF
         });
       }
 
-      const keySecret = process.env.RAZORPAY_KEY_SECRET || process.env.RAPIDPAY_KEY_SECRET || '';
+      const { keySecret } = getRazorpayCredentials();
       if (!keySecret) {
+        console.error('[Membership/Payment] Cannot verify payment: Razorpay keySecret is not configured on the server.');
         return res.status(500).json({
           success: false,
           message: 'Payment gateway configuration error: secret key not configured.',

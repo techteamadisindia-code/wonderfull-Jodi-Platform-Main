@@ -224,6 +224,7 @@ export default function MembershipPage() {
   };
 
   const handlePlanAction = async (plan: MembershipPlanData) => {
+    if (processingOrder) return;
     const planKey = plan.key || plan.slug;
     setSelectedPlan(plan.name);
     setOrderError(null);

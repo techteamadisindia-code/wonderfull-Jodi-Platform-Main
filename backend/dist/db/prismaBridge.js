@@ -1099,6 +1099,10 @@ class PrismaQueryBuilder {
         }
         catch (err) {
             if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+                if (this.delegateName === 'block') {
+                    console.error(`[PrismaBridge] CRITICAL: Schema error on security-critical delegate 'block'. Failing closed to protect block boundaries:`, err.message);
+                    throw err;
+                }
                 console.warn(`[PrismaBridge] Missing table encountered for delegate '${this.delegateName}' (P2021). Returning empty fallback result.`);
                 return (this.isFindOne ? null : []);
             }
@@ -1618,6 +1622,24 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
             throw err;
         }
     };
+    ModelConstructor.findOneAndDelete = async function (filter) {
+        const delegate = getDelegate();
+        if (!delegate)
+            return null;
+        const where = normalizeFilter(filter, fieldMap);
+        try {
+            const record = await delegate.findFirst({ where });
+            if (!record)
+                return null;
+            await delegate.delete({ where: { id: record.id } });
+            return (0, client_2.toClient)(record);
+        }
+        catch (err) {
+            if (err.code === 'P2025')
+                return null;
+            throw err;
+        }
+    };
     ModelConstructor.countDocuments = async function (filter = {}) {
         try {
             const delegate = getDelegate();
@@ -1628,6 +1650,9 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
         }
         catch (err) {
             if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+                if (String(delegateName) === 'block') {
+                    throw err;
+                }
                 console.warn(`[PrismaBridge] Table for delegate '${String(delegateName)}' does not exist yet. Returning 0 count.`);
                 return 0;
             }
@@ -1641,6 +1666,9 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
         }
         catch (err) {
             if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+                if (String(delegateName) === 'block') {
+                    throw err;
+                }
                 console.warn(`[PrismaBridge] Table for delegate '${String(delegateName)}' does not exist yet. Returning null for exists.`);
                 return null;
             }

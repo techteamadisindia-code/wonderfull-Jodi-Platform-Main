@@ -137,8 +137,8 @@ export default function FreeKundaliMatchPage() {
 
       try {
         const u = await getMyBirthDetails();
+        setIsLoggedIn(true);
         if (u) {
-          setIsLoggedIn(true);
           setSavedUserBirthDetails(u);
         }
       } catch {

@@ -16,9 +16,11 @@ const Block_1 = require("../models/Block");
 const Notification_1 = require("../models/Notification");
 const Conversation_1 = require("../models/Conversation");
 const securityUtils_1 = require("../utils/securityUtils");
+const profileController_1 = require("./profileController");
 const zod_1 = require("zod");
 const createInterestSchema = zod_1.z.object({
     receiverId: zod_1.z.string().optional(),
+    recipientId: zod_1.z.string().optional(),
     profileId: zod_1.z.string().optional(),
     targetUserId: zod_1.z.string().optional(),
 });
@@ -26,22 +28,25 @@ const updateInterestSchema = zod_1.z.object({
     status: zod_1.z.enum(['ACCEPTED', 'DECLINED', 'REJECTED', 'CANCELLED']),
 });
 /**
- * Helper to resolve target user ID whether given receiverId, profileId, or targetUserId
+ * Helper to resolve target user ID whether given receiverId, recipientId, profileId, or targetUserId
+ * Supports candidate IDs (e.g. WJ-100092), Profile ObjectIds, and User IDs.
  */
 async function resolveTargetUserId(body) {
-    const rawId = body.receiverId || body.profileId || body.targetUserId;
-    if (!rawId || !(0, securityUtils_1.isValidObjectId)(rawId)) {
+    const rawId = (body.recipientId || body.receiverId || body.profileId || body.targetUserId || '').trim();
+    if (!rawId) {
         return null;
     }
-    // Check if it's already a User ID
-    const directUser = await User_1.User.findById(rawId);
-    if (directUser) {
-        return String(directUser._id);
-    }
-    // Check if it's a Profile ID
-    const profile = await Profile_1.Profile.findById(rawId);
+    // 1. Resolve canonical profile (handles candidateId like WJ-100092, profile _id, legacy WJ-[hex])
+    const profile = await (0, profileController_1.findCanonicalProfile)(rawId);
     if (profile && profile.user) {
-        return String(profile.user);
+        return String(profile.user._id || profile.user.id || profile.user);
+    }
+    // 2. Direct User lookup if rawId matches ObjectId or UUID format
+    if ((0, securityUtils_1.isValidObjectId)(rawId) || /^[0-9a-fA-F]{24}$/.test(rawId) || /^[A-Za-z0-9_-]{20,36}$/.test(rawId)) {
+        const directUser = await User_1.User.findById(rawId).select('_id');
+        if (directUser) {
+            return String(directUser._id || directUser.id);
+        }
     }
     return null;
 }
@@ -219,8 +224,8 @@ async function checkInterestStatus(req, res, next) {
         if (!userId) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
-        const targetId = req.params.targetId;
-        if (!targetId || !(0, securityUtils_1.isValidObjectId)(targetId)) {
+        const targetId = (req.params.targetId || req.params.id || req.params.profileId || '').trim();
+        if (!targetId || targetId.length < 3 || targetId.length > 50) {
             return res.status(400).json({ success: false, message: 'Invalid target ID' });
         }
         const targetUserId = await resolveTargetUserId({ receiverId: targetId });

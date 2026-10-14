@@ -9,10 +9,12 @@ import { Conversation } from '../models/Conversation';
 import { Subscription } from '../models/Subscription';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { isValidObjectId } from '../utils/securityUtils';
+import { findCanonicalProfile } from './profileController';
 import { z } from 'zod';
 
 const createInterestSchema = z.object({
   receiverId: z.string().optional(),
+  recipientId: z.string().optional(),
   profileId: z.string().optional(),
   targetUserId: z.string().optional(),
 });
@@ -22,24 +24,27 @@ const updateInterestSchema = z.object({
 });
 
 /**
- * Helper to resolve target user ID whether given receiverId, profileId, or targetUserId
+ * Helper to resolve target user ID whether given receiverId, recipientId, profileId, or targetUserId
+ * Supports candidate IDs (e.g. WJ-100092), Profile ObjectIds, and User IDs.
  */
-async function resolveTargetUserId(body: { receiverId?: string; profileId?: string; targetUserId?: string }): Promise<string | null> {
-  const rawId = body.receiverId || body.profileId || body.targetUserId;
-  if (!rawId || !isValidObjectId(rawId)) {
+async function resolveTargetUserId(body: { receiverId?: string; recipientId?: string; profileId?: string; targetUserId?: string }): Promise<string | null> {
+  const rawId = (body.recipientId || body.receiverId || body.profileId || body.targetUserId || '').trim();
+  if (!rawId) {
     return null;
   }
 
-  // Check if it's already a User ID
-  const directUser = await User.findById(rawId);
-  if (directUser) {
-    return String(directUser._id);
+  // 1. Resolve canonical profile (handles candidateId like WJ-100092, profile _id, legacy WJ-[hex])
+  const profile = await findCanonicalProfile(rawId);
+  if (profile && profile.user) {
+    return String(profile.user._id || profile.user.id || profile.user);
   }
 
-  // Check if it's a Profile ID
-  const profile = await Profile.findById(rawId);
-  if (profile && profile.user) {
-    return String(profile.user);
+  // 2. Direct User lookup if rawId matches ObjectId or UUID format
+  if (isValidObjectId(rawId) || /^[0-9a-fA-F]{24}$/.test(rawId) || /^[A-Za-z0-9_-]{20,36}$/.test(rawId)) {
+    const directUser = await User.findById(rawId).select('_id');
+    if (directUser) {
+      return String(directUser._id || directUser.id);
+    }
   }
 
   return null;
@@ -233,8 +238,8 @@ export async function checkInterestStatus(req: AuthRequest, res: Response, next:
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const targetId = req.params.targetId;
-    if (!targetId || !isValidObjectId(targetId)) {
+    const targetId = (req.params.targetId || req.params.id || req.params.profileId || '').trim();
+    if (!targetId || targetId.length < 3 || targetId.length > 50) {
       return res.status(400).json({ success: false, message: 'Invalid target ID' });
     }
 

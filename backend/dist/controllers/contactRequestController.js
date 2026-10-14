@@ -15,6 +15,7 @@ const Subscription_1 = require("../models/Subscription");
 const User_1 = require("../models/User");
 const Profile_1 = require("../models/Profile");
 const Notification_1 = require("../models/Notification");
+const profileController_1 = require("./profileController");
 /**
  * 1. POST /api/contact-requests
  * Send a new contact request to a member
@@ -25,18 +26,22 @@ async function createContactRequest(req, res, next) {
         if (!requesterId) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
-        const { recipientId, profileId, message } = req.body;
-        let targetUserId = recipientId || null;
-        // If profileId provided, resolve user from Profile
+        const { recipientId, profileId, targetUserId: explicitTargetUserId, message } = req.body;
+        let targetUserId = recipientId || explicitTargetUserId || null;
+        // If profileId provided, resolve user from Profile (supports candidate ID or Profile ID)
         if (!targetUserId && profileId) {
-            if (!prismaBridge_1.default.Types.ObjectId.isValid(profileId)) {
-                return res.status(400).json({ success: false, message: 'Invalid profile ID' });
-            }
-            const profile = await Profile_1.Profile.findById(profileId);
-            if (!profile) {
+            const resolvedProfile = await (0, profileController_1.findCanonicalProfile)(String(profileId).trim());
+            if (!resolvedProfile) {
                 return res.status(404).json({ success: false, message: 'Profile not found' });
             }
-            targetUserId = profile.user.toString();
+            targetUserId = String(resolvedProfile.user?._id || resolvedProfile.user?.id || resolvedProfile.user);
+        }
+        else if (targetUserId) {
+            // If recipientId is a candidate ID or profile ID, resolve via canonical profile
+            const resolvedProfile = await (0, profileController_1.findCanonicalProfile)(String(targetUserId).trim());
+            if (resolvedProfile && resolvedProfile.user) {
+                targetUserId = String(resolvedProfile.user?._id || resolvedProfile.user?.id || resolvedProfile.user);
+            }
         }
         if (!targetUserId) {
             return res.status(400).json({
@@ -348,15 +353,18 @@ async function declineContactRequest(req, res, next) {
 async function getContactAccessStatus(req, res, next) {
     try {
         const userId = req.user?.userId;
-        const { profileId } = req.params;
-        if (!prismaBridge_1.default.Types.ObjectId.isValid(profileId)) {
+        const rawProfileId = (req.params.profileId || req.params.targetId || req.params.id || '').trim();
+        const profileId = rawProfileId;
+        if (!profileId || profileId.length < 3 || profileId.length > 50) {
             return res.status(400).json({ success: false, message: 'Invalid profile ID' });
         }
-        const targetProfile = await Profile_1.Profile.findById(profileId).populate('user', 'fullName email mobile verified verificationStatus');
+        const targetProfile = await (0, profileController_1.findCanonicalProfile)(profileId.trim(), {
+            populateUser: true,
+        });
         if (!targetProfile) {
             return res.status(404).json({ success: false, message: 'Profile not found' });
         }
-        const targetUserId = targetProfile.user?._id?.toString() || targetProfile.user?.toString();
+        const targetUserId = targetProfile.user?._id?.toString() || targetProfile.user?.id?.toString() || targetProfile.user?.toString();
         // Guest / non-logged-in users cannot access contact details
         if (!userId) {
             return res.json({

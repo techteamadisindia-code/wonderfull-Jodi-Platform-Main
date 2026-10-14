@@ -61,7 +61,12 @@ export async function getMyBirthDetails(req: AuthRequest, res: Response, next: N
 
     const profile = await Profile.findOne({ user: userId });
     if (!profile) {
-      return res.status(404).json({ success: false, message: 'Matrimonial profile not found' });
+      return res.status(200).json({
+        success: true,
+        data: null,
+        isComplete: false,
+        message: 'No matrimonial profile found for authenticated user',
+      });
     }
 
     const placeString = profile.horoscope?.placeOfBirth || `${profile.city || 'Pune'}, ${profile.state || 'Maharashtra'}, India`;

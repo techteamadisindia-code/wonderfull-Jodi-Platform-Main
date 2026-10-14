@@ -190,23 +190,15 @@ export async function saveKundaliMatch(reportData: PublicKundaliMatchResult): Pr
  * Fetch authenticated user's birth & horoscope details
  */
 export async function getMyBirthDetails(): Promise<UserBirthDetails | null> {
-  if (typeof window !== 'undefined') {
-    const token =
-      localStorage.getItem('wonderfuljodi_token') ||
-      localStorage.getItem('token') ||
-      localStorage.getItem('accessToken');
-    if (!token) {
-      return null;
-    }
-  }
-
   try {
     const res = await apiClient.get('/kundali/my-birth-details');
     return res.data?.data || null;
   } catch (err: any) {
-    if (err?.response?.status === 401) {
+    // If backend returns legacy 404 for missing matrimonial profile, treat as empty birth details
+    if (err?.response?.status === 404) {
       return null;
     }
+    // Do not treat authentication failures (401/403) or server errors (500+) as empty birth details
     throw err;
   }
 }

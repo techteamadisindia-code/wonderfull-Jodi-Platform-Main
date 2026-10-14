@@ -8,18 +8,23 @@ const Block_1 = require("../models/Block");
 const User_1 = require("../models/User");
 const Profile_1 = require("../models/Profile");
 const securityUtils_1 = require("../utils/securityUtils");
-// Helper to resolve User ID whether given a User ID or a Profile ID
+const profileController_1 = require("./profileController");
+// Helper to resolve User ID whether given a User ID, Profile ID, or Candidate ID (e.g. WJ-100092)
 async function resolveTargetUserId(idOrProfileId) {
-    if (!(0, securityUtils_1.isValidObjectId)(idOrProfileId))
+    const rawId = (idOrProfileId || '').trim();
+    if (!rawId || rawId.length < 3 || rawId.length > 50)
         return null;
-    // Check if it's already a valid User ID
-    const directUser = await User_1.User.findById(idOrProfileId).select('_id');
-    if (directUser)
-        return String(directUser._id);
-    // Check if it's a Profile ID
-    const profile = await Profile_1.Profile.findById(idOrProfileId).select('user');
-    if (profile && profile.user)
-        return String(profile.user);
+    // 1. Check canonical profile resolution (handles candidateId like WJ-100092, profile _id, legacy WJ-[hex])
+    const profile = await (0, profileController_1.findCanonicalProfile)(rawId);
+    if (profile && profile.user) {
+        return String(profile.user._id || profile.user.id || profile.user);
+    }
+    // 2. Direct User lookup if rawId matches ObjectId or UUID format
+    if ((0, securityUtils_1.isValidObjectId)(rawId) || /^[0-9a-fA-F]{24}$/.test(rawId) || /^[A-Za-z0-9_-]{20,36}$/.test(rawId)) {
+        const directUser = await User_1.User.findById(rawId).select('_id');
+        if (directUser)
+            return String(directUser._id || directUser.id);
+    }
     return null;
 }
 async function blockUser(req, res, next) {

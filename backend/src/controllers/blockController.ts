@@ -4,19 +4,25 @@ import { User } from '../models/User';
 import { Profile } from '../models/Profile';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { isValidObjectId } from '../utils/securityUtils';
+import { findCanonicalProfile } from './profileController';
 import mongoose from '../db/prismaBridge';
 
-// Helper to resolve User ID whether given a User ID or a Profile ID
+// Helper to resolve User ID whether given a User ID, Profile ID, or Candidate ID (e.g. WJ-100092)
 async function resolveTargetUserId(idOrProfileId: string): Promise<string | null> {
-  if (!isValidObjectId(idOrProfileId)) return null;
+  const rawId = (idOrProfileId || '').trim();
+  if (!rawId || rawId.length < 3 || rawId.length > 50) return null;
 
-  // Check if it's already a valid User ID
-  const directUser = await User.findById(idOrProfileId).select('_id');
-  if (directUser) return String(directUser._id);
+  // 1. Check canonical profile resolution (handles candidateId like WJ-100092, profile _id, legacy WJ-[hex])
+  const profile = await findCanonicalProfile(rawId);
+  if (profile && profile.user) {
+    return String(profile.user._id || profile.user.id || profile.user);
+  }
 
-  // Check if it's a Profile ID
-  const profile = await Profile.findById(idOrProfileId).select('user');
-  if (profile && profile.user) return String(profile.user);
+  // 2. Direct User lookup if rawId matches ObjectId or UUID format
+  if (isValidObjectId(rawId) || /^[0-9a-fA-F]{24}$/.test(rawId) || /^[A-Za-z0-9_-]{20,36}$/.test(rawId)) {
+    const directUser = await User.findById(rawId).select('_id');
+    if (directUser) return String(directUser._id || directUser.id);
+  }
 
   return null;
 }

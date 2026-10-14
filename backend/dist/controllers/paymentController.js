@@ -16,13 +16,13 @@ const Payment_1 = require("../models/Payment");
 const Subscription_1 = require("../models/Subscription");
 const User_1 = require("../models/User");
 const AuditLog_1 = require("../models/AuditLog");
+const membershipController_1 = require("./membershipController");
 /**
  * Helper to get Razorpay instance
  */
 function getRazorpayInstance() {
-    const keyId = process.env.RAZORPAY_KEY_ID || process.env.RAPIDPAY_KEY_ID || '';
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || process.env.RAPIDPAY_KEY_SECRET || '';
-    if (!keyId || !keySecret) {
+    const { keyId, keySecret, isConfigured } = (0, membershipController_1.getRazorpayCredentials)();
+    if (!isConfigured || !keyId || !keySecret) {
         return null;
     }
     return new razorpay_1.default({

@@ -8,6 +8,7 @@ import { User } from '../models/User';
 import { Profile } from '../models/Profile';
 import { Notification } from '../models/Notification';
 import { MembershipPlan } from '../models/MembershipPlan';
+import { findCanonicalProfile } from './profileController';
 
 /**
  * 1. POST /api/contact-requests
@@ -20,20 +21,23 @@ export async function createContactRequest(req: AuthRequest, res: Response, next
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const { recipientId, profileId, message } = req.body;
+    const { recipientId, profileId, targetUserId: explicitTargetUserId, message } = req.body;
 
-    let targetUserId: string | null = recipientId || null;
+    let targetUserId: string | null = recipientId || explicitTargetUserId || null;
 
-    // If profileId provided, resolve user from Profile
+    // If profileId provided, resolve user from Profile (supports candidate ID or Profile ID)
     if (!targetUserId && profileId) {
-      if (!mongoose.Types.ObjectId.isValid(profileId)) {
-        return res.status(400).json({ success: false, message: 'Invalid profile ID' });
-      }
-      const profile = await Profile.findById(profileId);
-      if (!profile) {
+      const resolvedProfile = await findCanonicalProfile(String(profileId).trim());
+      if (!resolvedProfile) {
         return res.status(404).json({ success: false, message: 'Profile not found' });
       }
-      targetUserId = profile.user.toString();
+      targetUserId = String(resolvedProfile.user?._id || resolvedProfile.user?.id || resolvedProfile.user);
+    } else if (targetUserId) {
+      // If recipientId is a candidate ID or profile ID, resolve via canonical profile
+      const resolvedProfile = await findCanonicalProfile(String(targetUserId).trim());
+      if (resolvedProfile && resolvedProfile.user) {
+        targetUserId = String(resolvedProfile.user?._id || resolvedProfile.user?.id || resolvedProfile.user);
+      }
     }
 
     if (!targetUserId) {
@@ -401,22 +405,22 @@ export async function declineContactRequest(req: AuthRequest, res: Response, nex
 export async function getContactAccessStatus(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.user?.userId;
-    const { profileId } = req.params;
+    const rawProfileId = (req.params.profileId || req.params.targetId || req.params.id || '').trim();
+    const profileId = rawProfileId;
 
-    if (!mongoose.Types.ObjectId.isValid(profileId)) {
+    if (!profileId || profileId.length < 3 || profileId.length > 50) {
       return res.status(400).json({ success: false, message: 'Invalid profile ID' });
     }
 
-    const targetProfile = await Profile.findById(profileId).populate(
-      'user',
-      'fullName email mobile verified verificationStatus'
-    );
+    const targetProfile = await findCanonicalProfile(profileId.trim(), {
+      populateUser: true,
+    });
 
     if (!targetProfile) {
       return res.status(404).json({ success: false, message: 'Profile not found' });
     }
 
-    const targetUserId = targetProfile.user?._id?.toString() || targetProfile.user?.toString();
+    const targetUserId = targetProfile.user?._id?.toString() || targetProfile.user?.id?.toString() || targetProfile.user?.toString();
 
     // Guest / non-logged-in users cannot access contact details
     if (!userId) {

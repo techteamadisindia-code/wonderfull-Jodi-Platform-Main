@@ -1194,6 +1194,13 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
       }
     } catch (err: any) {
       if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+        if (this.delegateName === 'block') {
+          console.error(
+            `[PrismaBridge] CRITICAL: Schema error on security-critical delegate 'block'. Failing closed to protect block boundaries:`,
+            err.message
+          );
+          throw err;
+        }
         console.warn(
           `[PrismaBridge] Missing table encountered for delegate '${this.delegateName}' (P2021). Returning empty fallback result.`
         );
@@ -1495,6 +1502,7 @@ export interface IModelAdapter<T = any> {
   deleteOne(filter: any): Promise<any>;
   deleteMany(filter: any): Promise<any>;
   findByIdAndDelete(id: any): Promise<T | null>;
+  findOneAndDelete(filter: any): Promise<T | null>;
   countDocuments(filter?: any): Promise<number>;
   estimatedDocumentCount(): Promise<number>;
   distinct(field: string, filter?: any): Promise<any[]>;
@@ -1788,6 +1796,21 @@ export function createPrismaModelAdapter<T = any>(
     }
   };
 
+  ModelConstructor.findOneAndDelete = async function (filter: any) {
+    const delegate = getDelegate();
+    if (!delegate) return null;
+    const where = normalizeFilter(filter, fieldMap);
+    try {
+      const record = await delegate.findFirst({ where });
+      if (!record) return null;
+      await delegate.delete({ where: { id: record.id } });
+      return toClient(record);
+    } catch (err: any) {
+      if (err.code === 'P2025') return null;
+      throw err;
+    }
+  };
+
   ModelConstructor.countDocuments = async function (filter: any = {}) {
     try {
       const delegate = getDelegate();
@@ -1796,6 +1819,9 @@ export function createPrismaModelAdapter<T = any>(
       return await delegate.count({ where });
     } catch (err: any) {
       if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+        if (String(delegateName) === 'block') {
+          throw err;
+        }
         console.warn(`[PrismaBridge] Table for delegate '${String(delegateName)}' does not exist yet. Returning 0 count.`);
         return 0;
       }
@@ -1809,6 +1835,9 @@ export function createPrismaModelAdapter<T = any>(
       return count > 0 ? { _id: true } : null;
     } catch (err: any) {
       if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
+        if (String(delegateName) === 'block') {
+          throw err;
+        }
         console.warn(`[PrismaBridge] Table for delegate '${String(delegateName)}' does not exist yet. Returning null for exists.`);
         return null;
       }

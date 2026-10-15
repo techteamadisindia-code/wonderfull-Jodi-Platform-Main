@@ -7,6 +7,7 @@ import { Profile } from '../models/Profile';
 import { getNextCandidateId } from '../models/Counter';
 import { RefreshToken } from '../models/RefreshToken';
 import { PasswordResetToken } from '../models/PasswordResetToken';
+import { Notification } from '../models/Notification';
 import { sendMail, sendPasswordResetEmail } from '../services/emailService';
 import {
   generateRandomToken,
@@ -20,6 +21,44 @@ import { AuthRequest } from '../middleware/authMiddleware';
 
 import { CURRENT_TERMS_VERSION } from '../config/termsConfig';
 import { validateDateOfBirth } from '../utils/doctorValidation';
+
+/**
+ * Safely parse browser and OS details from user agent string
+ */
+export function parseDeviceDescription(userAgent?: string): string {
+  if (!userAgent || typeof userAgent !== 'string') return 'Unknown Device';
+  const ua = userAgent.trim();
+  let browser = 'Browser';
+  let os = 'Device';
+
+  if (/edg/i.test(ua)) browser = 'Microsoft Edge';
+  else if (/chrome/i.test(ua) && !/chromium|edg/i.test(ua)) browser = 'Google Chrome';
+  else if (/safari/i.test(ua) && !/chrome/i.test(ua)) browser = 'Safari';
+  else if (/firefox/i.test(ua)) browser = 'Mozilla Firefox';
+  else if (/opera|opr/i.test(ua)) browser = 'Opera';
+
+  if (/windows/i.test(ua)) os = 'Windows';
+  else if (/macintosh|mac os x/i.test(ua)) os = 'macOS';
+  else if (/android/i.test(ua)) os = 'Android';
+  else if (/iphone|ipad|ipod/i.test(ua)) os = 'iOS';
+  else if (/linux/i.test(ua)) os = 'Linux';
+
+  return `${browser} on ${os}`;
+}
+
+/**
+ * Mask and sanitize IP address for user privacy
+ */
+export function sanitizeIpAddress(ip?: string): string {
+  if (!ip || typeof ip !== 'string') return 'Unknown IP';
+  const clean = ip.split(',')[0].trim();
+  if (clean === '::1' || clean === '127.0.0.1') return '127.0.0.1 (Localhost)';
+  const parts = clean.split('.');
+  if (parts.length === 4) {
+    return `${parts[0]}.${parts[1]}.***.***`;
+  }
+  return clean;
+}
 
 const passwordComplexityRegex =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&^#()_\-+={}[\]:;"'<>,.~`|\\]).{8,}$/;
@@ -105,7 +144,7 @@ function signAccessToken(userId: string, role: string): string {
 /**
  * Issue new Refresh Token with family tracking for rotation
  */
-async function issueRefreshToken(
+export async function issueRefreshToken(
   userId: string,
   family?: string,
   req?: Request
@@ -317,8 +356,15 @@ export async function loginUser(req: Request, res: Response, next: NextFunction)
       });
     }
 
+    // Check for prior active sessions belonging to this user before generating the new session
+    const priorActiveSessions = await RefreshToken.find({
+      user: user._id,
+      isRevoked: false,
+      expiresAt: { $gt: new Date() },
+    }).sort({ createdAt: -1 });
+
     const accessToken = signAccessToken(user._id.toString(), user.role);
-    const { rawRefreshToken } = await issueRefreshToken(user._id.toString(), undefined, req);
+    const { rawRefreshToken, family: newFamily } = await issueRefreshToken(user._id.toString(), undefined, req);
 
     setAuthCookies(res, accessToken, rawRefreshToken);
 
@@ -326,8 +372,56 @@ export async function loginUser(req: Request, res: Response, next: NextFunction)
       user,
       identifier: user.email,
       req,
-      details: { action: 'login' },
+      details: { action: 'login', family: newFamily },
     });
+
+    // Notify user if a new sign-in occurred while another active session exists
+    if (priorActiveSessions && priorActiveSessions.length > 0) {
+      try {
+        const prior = priorActiveSessions[0];
+        const priorDevice = parseDeviceDescription(prior.userAgent);
+        const priorIp = sanitizeIpAddress(prior.ipAddress);
+        const currentUa = (req.headers['user-agent'] as string) || '';
+        const currentDevice = parseDeviceDescription(currentUa);
+        const currentRawIp =
+          (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress;
+        const currentIp = sanitizeIpAddress(currentRawIp);
+        const recordedTime = new Date().toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        });
+
+        await Notification.create({
+          user: user._id,
+          type: 'SECURITY_ALERT',
+          title: 'New Sign-in Detected on Another Device',
+          message: `A new sign-in was detected for your account on ${recordedTime} from ${currentDevice} (IP: ${currentIp}). A previous active session was recorded from ${priorDevice} (IP: ${priorIp}). Note: Device descriptions and IP addresses are unverified HTTP request headers and not proof of physical identity. If this was not you, please log out of other sessions immediately.`,
+          actionUrl: '/profile#device-sessions',
+          link: '/profile#device-sessions',
+          metadata: {
+            eventType: 'NEW_DEVICE_SIGNIN',
+            hasOtherActiveSessions: true,
+            isIdentityVerified: false,
+            priorActiveSessionsCount: priorActiveSessions.length,
+            previousSession: {
+              device: priorDevice,
+              ip: priorIp,
+              recordedAt: prior.createdAt,
+            },
+            currentSession: {
+              device: currentDevice,
+              ip: currentIp,
+              recordedAt: new Date(),
+            },
+            disclaimer:
+              'Recorded user-agent and IP addresses are request metadata and do not constitute verified physical identity.',
+          },
+        });
+      } catch (notifErr) {
+        console.warn('Security sign-in notification warning (non-blocking):', notifErr);
+      }
+    }
 
     if (user.role !== 'admin') {
       import('../services/visitTrackingService')
@@ -419,7 +513,8 @@ export async function refreshSession(req: Request, res: Response, next: NextFunc
       });
     }
 
-    const user = await User.findById(tokenDoc.user);
+    const targetUserId = tokenDoc.user || (tokenDoc as any).userId;
+    const user = await User.findById(targetUserId);
     if (!user || !user.isActive) {
       tokenDoc.isRevoked = true;
       await tokenDoc.save();
@@ -435,9 +530,10 @@ export async function refreshSession(req: Request, res: Response, next: NextFunc
     await tokenDoc.save();
 
     // Issue new access token + new rotated refresh token in the same family
-    const newAccessToken = signAccessToken(user._id.toString(), user.role);
+    const currentUserIdStr = (user._id || (user as any).id).toString();
+    const newAccessToken = signAccessToken(currentUserIdStr, user.role);
     const { rawRefreshToken: newRawRefreshToken } = await issueRefreshToken(
-      user._id.toString(),
+      currentUserIdStr,
       tokenDoc.family,
       req
     );
@@ -452,8 +548,8 @@ export async function refreshSession(req: Request, res: Response, next: NextFunc
     });
 
     const userData = {
-      _id: user._id,
-      id: user._id,
+      _id: user._id || (user as any).id,
+      id: user._id || (user as any).id,
       fullName: user.fullName,
       email: user.email,
       mobile: user.mobile,
@@ -515,6 +611,160 @@ export async function logoutAllDevices(req: AuthRequest, res: Response, next: Ne
     return res.json({
       success: true,
       message: 'Successfully logged out from all devices',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Logout all other device sessions for the authenticated user while preserving current session
+ * POST /api/auth/logout-other-sessions
+ */
+export async function logoutOtherSessions(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    // 1. Resolve current session family from current refresh token or request parameter
+    const rawRefreshToken = req.cookies?.refresh_token || req.body?.refreshToken;
+    let currentFamily: string | null = null;
+
+    if (rawRefreshToken && typeof rawRefreshToken === 'string') {
+      const tokenHash = hashToken(rawRefreshToken);
+      const currentTokenDoc = await RefreshToken.findOne({
+        tokenHash,
+        user: userId,
+        isRevoked: false,
+        expiresAt: { $gt: new Date() },
+      });
+      if (currentTokenDoc) {
+        currentFamily = currentTokenDoc.family;
+      }
+    }
+
+    if (!currentFamily && req.user?.sessionId) {
+      const sessionDoc = await RefreshToken.findOne({
+        _id: req.user.sessionId,
+        user: userId,
+        isRevoked: false,
+        expiresAt: { $gt: new Date() },
+      });
+      if (sessionDoc) {
+        currentFamily = sessionDoc.family;
+      }
+    }
+
+    // Fallback: If not explicitly found via cookie/body, find the most recently created or updated active token for this user
+    if (!currentFamily) {
+      const latestActive = await RefreshToken.findOne({
+        user: userId,
+        isRevoked: false,
+        expiresAt: { $gt: new Date() },
+      }).sort({ updatedAt: -1 });
+
+      if (latestActive) {
+        currentFamily = latestActive.family;
+      }
+    }
+
+    // 2. Revoke other active sessions belonging exclusively to this user
+    // Safe against cross-account revocation because query strictly filters by { user: userId }
+    const filter: any = {
+      user: userId,
+      isRevoked: false,
+    };
+    if (currentFamily) {
+      filter.family = { $ne: currentFamily };
+    }
+
+    const result = await RefreshToken.updateMany(filter, { isRevoked: true, isUsed: true });
+    const count = typeof (result as any)?.modifiedCount === 'number'
+      ? (result as any).modifiedCount
+      : (typeof (result as any)?.count === 'number' ? (result as any).count : 0);
+
+    await recordSecurityEvent('LOGOUT_ALL', {
+      user: userId,
+      req,
+      details: {
+        action: 'logout_other_sessions',
+        preservedFamily: currentFamily,
+        revokedSessionsCount: count,
+      },
+    });
+
+    return res.json({
+      success: true,
+      message: 'All other active device sessions have been securely logged out.',
+      data: {
+        revokedCount: count,
+        revokedSessionsCount: count,
+        currentSessionPreserved: !!currentFamily,
+        statelessJwtNotice:
+          'Refresh tokens for other devices are immediately revoked. Existing stateless access tokens expire naturally within up to 15 minutes (15m).',
+        note: 'Refresh tokens for other devices are immediately revoked. Existing stateless access tokens expire naturally within up to 15 minutes.',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * List active device sessions for the authenticated user
+ * GET /api/auth/active-sessions
+ */
+export async function getActiveSessions(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    const rawRefreshToken = req.cookies?.refresh_token || req.query?.refreshToken;
+    let currentFamily: string | null = null;
+    if (rawRefreshToken && typeof rawRefreshToken === 'string') {
+      const tokenHash = hashToken(rawRefreshToken);
+      const currentDoc = await RefreshToken.findOne({ tokenHash, user: userId });
+      if (currentDoc) currentFamily = currentDoc.family;
+    }
+
+    const activeTokens = await RefreshToken.find({
+      user: userId,
+      isRevoked: false,
+      expiresAt: { $gt: new Date() },
+    }).sort({ updatedAt: -1 });
+
+    // Group by family to represent unique device sessions
+    const familyMap = new Map<string, any>();
+    for (const token of activeTokens) {
+      if (!familyMap.has(token.family)) {
+        familyMap.set(token.family, token);
+      }
+    }
+
+    const sessions = Array.from(familyMap.values()).map((doc, idx) => {
+      const isCurrent = currentFamily ? doc.family === currentFamily : idx === 0;
+      return {
+        id: doc._id,
+        family: doc.family,
+        device: parseDeviceDescription(doc.userAgent),
+        userAgent: doc.userAgent ? doc.userAgent.slice(0, 150) : 'Unknown',
+        ipAddress: sanitizeIpAddress(doc.ipAddress),
+        createdAt: doc.createdAt,
+        lastActiveAt: doc.updatedAt || doc.createdAt,
+        isCurrent,
+      };
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        sessions,
+        totalActiveSessions: sessions.length,
+      },
     });
   } catch (error) {
     next(error);

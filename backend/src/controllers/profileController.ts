@@ -124,21 +124,32 @@ const profileSchema = z.object({
       villageId: z.string().optional(),
       pincode: z.string().max(20).optional(),
       formattedAddress: z.string().max(300).optional(),
+      addressLine1: z.string().max(300).optional(),
+      addressLine2: z.string().max(300).optional(),
+      landmark: z.string().max(200).optional(),
     })
     .passthrough()
     .optional(),
   nativePlaceDetails: z
     .object({
       countryId: z.string().optional(),
+      countryName: z.string().optional(),
       stateId: z.string().optional(),
+      stateName: z.string().optional(),
       districtId: z.string().optional(),
+      districtName: z.string().optional(),
       subDistrictId: z.string().optional(),
       cityId: z.string().optional(),
+      cityName: z.string().optional(),
       villageId: z.string().optional(),
       pincode: z.string().max(20).optional(),
       description: z.string().max(500).optional(),
       formattedAddress: z.string().max(300).optional(),
+      addressLine1: z.string().max(300).optional(),
+      addressLine2: z.string().max(300).optional(),
+      landmark: z.string().max(200).optional(),
     })
+    .passthrough()
     .optional(),
   communityDetails: z
     .object({
@@ -368,13 +379,21 @@ export async function updateMyProfile(req: AuthRequest, res: Response, next: Nex
       });
     }
 
-    // Deep merge partnerPreferences and privacySettings if provided
+    // Deep merge partnerPreferences, partnerExpectations and privacySettings if provided
     if (data.partnerPreferences) {
       profile.partnerPreferences = {
         ...((profile.partnerPreferences as any)?.toObject?.() || profile.partnerPreferences || {}),
         ...data.partnerPreferences,
       };
       delete (data as any).partnerPreferences;
+    }
+
+    if (data.partnerExpectations) {
+      profile.partnerExpectations = {
+        ...((profile.partnerExpectations as any)?.toObject?.() || profile.partnerExpectations || {}),
+        ...data.partnerExpectations,
+      };
+      delete (data as any).partnerExpectations;
     }
 
     if (data.privacySettings) {
@@ -399,6 +418,22 @@ export async function updateMyProfile(req: AuthRequest, res: Response, next: Nex
         ...data.lifestyleInterests,
       };
       delete (data as any).lifestyleInterests;
+    }
+
+    if (data.currentLocation) {
+      profile.currentLocation = {
+        ...((profile.currentLocation as any)?.toObject?.() || profile.currentLocation || {}),
+        ...data.currentLocation,
+      };
+      delete (data as any).currentLocation;
+    }
+
+    if (data.nativePlaceDetails) {
+      profile.nativePlaceDetails = {
+        ...((profile.nativePlaceDetails as any)?.toObject?.() || profile.nativePlaceDetails || {}),
+        ...data.nativePlaceDetails,
+      };
+      delete (data as any).nativePlaceDetails;
     }
 
     Object.assign(profile, data);
@@ -701,7 +736,7 @@ export async function createProfile(req: AuthRequest, res: Response, next: NextF
 export async function updateProfile(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
-    if (!isValidObjectId(id)) {
+    if (!isValidObjectId(id) && !/^[A-Za-z0-9_-]{20,36}$/.test(id)) {
       return res.status(400).json({ success: false, message: 'Invalid profile ID' });
     }
 
@@ -711,7 +746,7 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
     }
 
     // Ownership & authorization check
-    const isOwner = profile.user.toString() === req.user?.userId;
+    const isOwner = (profile.user?._id?.toString() || profile.user?.toString() || (profile as any).userId?.toString()) === req.user?.userId;
     const isAdmin = req.user?.role === 'admin';
 
     if (!isOwner && !isAdmin) {
@@ -719,6 +754,23 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
     }
 
     const data = profileSchema.partial().parse(req.body);
+
+    if (data.currentLocation) {
+      profile.currentLocation = {
+        ...((profile.currentLocation as any)?.toObject?.() || profile.currentLocation || {}),
+        ...data.currentLocation,
+      };
+      delete (data as any).currentLocation;
+    }
+
+    if (data.nativePlaceDetails) {
+      profile.nativePlaceDetails = {
+        ...((profile.nativePlaceDetails as any)?.toObject?.() || profile.nativePlaceDetails || {}),
+        ...data.nativePlaceDetails,
+      };
+      delete (data as any).nativePlaceDetails;
+    }
+
     Object.assign(profile, data);
     if (data.dob) {
       profile.dob = new Date(data.dob);

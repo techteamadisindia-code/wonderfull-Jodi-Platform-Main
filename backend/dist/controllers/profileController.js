@@ -112,21 +112,32 @@ const profileSchema = zod_1.z.object({
         villageId: zod_1.z.string().optional(),
         pincode: zod_1.z.string().max(20).optional(),
         formattedAddress: zod_1.z.string().max(300).optional(),
+        addressLine1: zod_1.z.string().max(300).optional(),
+        addressLine2: zod_1.z.string().max(300).optional(),
+        landmark: zod_1.z.string().max(200).optional(),
     })
         .passthrough()
         .optional(),
     nativePlaceDetails: zod_1.z
         .object({
         countryId: zod_1.z.string().optional(),
+        countryName: zod_1.z.string().optional(),
         stateId: zod_1.z.string().optional(),
+        stateName: zod_1.z.string().optional(),
         districtId: zod_1.z.string().optional(),
+        districtName: zod_1.z.string().optional(),
         subDistrictId: zod_1.z.string().optional(),
         cityId: zod_1.z.string().optional(),
+        cityName: zod_1.z.string().optional(),
         villageId: zod_1.z.string().optional(),
         pincode: zod_1.z.string().max(20).optional(),
         description: zod_1.z.string().max(500).optional(),
         formattedAddress: zod_1.z.string().max(300).optional(),
+        addressLine1: zod_1.z.string().max(300).optional(),
+        addressLine2: zod_1.z.string().max(300).optional(),
+        landmark: zod_1.z.string().max(200).optional(),
     })
+        .passthrough()
         .optional(),
     communityDetails: zod_1.z
         .object({
@@ -351,13 +362,20 @@ async function updateMyProfile(req, res, next) {
                 message: 'Profile not found. Please complete profile registration first.',
             });
         }
-        // Deep merge partnerPreferences and privacySettings if provided
+        // Deep merge partnerPreferences, partnerExpectations and privacySettings if provided
         if (data.partnerPreferences) {
             profile.partnerPreferences = {
                 ...(profile.partnerPreferences?.toObject?.() || profile.partnerPreferences || {}),
                 ...data.partnerPreferences,
             };
             delete data.partnerPreferences;
+        }
+        if (data.partnerExpectations) {
+            profile.partnerExpectations = {
+                ...(profile.partnerExpectations?.toObject?.() || profile.partnerExpectations || {}),
+                ...data.partnerExpectations,
+            };
+            delete data.partnerExpectations;
         }
         if (data.privacySettings) {
             profile.privacySettings = {
@@ -379,6 +397,20 @@ async function updateMyProfile(req, res, next) {
                 ...data.lifestyleInterests,
             };
             delete data.lifestyleInterests;
+        }
+        if (data.currentLocation) {
+            profile.currentLocation = {
+                ...(profile.currentLocation?.toObject?.() || profile.currentLocation || {}),
+                ...data.currentLocation,
+            };
+            delete data.currentLocation;
+        }
+        if (data.nativePlaceDetails) {
+            profile.nativePlaceDetails = {
+                ...(profile.nativePlaceDetails?.toObject?.() || profile.nativePlaceDetails || {}),
+                ...data.nativePlaceDetails,
+            };
+            delete data.nativePlaceDetails;
         }
         Object.assign(profile, data);
         if (data.dob) {
@@ -635,7 +667,7 @@ async function createProfile(req, res, next) {
 async function updateProfile(req, res, next) {
     try {
         const { id } = req.params;
-        if (!(0, securityUtils_1.isValidObjectId)(id)) {
+        if (!(0, securityUtils_1.isValidObjectId)(id) && !/^[A-Za-z0-9_-]{20,36}$/.test(id)) {
             return res.status(400).json({ success: false, message: 'Invalid profile ID' });
         }
         const profile = await Profile_1.Profile.findById(id);
@@ -643,12 +675,26 @@ async function updateProfile(req, res, next) {
             return res.status(404).json({ success: false, message: 'Profile not found' });
         }
         // Ownership & authorization check
-        const isOwner = profile.user.toString() === req.user?.userId;
+        const isOwner = (profile.user?._id?.toString() || profile.user?.toString() || profile.userId?.toString()) === req.user?.userId;
         const isAdmin = req.user?.role === 'admin';
         if (!isOwner && !isAdmin) {
             return res.status(403).json({ success: false, message: 'Forbidden: you cannot edit another user\'s profile' });
         }
         const data = profileSchema.partial().parse(req.body);
+        if (data.currentLocation) {
+            profile.currentLocation = {
+                ...(profile.currentLocation?.toObject?.() || profile.currentLocation || {}),
+                ...data.currentLocation,
+            };
+            delete data.currentLocation;
+        }
+        if (data.nativePlaceDetails) {
+            profile.nativePlaceDetails = {
+                ...(profile.nativePlaceDetails?.toObject?.() || profile.nativePlaceDetails || {}),
+                ...data.nativePlaceDetails,
+            };
+            delete data.nativePlaceDetails;
+        }
         Object.assign(profile, data);
         if (data.dob) {
             profile.dob = new Date(data.dob);

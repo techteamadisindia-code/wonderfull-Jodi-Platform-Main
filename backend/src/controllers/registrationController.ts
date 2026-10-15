@@ -4,6 +4,10 @@ import bcrypt from 'bcrypt';
 import { Registration, RegistrationStatus } from '../models/Registration';
 import { User } from '../models/User';
 import { Profile } from '../models/Profile';
+import { Admin } from '../models/Admin';
+import { Payment } from '../models/Payment';
+import { Subscription } from '../models/Subscription';
+import { AuditLog } from '../models/AuditLog';
 import { State, City } from '../models/Location';
 import { getNextCandidateId } from '../models/Counter';
 import { AuthRequest } from '../middleware/authMiddleware';
@@ -1573,7 +1577,10 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
         qualification: partnerExp.qualification || pref.prefEducation || raw.prefEducation || undefined,
         specialization: partnerExp.specialization || pref.prefProfession || raw.prefProfession || undefined,
         location: partnerExp.location || { city: pref.prefCity || raw.prefCity || undefined },
-        willingToRelocate: partnerExp.willingToRelocate,
+        willingToRelocate:
+          partnerExp.willingToRelocate !== undefined && partnerExp.willingToRelocate !== ''
+            ? partnerExp.willingToRelocate
+            : undefined,
         maritalStatus: partnerExp.maritalStatus || undefined,
         lifestyle: partnerExp.lifestyle || { diet: pref.prefDiet || raw.prefDiet || undefined },
         familyExpectations: partnerExp.familyExpectations || undefined,
@@ -2078,6 +2085,134 @@ export async function getAdminRegistrationById(
         registration: sanitized,
         sectionStatus,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * 11. DELETE INCOMPLETE REGISTRATION (DELETE /api/admin/registrations/:id)
+ * Safely soft-deletes an incomplete candidate registration record
+ */
+export async function deleteAdminRegistration(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const callerId = req.user?.userId;
+    if (!callerId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    // 1. Authorization: Verify admin has 'all', 'users', or 'admins' permission or is primary admin
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    const callerPerms: string[] = callerAdmin?.permissions || [];
+    const canDelete =
+      callerPerms.includes('all') ||
+      callerPerms.includes('users') ||
+      callerPerms.includes('admins');
+
+    if (!canDelete) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: Insufficient permissions to delete registration records.',
+      });
+    }
+
+    const { id } = req.params;
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({ success: false, message: 'Invalid ID provided' });
+    }
+
+    // 2. Find target registration
+    const isMongoId = isValidObjectId(id);
+    const registration = await Registration.findOne({
+      $or: [
+        isMongoId ? { _id: id } : null,
+        { registrationId: id.trim().toUpperCase() },
+      ].filter(Boolean) as any[],
+      isDeleted: false,
+    });
+
+    if (!registration) {
+      return res.status(404).json({
+        success: false,
+        code: 'NOT_FOUND',
+        message: 'Registration record not found or already deleted',
+      });
+    }
+
+    // 3. Eligibility check: Reject completed registrations
+    if (registration.status === 'COMPLETED') {
+      return res.status(400).json({
+        success: false,
+        code: 'CANNOT_DELETE_COMPLETED',
+        message: 'Completed registrations cannot be deleted from incomplete registration records. Please manage completed candidates via the Profiles module.',
+      });
+    }
+
+    // 4. Protection: Reject if linked to an active user account
+    if (registration.user) {
+      const linkedUser = await User.findById(registration.user);
+      if (linkedUser && !linkedUser.isDeleted && linkedUser.isActive && linkedUser.status === 'Active') {
+        return res.status(400).json({
+          success: false,
+          code: 'CANNOT_DELETE_ACTIVE_USER',
+          message: 'This registration is linked to an active candidate account and cannot be deleted.',
+        });
+      }
+    }
+
+    // 5. Protection: Reject if linked to completed payments or active subscriptions
+    if (registration.user) {
+      const [completedPayment, activeSub] = await Promise.all([
+        Payment.findOne({ user: registration.user, status: 'SUCCESS' }),
+        Subscription.findOne({ user: registration.user, status: { $in: ['ACTIVE', 'PENDING'] } }),
+      ]);
+      if (completedPayment || activeSub) {
+        return res.status(400).json({
+          success: false,
+          code: 'CANNOT_DELETE_FINANCIAL_RECORDS',
+          message: 'Cannot delete registration: candidate is linked to existing payment or subscription records.',
+        });
+      }
+    }
+
+    // 6. Execute soft deletion
+    await Registration.findByIdAndUpdate(registration._id, {
+      isDeleted: true,
+    });
+
+    // 7. Record audit log
+    try {
+      await AuditLog.create({
+        adminEmail: req.user?.email || 'admin@wonderfuljodi.com',
+        adminId: callerId,
+        action: 'REGISTRATION_DELETED',
+        targetModel: 'Registration',
+        targetId: String(registration._id),
+        previousStatus: registration.status,
+        newStatus: 'DELETED',
+        reason: req.body?.reason || 'Incomplete registration soft-deleted by administrator',
+        details: `Soft-deleted registration ${registration.registrationId} for candidate ${registration.candidateName || 'Unnamed'}`,
+        metadata: {
+          registrationId: registration.registrationId,
+          candidateName: registration.candidateName,
+          currentStep: registration.currentStep,
+          completionPercentage: registration.completionPercentage,
+        },
+        status: 'SUCCESS',
+      });
+    } catch (auditErr) {
+      console.error('Audit logging for registration deletion failed:', auditErr);
+    }
+
+    return res.json({
+      success: true,
+      message: 'Incomplete registration deleted successfully',
+      registrationId: registration.registrationId,
     });
   } catch (error) {
     next(error);

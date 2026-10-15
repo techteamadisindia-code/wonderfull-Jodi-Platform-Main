@@ -37,10 +37,34 @@ import {
   toggleAdminMembershipPlanStatus,
   fetchMemberships,
   updateMembership,
+  grantManualMembership,
 } from '../../../services/membershipApi';
+import { getAdminUser } from '../../../services/authApi';
 
 export default function AdminMembershipsPage() {
   const [activeTab, setActiveTab] = useState<'plans' | 'subscriptions'>('plans');
+
+  const [currentAdmin, setCurrentAdmin] = useState<any>(null);
+
+  useEffect(() => {
+    const admin = getAdminUser();
+    if (admin) {
+      setCurrentAdmin(admin);
+    }
+  }, []);
+
+  const isSuperAdmin =
+    Boolean(currentAdmin?.permissions?.includes('all'));
+
+  // ─── Super Admin Manual Grant Modal State ───
+  const [isGrantModalOpen, setIsGrantModalOpen] = useState(false);
+  const [grantUserId, setGrantUserId] = useState('');
+  const [grantPlanId, setGrantPlanId] = useState('');
+  const [grantDurationDays, setGrantDurationDays] = useState<number | string>(30);
+  const [grantReason, setGrantReason] = useState('');
+  const [grantExtendExisting, setGrantExtendExisting] = useState(true);
+  const [granting, setGranting] = useState(false);
+  const [grantError, setGrantError] = useState<string | null>(null);
 
   // ─── Plan Management State ───
   const [plans, setPlans] = useState<MembershipPlanData[]>([]);
@@ -324,6 +348,48 @@ export default function AdminMembershipsPage() {
     }
   };
 
+  // ─── Super Admin Manual Grant Handler ───
+  const handleGrantMembership = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!grantUserId.trim()) {
+      setGrantError('Target User ID, Candidate ID, or email address is required.');
+      return;
+    }
+    if (!grantPlanId) {
+      setGrantError('Please select a membership plan to grant.');
+      return;
+    }
+    if (!grantReason.trim() || grantReason.trim().length < 5) {
+      setGrantError('A detailed reason is required (minimum 5 characters) for audit trail compliance.');
+      return;
+    }
+
+    setGranting(true);
+    setGrantError(null);
+    try {
+      const res = await grantManualMembership({
+        userId: grantUserId.trim(),
+        planId: grantPlanId,
+        durationDays: Number(grantDurationDays) || 30,
+        grantReason: grantReason.trim(),
+        extendExisting: grantExtendExisting,
+      });
+
+      showToast(res.message || 'Membership plan granted successfully!', 'success');
+      setIsGrantModalOpen(false);
+      setGrantUserId('');
+      setGrantReason('');
+      if (activeTab === 'subscriptions') {
+        loadSubscriptions();
+      }
+    } catch (err: any) {
+      console.error('Failed to grant membership:', err);
+      setGrantError(err.response?.data?.message || 'Failed to manually grant membership.');
+    } finally {
+      setGranting(false);
+    }
+  };
+
   // Stats
   const totalPlans = plans.length;
   const activePlansCount = plans.filter((p) => p.isActive).length;
@@ -375,6 +441,25 @@ export default function AdminMembershipsPage() {
             <RefreshCw className="w-4 h-4 text-slate-500" />
             <span>Refresh</span>
           </button>
+
+          {isSuperAdmin && (
+            <button
+              onClick={() => {
+                setGrantError(null);
+                if (plans.length > 0 && !grantPlanId) {
+                  const defaultP = plans.find((p) => p.isActive) || plans[0];
+                  setGrantPlanId(defaultP?._id || defaultP?.slug);
+                  setGrantDurationDays(defaultP?.durationDays || 30);
+                }
+                setIsGrantModalOpen(true);
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-amber-950 bg-gradient-to-r from-amber-200 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-500 transition shadow-xs cursor-pointer border border-amber-400"
+              title="Super Admin Only: Manually grant active membership without financial transaction bypass"
+            >
+              <Crown className="w-4 h-4 text-amber-800" />
+              <span>Grant Paid Membership</span>
+            </button>
+          )}
 
           {activeTab === 'plans' && (
             <button
@@ -1335,6 +1420,155 @@ export default function AdminMembershipsPage() {
                   className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-[#E51F3E] hover:bg-[#c91834] disabled:opacity-50"
                 >
                   {savingSub ? 'Saving...' : 'Update Subscription'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Super Admin Manual Membership Grant Modal ─── */}
+      {isGrantModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-500 text-amber-950 flex items-center justify-center shadow-xs">
+                  <Crown className="w-5 h-5 text-amber-950" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">Grant Paid Membership</h3>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                    Super Admin Only Action
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsGrantModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {grantError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{grantError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleGrantMembership} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Target User (User ID, Candidate ID, or Email) *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. WJ1042 or doctor@example.com"
+                  value={grantUserId}
+                  onChange={(e) => setGrantUserId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-xs font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Select Plan *
+                  </label>
+                  <select
+                    value={grantPlanId}
+                    onChange={(e) => {
+                      setGrantPlanId(e.target.value);
+                      const selected = plans.find((p) => p._id === e.target.value || p.slug === e.target.value);
+                      if (selected) {
+                        setGrantDurationDays(selected.durationDays || 30);
+                      }
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-xs font-medium"
+                  >
+                    <option value="">Select a plan...</option>
+                    {plans.map((p) => (
+                      <option key={p._id} value={p._id}>
+                        {p.name} ({p.durationDays} days)
+                      </option>
+                    ))}
+                    {plans.length === 0 && (
+                      <>
+                        <option value="premium-match">Premium Match (180 days)</option>
+                        <option value="priority-matchmaking">Priority Matchmaking (180 days)</option>
+                        <option value="elite-assisted-vip">Elite Assisted VIP (365 days)</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Duration (Days) *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="1825"
+                    value={grantDurationDays}
+                    onChange={(e) => setGrantDurationDays(Number(e.target.value))}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-xs font-medium"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Grant Reason / Justification *
+                </label>
+                <textarea
+                  required
+                  rows={2}
+                  placeholder="e.g. VIP Doctor offline executive registration or goodwill extension"
+                  value={grantReason}
+                  onChange={(e) => setGrantReason(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-xs"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="grantExtendExisting"
+                  checked={grantExtendExisting}
+                  onChange={(e) => setGrantExtendExisting(e.target.checked)}
+                  className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                />
+                <label htmlFor="grantExtendExisting" className="text-xs text-slate-600 cursor-pointer select-none">
+                  Extend expiration date if candidate already holds an active subscription
+                </label>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-500 leading-snug flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <span>
+                  <strong>Financial Integrity Guarantee:</strong> Manual grants create an active subscription with reference <code className="font-mono text-slate-700">SUPERADMIN_MANUAL_GRANT</code>. No fake payment transactions are fabricated, and a complete audit entry is saved in AuditLog.
+                </span>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsGrantModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={granting}
+                  className="px-5 py-2 rounded-xl text-xs font-bold text-amber-950 bg-gradient-to-r from-amber-300 to-yellow-400 hover:from-amber-400 hover:to-yellow-500 transition shadow-xs disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                >
+                  <Crown className="w-3.5 h-3.5" />
+                  <span>{granting ? 'Granting Membership...' : 'Grant Membership Now'}</span>
                 </button>
               </div>
             </form>

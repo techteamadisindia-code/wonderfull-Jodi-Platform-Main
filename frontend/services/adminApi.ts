@@ -145,7 +145,11 @@ export interface AdminAccount {
   email: string;
   mobile: string;
   role: string;
+  isActive?: boolean;
+  status?: string;
+  permissions?: string[];
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface AuditLogItem {
@@ -212,6 +216,27 @@ export async function createAdminAccount(data: { fullName: string; email: string
 
 export async function updateAdminPermissions(id: string, permissions: string[]) {
   const response = await apiClient.put<{ success: boolean; message: string }>(`/admin/admins/${id}`, { permissions });
+  return response.data;
+}
+
+export async function fetchAdminById(
+  id: string
+): Promise<AdminAccount & { permissions: string[]; isActive: boolean; status: string }> {
+  const response = await apiClient.get<{
+    success: boolean;
+    data: AdminAccount & { permissions: string[]; isActive: boolean; status: string };
+  }>(`/admin/admins/${encodeURIComponent(id)}`);
+  return response.data.data;
+}
+
+export async function deleteAdminAccount(
+  id: string,
+  reason?: string
+): Promise<{ success: boolean; message: string }> {
+  const response = await apiClient.delete<{ success: boolean; message: string }>(
+    `/admin/admins/${encodeURIComponent(id)}`,
+    { data: { reason } }
+  );
   return response.data;
 }
 
@@ -570,3 +595,38 @@ export async function fetchAdminRegistrationStats(): Promise<AdminRegistrationSt
   return response.data.data;
 }
 
+/**
+ * Delete an incomplete candidate registration record
+ */
+export async function deleteAdminRegistration(
+  id: string,
+  reason?: string
+): Promise<{ success: boolean; message: string; registrationId?: string }> {
+  const response = await apiClient.delete<{
+    success: boolean;
+    message: string;
+    registrationId?: string;
+  }>(`/admin/registrations/${encodeURIComponent(id)}`, {
+    data: { reason },
+  });
+
+  return response.data;
+}
+
+/**
+ * Super Admin-only manual paid membership grant
+ */
+export async function grantManualMembership(payload: {
+  userId: string;
+  planId: string;
+  durationDays?: number;
+  durationMonths?: number;
+  grantReason: string;
+  extendExisting?: boolean;
+}): Promise<any> {
+  const response = await apiClient.post<{ success: boolean; message: string; data: any }>(
+    '/admin/memberships/grant',
+    payload
+  );
+  return response.data;
+}

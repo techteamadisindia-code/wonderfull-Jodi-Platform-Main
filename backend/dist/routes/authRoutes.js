@@ -19,5 +19,8 @@ router.post('/reset-password', rateLimiters_1.passwordResetLimiter, authControll
 router.get('/me', authMiddleware_1.requireAuth, authController_1.getCurrentUser);
 router.post('/change-password', authMiddleware_1.requireAuth, authController_1.changePassword);
 router.post('/logout-all', authMiddleware_1.requireAuth, authController_1.logoutAllDevices);
+router.post('/logout-other-sessions', authMiddleware_1.requireAuth, authController_1.logoutOtherSessions);
+router.get('/active-sessions', authMiddleware_1.requireAuth, authController_1.getActiveSessions);
+router.get('/sessions', authMiddleware_1.requireAuth, authController_1.getActiveSessions);
 exports.default = router;
 //# sourceMappingURL=authRoutes.js.map

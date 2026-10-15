@@ -197,6 +197,35 @@ export async function logoutUser() {
   }
 }
 
+export async function logoutOtherSessions() {
+  const response = await api.post<{
+    success: boolean;
+    message: string;
+    data?: { revokedCount: number; currentSessionPreserved: boolean; note?: string };
+  }>('/auth/logout-other-sessions');
+  return response.data;
+}
+
+export async function getActiveSessions() {
+  const response = await api.get<{
+    success: boolean;
+    data: {
+      sessions: Array<{
+        id: string;
+        family: string;
+        device: string;
+        userAgent: string;
+        ipAddress: string;
+        createdAt: string;
+        lastActiveAt: string;
+        isCurrent: boolean;
+      }>;
+      totalActiveSessions: number;
+    };
+  }>('/auth/active-sessions');
+  return response.data.data;
+}
+
 export async function blockUser(blockedUserId: string, reason?: string) {
   const response = await api.post<{ success: boolean; message: string }>('/blocks', {
     blockedUserId,

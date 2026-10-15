@@ -41,7 +41,7 @@ exports.requireRole = requireRole;
 exports.requireAdminAuth = requireAdminAuth;
 exports.optionalAuth = optionalAuth;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
     // 1. Check Bearer Authorization Header
     const authHeader = req.headers.authorization;
     let token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
@@ -56,6 +56,29 @@ function requireAuth(req, res, next) {
         const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
         const payload = jsonwebtoken_1.default.verify(token, secret);
         req.user = payload;
+        // Check account status if userId exists to prevent deactivated/deleted users from accessing routes
+        if (payload.userId) {
+            try {
+                const { User } = await Promise.resolve().then(() => __importStar(require('../models/User')));
+                const userDoc = await User.findById(payload.userId);
+                if (userDoc) {
+                    if (userDoc.isDeleted ||
+                        userDoc.isActive === false ||
+                        userDoc.status === 'Deleted' ||
+                        userDoc.status === 'Suspended' ||
+                        userDoc.status === 'Blocked') {
+                        return res.status(401).json({
+                            success: false,
+                            code: 'ACCOUNT_DEACTIVATED',
+                            message: 'Your account is deactivated, suspended, or deleted. Access denied.',
+                        });
+                    }
+                }
+            }
+            catch (err) {
+                // Fallback gracefully if database lookup is unavailable in lightweight testing
+            }
+        }
         // Track daily unique user visits for regular authenticated members
         if (payload.userId && payload.role !== 'admin') {
             Promise.resolve().then(() => __importStar(require('../services/visitTrackingService'))).then(({ recordUserVisit }) => {
@@ -77,9 +100,26 @@ function requireAuth(req, res, next) {
     }
 }
 function requireRole(role) {
-    return (req, res, next) => {
+    return async (req, res, next) => {
         if (!req.user || req.user.role !== role) {
             return res.status(403).json({ success: false, message: 'Access denied: insufficient permissions' });
+        }
+        // Enforce active administrator account verification
+        if (role === 'admin' && req.user.userId) {
+            try {
+                const { User } = await Promise.resolve().then(() => __importStar(require('../models/User')));
+                const adminUser = await User.findById(req.user.userId);
+                if (adminUser && (adminUser.isDeleted || adminUser.isActive === false || adminUser.status === 'Deleted')) {
+                    return res.status(403).json({
+                        success: false,
+                        code: 'ADMIN_DEACTIVATED',
+                        message: 'Administrator account is deactivated or deleted.',
+                    });
+                }
+            }
+            catch (err) {
+                // Fallback
+            }
         }
         next();
     };

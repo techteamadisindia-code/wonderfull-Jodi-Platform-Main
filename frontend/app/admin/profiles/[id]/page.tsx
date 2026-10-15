@@ -68,6 +68,7 @@ import {
   AdminPaymentRecord,
 } from '../../../../services/profileApi';
 import { AdminEditProfileModal } from '../../../../components/admin/AdminEditProfileModal';
+import { getAdminUser } from '../../../../services/authApi';
 
 type TabKey =
   | 'overview'
@@ -102,6 +103,18 @@ function AdminProfileDetailsContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<AdminProfileCompleteData | null>(null);
+  const [currentAdmin, setCurrentAdmin] = useState<any>(null);
+
+  useEffect(() => {
+    const admin = getAdminUser();
+    if (admin) {
+      setCurrentAdmin(admin);
+    }
+  }, []);
+
+  const isSuperAdmin = Boolean(currentAdmin?.permissions?.includes('all'));
+  const canViewPrivate = isSuperAdmin || currentAdmin?.permissions?.includes('privateInfo.view') || (data as any)?.canViewPrivateContact;
+  const canEditPrivate = isSuperAdmin || currentAdmin?.permissions?.includes('privateInfo.edit') || (data as any)?.canEditPrivateContact;
 
   // Modals & Forms State
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -1046,19 +1059,43 @@ function AdminProfileDetailsContent() {
                     Private Contact Info
                   </h3>
                 </div>
-                <span className="text-[10px] bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded-full font-bold border border-amber-400/30">
-                  Admin Eyes Only
-                </span>
+                {canViewPrivate ? (
+                  canEditPrivate ? (
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-bold border border-emerald-400/30 flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-emerald-400" /> View & Edit
+                    </span>
+                  ) : (
+                    <span className="text-[10px] bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded-full font-bold border border-amber-400/30 flex items-center gap-1">
+                      <Lock className="w-3 h-3 text-amber-300" /> View-Only Mode
+                    </span>
+                  )
+                ) : (
+                  <span className="text-[10px] bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full font-bold border border-rose-400/30 flex items-center gap-1">
+                    <ShieldAlert className="w-3 h-3 text-rose-400" /> Restricted Access
+                  </span>
+                )}
               </div>
+
+              {!canViewPrivate && (
+                <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/30 text-rose-200 text-xs space-y-1.5">
+                  <div className="flex items-center gap-1.5 font-bold text-rose-300">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>View Permission Required</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-snug">
+                    Your administrator role has masked access. The <code className="text-amber-300 font-mono">privateInfo.view</code> permission is required to inspect confidential phone, email, and registered addresses.
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-3 text-xs">
                 <div>
                   <span className="text-slate-400 text-[11px] block">Verified Email Address</span>
                   <div className="flex items-center justify-between mt-0.5">
                     <span className="font-semibold text-white truncate max-w-[200px]">
-                      {user?.email || 'No email recorded'}
+                      {canViewPrivate ? (user?.email || 'No email recorded') : '•••••••••••• (Protected)'}
                     </span>
-                    {user?.email && (
+                    {canViewPrivate && user?.email && !user.email.includes('••••') && (
                       <button
                         type="button"
                         onClick={() => copyToClipboard(user.email, 'email')}
@@ -1075,9 +1112,9 @@ function AdminProfileDetailsContent() {
                   <span className="text-slate-400 text-[11px] block">Mobile Phone Number</span>
                   <div className="flex items-center justify-between mt-0.5">
                     <span className="font-semibold text-white font-mono">
-                      {user?.mobile || 'No mobile recorded'}
+                      {canViewPrivate ? (user?.mobile || 'No mobile recorded') : '•••••••••• (Protected)'}
                     </span>
-                    {user?.mobile && (
+                    {canViewPrivate && user?.mobile && !user.mobile.includes('••••') && (
                       <button
                         type="button"
                         onClick={() => copyToClipboard(user.mobile, 'mobile')}
@@ -1093,17 +1130,26 @@ function AdminProfileDetailsContent() {
                 <div>
                   <span className="text-slate-400 text-[11px] block">Full Registered Address</span>
                   <p className="font-medium text-slate-200 mt-0.5 leading-snug">
-                    {data.currentLocation?.formattedAddress ||
-                      `${data.city || '—'}, ${data.state || '—'}, ${data.country || 'India'} ${
-                        data.currentLocation?.pincode ? `(PIN: ${data.currentLocation.pincode})` : ''
-                      }`}
+                    {canViewPrivate
+                      ? (data.currentLocation?.formattedAddress ||
+                        `${data.city || '—'}, ${data.state || '—'}, ${data.country || 'India'} ${
+                          data.currentLocation?.pincode ? `(PIN: ${data.currentLocation.pincode})` : ''
+                        }`)
+                      : '[Confidential Address — View Permission Required]'}
                   </p>
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-slate-700/80 text-[11px] text-slate-400 flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>This confidential data is protected and hidden from normal website visitors.</span>
+              <div className="pt-2 border-t border-slate-700/80 text-[11px] text-slate-400 flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>Confidential contact data</span>
+                </div>
+                {canViewPrivate && (
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {canEditPrivate ? 'Edit Permitted' : 'Read-Only Mode'}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -2525,6 +2571,7 @@ function AdminProfileDetailsContent() {
         isOpen={editModalOpen}
         onClose={() => setEditModalOpen(false)}
         profile={data}
+        canEditPrivate={canEditPrivate}
         onSuccess={async () => {
           showToast('Profile updated successfully.');
           await loadProfile();

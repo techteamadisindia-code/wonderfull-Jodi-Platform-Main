@@ -36,6 +36,7 @@ interface AdminEditProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   profile: any;
+  canEditPrivate?: boolean;
   onSuccess?: (updatedData: any) => void;
 }
 
@@ -43,6 +44,7 @@ export function AdminEditProfileModal({
   isOpen,
   onClose,
   profile,
+  canEditPrivate = false,
   onSuccess,
 }: AdminEditProfileModalProps) {
   // Lock background scroll when modal is open
@@ -69,10 +71,11 @@ export function AdminEditProfileModal({
     const user = profile.user || profile.profile?.user;
 
     setFormData({
-      // Protected Identity (read-only)
+      // Protected Identity & Contact Information
       fullName: user?.fullName || profile.displayName || profile.fullName || '—',
-      email: user?.email || profile.email || '—',
-      mobile: user?.mobile || profile.mobile || '—',
+      email: user?.email || profile.email || '',
+      mobile: user?.mobile || profile.mobile || '',
+      formattedAddress: profile.currentLocation?.formattedAddress || '',
 
       // Section 2: Personal Details
       gender: profile.gender || 'Male',
@@ -215,16 +218,37 @@ export function AdminEditProfileModal({
         accountStatus: formData.accountStatus,
       };
 
-      // Security guarantee: completely remove any protected fields
-      delete payload.name;
-      delete payload.fullName;
-      delete payload.displayName;
-      delete payload.firstName;
-      delete payload.lastName;
-      delete payload.email;
-      delete payload.phone;
-      delete payload.mobile;
-      delete payload.mobileNumber;
+      if (!canEditPrivate) {
+        // Security guarantee: completely remove any protected fields
+        delete payload.name;
+        delete payload.fullName;
+        delete payload.displayName;
+        delete payload.firstName;
+        delete payload.lastName;
+        delete payload.email;
+        delete payload.phone;
+        delete payload.mobile;
+        delete payload.mobileNumber;
+      } else {
+        // Authorized with privateInfo.edit: submit contact fields
+        if (formData.email && formData.email.trim()) {
+          payload.email = formData.email.trim();
+        }
+        if (formData.mobile && formData.mobile.trim()) {
+          payload.mobile = formData.mobile.trim();
+        }
+        if (formData.formattedAddress !== undefined) {
+          payload.currentLocation = {
+            ...(profile.currentLocation || {}),
+            formattedAddress: formData.formattedAddress.trim(),
+          };
+        }
+        delete payload.name;
+        delete payload.fullName;
+        delete payload.displayName;
+        delete payload.firstName;
+        delete payload.lastName;
+      }
 
       const res = await updateAdminProfile(profileId, payload);
 
@@ -309,22 +333,30 @@ export function AdminEditProfileModal({
           )}
 
           {/* ───────────────────────────────────────────────────────────── */}
-          {/* SECTION 1: PROTECTED ACCOUNT INFORMATION 🔒                   */}
+          {/* SECTION 1: ACCOUNT & CONTACT INFORMATION                      */}
           {/* ───────────────────────────────────────────────────────────── */}
           <section className="space-y-4 rounded-2xl p-5 bg-gradient-to-br from-amber-50/50 via-slate-50 to-slate-50 border border-amber-200/80 shadow-2xs">
             <div className="flex items-start justify-between gap-3 border-b border-amber-200/60 pb-3">
               <div>
                 <h4 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-2">
                   <Lock className="w-4 h-4 text-amber-600" />
-                  <span>SECTION 1: Protected Account Information 🔒</span>
+                  <span>SECTION 1: Account & Contact Information</span>
                 </h4>
                 <p className="text-xs font-semibold text-amber-800 mt-1">
-                  Name, Email Address and Mobile Number are protected and cannot be modified by administrators.
+                  {canEditPrivate
+                    ? 'You have privateInfo.edit permission. Edits to email and mobile update the candidate primary contact record.'
+                    : 'Name, Email Address and Mobile Number are protected. You need privateInfo.edit permission to modify contact details.'}
                 </p>
               </div>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300/80 shrink-0 flex items-center gap-1">
-                <Lock className="w-3 h-3" /> Read-Only
-              </span>
+              {canEditPrivate ? (
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300/80 shrink-0 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Edit Permitted
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300/80 shrink-0 flex items-center gap-1">
+                  <Lock className="w-3 h-3" /> Read-Only
+                </span>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -354,20 +386,28 @@ export function AdminEditProfileModal({
               <div>
                 <label className="text-xs font-bold text-slate-700 flex items-center justify-between mb-1.5">
                   <span className="flex items-center gap-1">
-                    Email Address <Lock className="w-3 h-3 text-amber-600" />
+                    Email Address {canEditPrivate ? null : <Lock className="w-3 h-3 text-amber-600" />}
                   </span>
-                  <span className="text-[10px] text-slate-400 font-semibold">Locked</span>
+                  <span className="text-[10px] text-slate-400 font-semibold">
+                    {canEditPrivate ? 'Editable' : 'Locked'}
+                  </span>
                 </label>
                 <div className="relative">
                   <input
                     type="email"
-                    disabled
-                    readOnly
+                    disabled={!canEditPrivate}
+                    readOnly={!canEditPrivate}
                     value={formData.email}
-                    className="w-full pl-3 pr-9 py-2.5 bg-slate-100/90 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 cursor-not-allowed select-none shadow-2xs"
+                    onChange={(e) => handleFieldChange('email', e.target.value)}
+                    placeholder="doctor@example.com"
+                    className={`w-full pl-3 pr-9 py-2.5 rounded-xl text-xs font-bold ${
+                      canEditPrivate
+                        ? 'bg-white border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
+                        : 'bg-slate-100/90 border border-slate-200 text-slate-700 cursor-not-allowed select-none'
+                    } shadow-2xs`}
                   />
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" title="Protected credential">
-                    <Lock className="w-3.5 h-3.5" />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                    {canEditPrivate ? <Mail className="w-3.5 h-3.5 text-slate-400" /> : <Lock className="w-3.5 h-3.5" />}
                   </div>
                 </div>
               </div>
@@ -376,20 +416,28 @@ export function AdminEditProfileModal({
               <div>
                 <label className="text-xs font-bold text-slate-700 flex items-center justify-between mb-1.5">
                   <span className="flex items-center gap-1">
-                    Mobile Number <Lock className="w-3 h-3 text-amber-600" />
+                    Mobile Number {canEditPrivate ? null : <Lock className="w-3 h-3 text-amber-600" />}
                   </span>
-                  <span className="text-[10px] text-slate-400 font-semibold">Locked</span>
+                  <span className="text-[10px] text-slate-400 font-semibold">
+                    {canEditPrivate ? 'Editable' : 'Locked'}
+                  </span>
                 </label>
                 <div className="relative">
                   <input
                     type="text"
-                    disabled
-                    readOnly
+                    disabled={!canEditPrivate}
+                    readOnly={!canEditPrivate}
                     value={formData.mobile}
-                    className="w-full pl-3 pr-9 py-2.5 bg-slate-100/90 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 cursor-not-allowed select-none shadow-2xs"
+                    onChange={(e) => handleFieldChange('mobile', e.target.value)}
+                    placeholder="+919876543210"
+                    className={`w-full pl-3 pr-9 py-2.5 rounded-xl text-xs font-bold ${
+                      canEditPrivate
+                        ? 'bg-white border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
+                        : 'bg-slate-100/90 border border-slate-200 text-slate-700 cursor-not-allowed select-none'
+                    } shadow-2xs`}
                   />
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" title="Protected credential">
-                    <Lock className="w-3.5 h-3.5" />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                    {canEditPrivate ? <Phone className="w-3.5 h-3.5 text-slate-400" /> : <Lock className="w-3.5 h-3.5" />}
                   </div>
                 </div>
               </div>

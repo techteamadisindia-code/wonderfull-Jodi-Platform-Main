@@ -31,7 +31,7 @@ import {
 } from '../../services/notificationApi';
 import { acceptInterest, rejectInterest } from '../../services/interestApi';
 import { DoctorAvatar } from '../../components/DoctorAvatar';
-import { getAuthToken } from '../../lib/api';
+import { getAuthToken, logoutOtherSessions } from '../../lib/api';
 
 export default function UserNotificationsPage() {
   const router = useRouter();
@@ -150,6 +150,7 @@ export default function UserNotificationsPage() {
       case 'VERIFICATION':
         return <ShieldCheck className="w-4 h-4 text-purple-600" />;
       case 'SECURITY':
+      case 'SECURITY_ALERT':
         return <AlertTriangle className="w-4 h-4 text-rose-600" />;
       default:
         return <Info className="w-4 h-4 text-blue-600" />;
@@ -172,6 +173,7 @@ export default function UserNotificationsPage() {
       case 'VERIFICATION':
         return 'bg-purple-50 text-purple-700 border-purple-200';
       case 'SECURITY':
+      case 'SECURITY_ALERT':
         return 'bg-rose-50 text-rose-700 border-rose-200';
       default:
         return 'bg-blue-50 text-blue-700 border-blue-200';
@@ -396,6 +398,68 @@ export default function UserNotificationsPage() {
                               <ArrowRight className="w-3 h-3" />
                             </Link>
                           )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Security Alert: Device Sign-in details & Remote Logout */}
+                    {(notif.type === 'SECURITY_ALERT' || notif.metadata?.eventType === 'NEW_DEVICE_SIGNIN') && (
+                      <div className="pt-2.5 border-t border-slate-100 space-y-2.5">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          {notif.metadata?.currentSession?.device && (
+                            <span className="inline-flex items-center gap-1 font-semibold text-slate-800 bg-rose-50 border border-rose-200/60 px-2.5 py-1 rounded-lg">
+                              <ShieldCheck className="w-3.5 h-3.5 text-[#E51F3E]" />
+                              <span>Current: {notif.metadata.currentSession.device}</span>
+                            </span>
+                          )}
+                          {notif.metadata?.previousSession?.device && (
+                            <span className="inline-flex items-center gap-1 font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg">
+                              <span>Prior: {notif.metadata.previousSession.device} ({notif.metadata.previousSession.ip})</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {actionFeedback[notif._id] === 'LOGGED_OUT' ? (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Other devices logged out successfully ✓</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={actionLoadingId === notif._id}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                setActionLoadingId(notif._id);
+                                try {
+                                  await logoutOtherSessions();
+                                  setActionFeedback((prev) => ({ ...prev, [notif._id]: 'LOGGED_OUT' }));
+                                } catch (err) {
+                                  console.error('Remote logout failed:', err);
+                                } finally {
+                                  setActionLoadingId(null);
+                                }
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-2xs cursor-pointer disabled:opacity-50"
+                            >
+                              {actionLoadingId === notif._id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                              )}
+                              <span>Log Out Other Sessions</span>
+                            </button>
+                          )}
+
+                          <Link
+                            href="/profile#device-sessions"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-[#E51F3E] hover:underline px-2 py-1"
+                          >
+                            <span>Manage Sessions</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </Link>
                         </div>
                       </div>
                     )}

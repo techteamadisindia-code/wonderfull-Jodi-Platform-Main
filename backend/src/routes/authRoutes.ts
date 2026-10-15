@@ -5,6 +5,8 @@ import {
   refreshSession,
   logoutUser,
   logoutAllDevices,
+  logoutOtherSessions,
+  getActiveSessions,
   forgotPassword,
   validateResetToken,
   resetPassword,
@@ -32,5 +34,8 @@ router.post('/reset-password', passwordResetLimiter, resetPassword);
 router.get('/me', requireAuth, getCurrentUser);
 router.post('/change-password', requireAuth, changePassword);
 router.post('/logout-all', requireAuth, logoutAllDevices);
+router.post('/logout-other-sessions', requireAuth, logoutOtherSessions);
+router.get('/active-sessions', requireAuth, getActiveSessions);
+router.get('/sessions', requireAuth, getActiveSessions);
 
 export default router;

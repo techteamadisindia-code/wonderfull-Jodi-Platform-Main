@@ -636,7 +636,7 @@ export function RegistrationReviewSection({
               </span>
             </div>
             <p className="text-slate-500 text-[11px]">
-              Preferred Height: {prefHeightMin} - {prefHeightMax} • Relocation: {prefWillingToRelocate}
+              Preferred Height: {prefHeightMin} - {prefHeightMax} • Relocation: {prefWillingToRelocate || 'Not specified'}
             </p>
           </div>
         </div>

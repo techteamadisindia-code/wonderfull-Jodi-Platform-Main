@@ -207,4 +207,22 @@ export async function fetchMySubscription(): Promise<UserSubscriptionDetails> {
   return response.data.data;
 }
 
+export interface GrantMembershipPayload {
+  userId: string;
+  planId: string;
+  durationDays?: number;
+  durationMonths?: number;
+  grantReason: string;
+  extendExisting?: boolean;
+}
 
+/**
+ * Super Admin-only manual paid membership grant
+ */
+export async function grantManualMembership(payload: GrantMembershipPayload): Promise<any> {
+  const response = await apiClient.post<{ success: boolean; message: string; data: any }>(
+    '/admin/memberships/grant',
+    payload
+  );
+  return response.data;
+}

@@ -31,11 +31,13 @@ import {
   ExternalLink,
   ShieldCheck,
   ShieldAlert,
+  Trash2,
 } from 'lucide-react';
 import {
   fetchAdminRegistrations,
   fetchAdminRegistrationById,
   fetchAdminRegistrationStats,
+  deleteAdminRegistration,
   AdminRegistrationCandidate,
   AdminRegistrationStats,
   AdminRegistrationDetailResponse,
@@ -141,6 +143,65 @@ export default function UnregisteredCandidatesPage() {
     setSelectedCandidateId(null);
     setDetailData(null);
     setDetailError(null);
+  };
+
+  // Delete Candidate Modal State & Handlers
+  const [candidateToDelete, setCandidateToDelete] = useState<{
+    id: string;
+    registrationId: string;
+    candidateName: string;
+    currentStep?: number;
+    completionPercentage?: number;
+    status?: string;
+  } | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleOpenDeleteCandidate = (candidate: {
+    _id?: string;
+    id?: string;
+    registrationId: string;
+    candidateName?: string;
+    currentStep?: number;
+    completionPercentage?: number;
+    status?: string;
+  }) => {
+    const targetId = candidate._id || candidate.id;
+    if (!targetId) return;
+    setCandidateToDelete({
+      id: targetId,
+      registrationId: candidate.registrationId,
+      candidateName: candidate.candidateName || 'Unnamed Candidate',
+      currentStep: candidate.currentStep,
+      completionPercentage: candidate.completionPercentage,
+      status: candidate.status,
+    });
+    setDeleteError(null);
+  };
+
+  const handleCloseDeleteCandidate = () => {
+    setCandidateToDelete(null);
+    setDeleteError(null);
+  };
+
+  const handleConfirmDeleteCandidate = async () => {
+    if (!candidateToDelete) return;
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      await deleteAdminRegistration(candidateToDelete.id, 'Incomplete registration removed by administrator');
+      showToast(`Incomplete registration ${candidateToDelete.registrationId} deleted successfully.`);
+      handleCloseDeleteCandidate();
+      if (selectedCandidateId === candidateToDelete.id) {
+        handleCloseDetail();
+      }
+      loadData(true);
+    } catch (err: any) {
+      console.error('Failed to delete registration:', err);
+      setDeleteError(err?.response?.data?.message || 'Failed to delete incomplete registration record.');
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   // Helper formatting for timestamps
@@ -560,14 +621,27 @@ export default function UnregisteredCandidatesPage() {
 
                       {/* 10. Actions */}
                       <td className="px-4 py-3.5 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenDetail(c._id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold shadow-2xs hover:border-slate-300 transition cursor-pointer"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-[#E51F3E]" />
-                          <span>View Details</span>
-                        </button>
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDetail(c._id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold shadow-2xs hover:border-slate-300 transition cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-[#E51F3E]" />
+                            <span>View Details</span>
+                          </button>
+                          {c.status !== 'COMPLETED' && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenDeleteCandidate(c)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-rose-200 bg-rose-50/50 hover:bg-rose-100 text-rose-700 text-xs font-bold shadow-2xs hover:border-rose-300 transition cursor-pointer"
+                              title="Delete incomplete registration draft"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                              <span>Delete</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -908,14 +982,92 @@ export default function UnregisteredCandidatesPage() {
             {/* Modal Footer */}
             <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50">
               <span className="text-xs text-slate-400 font-mono">
-                Read-only candidate tracking profile
+                Draft ID: <strong className="text-slate-700">{detailData?.registration.registrationId}</strong>
               </span>
+              <div className="flex items-center gap-2">
+                {detailData?.registration.status !== 'COMPLETED' && (
+                  <button
+                    type="button"
+                    onClick={() => detailData && handleOpenDeleteCandidate(detailData.registration)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Delete Incomplete Registration</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleCloseDetail}
+                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition cursor-pointer"
+                >
+                  Close View
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Candidate Confirmation Modal */}
+      {candidateToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-rose-200 shadow-2xl max-w-md w-full p-6 space-y-4 animate-fade-in">
+            <div className="flex items-center gap-3 border-b border-rose-100 pb-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Delete Incomplete Registration</h3>
+                <p className="text-[11px] text-slate-500">Candidate Draft Removal</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-700 leading-relaxed">
+              Are you sure you want to remove the incomplete registration for{' '}
+              <strong>{candidateToDelete.candidateName}</strong>?
+            </p>
+
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1.5">
+              <div className="flex items-center justify-between text-slate-600">
+                <span>Registration ID:</span>
+                <span className="font-mono font-bold text-slate-800">{candidateToDelete.registrationId}</span>
+              </div>
+              {candidateToDelete.currentStep !== undefined && (
+                <div className="flex items-center justify-between text-slate-600">
+                  <span>Progress:</span>
+                  <span className="font-semibold text-slate-800">
+                    Step {candidateToDelete.currentStep} of 4 ({candidateToDelete.completionPercentage || 0}%)
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <p className="text-[11px] text-slate-500 italic">
+              Notice: Only incomplete registrations without active candidate accounts or completed subscriptions are eligible for deletion.
+            </p>
+
+            {deleteError && (
+              <div className="p-3 rounded-xl bg-rose-100 border border-rose-300 text-rose-900 text-xs font-semibold">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
-                onClick={handleCloseDetail}
-                className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition"
+                disabled={deleteLoading}
+                onClick={handleCloseDeleteCandidate}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer"
               >
-                Close View
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteLoading}
+                onClick={handleConfirmDeleteCandidate}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold shadow-md shadow-rose-600/20 disabled:opacity-50 cursor-pointer"
+              >
+                {deleteLoading ? 'Deleting...' : 'Delete Registration'}
               </button>
             </div>
           </div>

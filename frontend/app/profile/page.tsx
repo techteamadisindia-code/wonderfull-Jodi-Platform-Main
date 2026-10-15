@@ -42,6 +42,7 @@ import {
   CheckSquare,
   Ban,
   FileCheck,
+  Laptop,
 } from 'lucide-react';
 import {
   getMyProfile,
@@ -50,6 +51,8 @@ import {
   uploadProfileImage,
   getAuthToken,
   logoutUser,
+  getActiveSessions,
+  logoutOtherSessions,
 } from '../../lib/api';
 import {
   fetchUserVerifications,
@@ -290,6 +293,8 @@ function calculateWeightedCompletion(profile: any, user?: any) {
 type ModalType =
   | 'basic'
   | 'about'
+  | 'current_address'
+  | 'permanent_address'
   | 'medical_edu'
   | 'medical_career'
   | 'medical_reg'
@@ -317,6 +322,12 @@ export default function MyProfilePage() {
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
+  // Active Device Sessions & Security
+  const [activeSessions, setActiveSessions] = useState<any[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [loggingOutOther, setLoggingOutOther] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
   // Document Upload Modal
   const [isDocUploadOpen, setIsDocUploadOpen] = useState(false);
   const [uploadCategory, setUploadCategory] = useState('MEDICAL_REGISTRATION');
@@ -333,6 +344,20 @@ export default function MyProfilePage() {
   const [submitting, setSubmitting] = useState(false);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [activeNavSection, setActiveNavSection] = useState('basic-details');
+
+  const loadSessions = async () => {
+    try {
+      setLoadingSessions(true);
+      const res = await getActiveSessions();
+      if (res && res.sessions) {
+        setActiveSessions(res.sessions || []);
+      }
+    } catch (err) {
+      console.error('Failed to load active sessions:', err);
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -369,6 +394,8 @@ export default function MyProfilePage() {
       .finally(() => {
         if (isMounted) setLoading(false);
       });
+
+    loadSessions();
 
     return () => {
       isMounted = false;
@@ -468,11 +495,34 @@ export default function MyProfilePage() {
     }
   };
 
+  const handleLogoutOtherSessions = async () => {
+    try {
+      setLoggingOutOther(true);
+      const res = await logoutOtherSessions();
+      if (res && res.success !== false) {
+        showToast(res.message || 'Other active sessions have been revoked successfully.');
+        setShowLogoutConfirm(false);
+        loadSessions();
+      } else {
+        showToast(res?.message || 'Failed to revoke other sessions.', 'error');
+      }
+    } catch (err: any) {
+      console.error('Failed to revoke sessions:', err);
+      showToast(err?.response?.data?.message || 'Failed to revoke other sessions.', 'error');
+    } finally {
+      setLoggingOutOther(false);
+    }
+  };
+
   const openModalForSection = (sectionId: string) => {
     if (sectionId === 'basic-details') {
       openSectionModal('basic');
     } else if (sectionId === 'about-me') {
       openSectionModal('about');
+    } else if (sectionId === 'current-address') {
+      openSectionModal('current_address');
+    } else if (sectionId === 'permanent-address') {
+      openSectionModal('permanent_address');
     } else if (sectionId === 'medical-education') {
       openSectionModal('medical_edu');
     } else if (sectionId === 'medical-career') {
@@ -624,6 +674,7 @@ export default function MyProfilePage() {
       preferredSpecialization: profile.partnerPreferences?.preferredSpecialization || '',
       preferredMaritalStatus: profile.partnerPreferences?.preferredMaritalStatus || 'Never Married',
       otherPreferences: profile.partnerPreferences?.otherPreferences || '',
+      willingToRelocate: profile.partnerExpectations?.willingToRelocate || '',
       // Horoscope
       timeOfBirth: profile.horoscope?.timeOfBirth || '',
       placeOfBirth: profile.horoscope?.placeOfBirth || '',
@@ -643,6 +694,21 @@ export default function MyProfilePage() {
       languages: (profile.lifestyleInterests?.languages || (profile.motherTongue ? [profile.motherTongue] : [])).join(', '),
       pets: profile.lifestyleInterests?.pets || '',
       otherInterests: profile.lifestyleInterests?.otherInterests || '',
+      // Current Address fields
+      addressLine1: profile.currentLocation?.addressLine1 || '',
+      addressLine2: profile.currentLocation?.addressLine2 || '',
+      landmark: profile.currentLocation?.landmark || '',
+      formattedAddress: profile.currentLocation?.formattedAddress || '',
+      pincode: profile.currentLocation?.pincode || '',
+      // Permanent Address fields
+      permAddressLine1: profile.nativePlaceDetails?.addressLine1 || '',
+      permAddressLine2: profile.nativePlaceDetails?.addressLine2 || '',
+      permLandmark: profile.nativePlaceDetails?.landmark || '',
+      permCity: profile.nativePlaceDetails?.cityName || profile.nativePlace || '',
+      permState: profile.nativePlaceDetails?.stateName || '',
+      permCountry: profile.nativePlaceDetails?.countryName || 'India',
+      permPincode: profile.nativePlaceDetails?.pincode || '',
+      permDescription: profile.nativePlaceDetails?.description || profile.nativePlace || '',
     });
   };
 
@@ -705,6 +771,61 @@ export default function MyProfilePage() {
           about: modalFormData.about,
           profileManagedBy: modalFormData.profileManagedBy,
         };
+      } else if (activeModal === 'current_address') {
+        const parts = [
+          modalFormData.addressLine1?.trim(),
+          modalFormData.addressLine2?.trim(),
+          modalFormData.landmark?.trim() ? `Near ${modalFormData.landmark.trim()}` : '',
+          modalFormData.city?.trim(),
+          modalFormData.state?.trim(),
+          modalFormData.pincode?.trim(),
+          modalFormData.country?.trim() || 'India',
+        ].filter(Boolean);
+
+        const computedFormatted = parts.length > 0 ? parts.join(', ') : '';
+
+        payload = {
+          city: modalFormData.city?.trim() || undefined,
+          state: modalFormData.state?.trim() || undefined,
+          country: modalFormData.country?.trim() || 'India',
+          currentLocation: {
+            addressLine1: modalFormData.addressLine1?.trim() || '',
+            addressLine2: modalFormData.addressLine2?.trim() || '',
+            landmark: modalFormData.landmark?.trim() || '',
+            formattedAddress: computedFormatted || modalFormData.formattedAddress || '',
+            cityName: modalFormData.city?.trim() || '',
+            stateName: modalFormData.state?.trim() || '',
+            countryName: modalFormData.country?.trim() || 'India',
+            pincode: modalFormData.pincode?.trim() || '',
+          },
+        };
+      } else if (activeModal === 'permanent_address') {
+        const parts = [
+          modalFormData.permAddressLine1?.trim(),
+          modalFormData.permAddressLine2?.trim(),
+          modalFormData.permLandmark?.trim() ? `Near ${modalFormData.permLandmark.trim()}` : '',
+          modalFormData.permCity?.trim(),
+          modalFormData.permState?.trim(),
+          modalFormData.permPincode?.trim(),
+          modalFormData.permCountry?.trim() || 'India',
+        ].filter(Boolean);
+
+        const computedFormatted = parts.length > 0 ? parts.join(', ') : '';
+
+        payload = {
+          nativePlace: modalFormData.permCity?.trim() || modalFormData.permDescription?.trim() || undefined,
+          nativePlaceDetails: {
+            addressLine1: modalFormData.permAddressLine1?.trim() || '',
+            addressLine2: modalFormData.permAddressLine2?.trim() || '',
+            landmark: modalFormData.permLandmark?.trim() || '',
+            formattedAddress: computedFormatted || '',
+            cityName: modalFormData.permCity?.trim() || '',
+            stateName: modalFormData.permState?.trim() || '',
+            countryName: modalFormData.permCountry?.trim() || 'India',
+            pincode: modalFormData.permPincode?.trim() || '',
+            description: modalFormData.permDescription?.trim() || computedFormatted || '',
+          },
+        };
       } else if (activeModal === 'medical_edu') {
         const checkQual = validateMedicalQualification(modalFormData.education);
         if (!checkQual.isValid) {
@@ -760,6 +881,9 @@ export default function MyProfilePage() {
             preferredSpecialization: modalFormData.preferredSpecialization,
             preferredMaritalStatus: modalFormData.preferredMaritalStatus,
             otherPreferences: modalFormData.otherPreferences,
+          },
+          partnerExpectations: {
+            willingToRelocate: modalFormData.willingToRelocate || undefined,
           },
         };
       } else if (activeModal === 'horoscope') {
@@ -957,6 +1081,23 @@ export default function MyProfilePage() {
   const qualificationDisplay = profile.education || profile.degree || 'Medical Qualification Not Specified';
   const professionDisplay = profile.profession || 'Medical Profession Not Specified';
 
+  const hasCurrentAddress = Boolean(
+    profile.currentLocation?.addressLine1 ||
+    profile.currentLocation?.formattedAddress ||
+    profile.currentLocation?.pincode ||
+    profile.currentLocation?.landmark ||
+    (profile.currentLocation?.cityName && (profile.currentLocation?.stateName || profile.currentLocation?.addressLine1))
+  );
+
+  const hasPermanentAddress = Boolean(
+    profile.nativePlaceDetails?.addressLine1 ||
+    profile.nativePlaceDetails?.formattedAddress ||
+    profile.nativePlaceDetails?.pincode ||
+    profile.nativePlaceDetails?.landmark ||
+    profile.nativePlaceDetails?.description ||
+    (profile.nativePlaceDetails?.cityName && profile.nativePlaceDetails?.stateName)
+  );
+
   const completionData = calculateWeightedCompletion(profile, profile.user);
   const completionScore = profile.completionScore ?? profile.completionPercentage ?? completionData.score;
   const completionCategories: ProfileCategoryItem[] = profile.completionBreakdown || completionData.categories;
@@ -1071,6 +1212,8 @@ export default function MyProfilePage() {
             <option value="medical-verification">Medical Verification</option>
             <option value="basic-details">Basic Details</option>
             <option value="about-me">About Me</option>
+            <option value="current-address">Current Address</option>
+            <option value="permanent-address">Permanent Address</option>
             <option value="medical-education">Medical Education & Qualifications</option>
             <option value="medical-career">Medical Career & Practice</option>
             <option value="medical-registration">Medical Registration</option>
@@ -1079,6 +1222,7 @@ export default function MyProfilePage() {
             <option value="horoscope">Horoscope</option>
             <option value="lifestyle">Lifestyle & Interests</option>
             <option value="photos">Photos</option>
+            <option value="device-sessions">Device Sessions & Security</option>
           </select>
         </div>
 
@@ -1637,6 +1781,184 @@ export default function MyProfilePage() {
               </div>
             </section>
 
+            {/* CURRENT ADDRESS CARD */}
+            <section
+              id="current-address"
+              className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-5 h-5 text-[#E51F3E]" />
+                  <div>
+                    <h3 className="font-serif text-lg font-bold text-[#0F172A]">Current Residential Address</h3>
+                    <p className="text-[11px] text-slate-500">Present residential location and contact address</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openSectionModal('current_address')}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-[#E51F3E] hover:underline cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>{hasCurrentAddress ? 'Edit' : 'Add'}</span>
+                </button>
+              </div>
+
+              {hasCurrentAddress ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs sm:text-sm">
+                    {profile.currentLocation?.addressLine1 && (
+                      <div className="bg-slate-50 p-3.5 rounded-2xl sm:col-span-2">
+                        <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Street / House Address</span>
+                        <span className="font-semibold text-slate-800 mt-0.5 block">
+                          {profile.currentLocation.addressLine1}
+                          {profile.currentLocation.addressLine2 ? `, ${profile.currentLocation.addressLine2}` : ''}
+                        </span>
+                      </div>
+                    )}
+                    {profile.currentLocation?.landmark && (
+                      <div className="bg-slate-50 p-3.5 rounded-2xl">
+                        <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Landmark</span>
+                        <span className="font-semibold text-slate-800 mt-0.5 block">{profile.currentLocation.landmark}</span>
+                      </div>
+                    )}
+                    <div className="bg-slate-50 p-3.5 rounded-2xl">
+                      <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">City & District</span>
+                      <span className="font-semibold text-slate-800 mt-0.5 block">
+                        {profile.currentLocation?.cityName || profile.city || 'Not Specified'}
+                        {profile.currentLocation?.districtName ? ` (${profile.currentLocation.districtName})` : ''}
+                      </span>
+                    </div>
+                    <div className="bg-slate-50 p-3.5 rounded-2xl">
+                      <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">State & Country</span>
+                      <span className="font-semibold text-slate-800 mt-0.5 block">
+                        {profile.currentLocation?.stateName || profile.state || 'Not Specified'}, {profile.currentLocation?.countryName || profile.country || 'India'}
+                      </span>
+                    </div>
+                    <div className="bg-slate-50 p-3.5 rounded-2xl">
+                      <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">PIN Code</span>
+                      <span className="font-semibold text-slate-800 mt-0.5 block">
+                        {profile.currentLocation?.pincode || 'Not Specified'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {profile.currentLocation?.formattedAddress && (
+                    <div className="p-3 rounded-xl bg-slate-50 text-xs text-slate-600 flex items-center gap-2">
+                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span>{profile.currentLocation.formattedAddress}</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-5 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-3">
+                  <p className="text-xs text-slate-500">
+                    Current residential address has not been provided yet. Add your current residential details to complete your profile.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => openSectionModal('current_address')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-rose-50 text-xs font-bold text-slate-700 hover:text-[#E51F3E] transition shadow-2xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-[#E51F3E]" />
+                    <span>Add Current Address</span>
+                  </button>
+                </div>
+              )}
+            </section>
+
+            {/* PERMANENT ADDRESS CARD */}
+            <section
+              id="permanent-address"
+              className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <Home className="w-5 h-5 text-[#E51F3E]" />
+                  <div>
+                    <h3 className="font-serif text-lg font-bold text-[#0F172A]">Permanent / Native Place Address</h3>
+                    <p className="text-[11px] text-slate-500">Family ancestral residence, native hometown, and roots</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openSectionModal('permanent_address')}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-[#E51F3E] hover:underline cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>{hasPermanentAddress ? 'Edit' : 'Add'}</span>
+                </button>
+              </div>
+
+              {hasPermanentAddress ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs sm:text-sm">
+                    {profile.nativePlaceDetails?.addressLine1 && (
+                      <div className="bg-slate-50 p-3.5 rounded-2xl sm:col-span-2">
+                        <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Permanent House / Street</span>
+                        <span className="font-semibold text-slate-800 mt-0.5 block">
+                          {profile.nativePlaceDetails.addressLine1}
+                          {profile.nativePlaceDetails.addressLine2 ? `, ${profile.nativePlaceDetails.addressLine2}` : ''}
+                        </span>
+                      </div>
+                    )}
+                    {profile.nativePlaceDetails?.landmark && (
+                      <div className="bg-slate-50 p-3.5 rounded-2xl">
+                        <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Landmark</span>
+                        <span className="font-semibold text-slate-800 mt-0.5 block">{profile.nativePlaceDetails.landmark}</span>
+                      </div>
+                    )}
+                    <div className="bg-slate-50 p-3.5 rounded-2xl">
+                      <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Native Town / City</span>
+                      <span className="font-semibold text-slate-800 mt-0.5 block">
+                        {profile.nativePlaceDetails?.cityName || profile.nativePlace || 'Not Specified'}
+                        {profile.nativePlaceDetails?.districtName ? ` (${profile.nativePlaceDetails.districtName})` : ''}
+                      </span>
+                    </div>
+                    <div className="bg-slate-50 p-3.5 rounded-2xl">
+                      <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">State & Country</span>
+                      <span className="font-semibold text-slate-800 mt-0.5 block">
+                        {profile.nativePlaceDetails?.stateName || 'Not Specified'}, {profile.nativePlaceDetails?.countryName || 'India'}
+                      </span>
+                    </div>
+                    <div className="bg-slate-50 p-3.5 rounded-2xl">
+                      <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">PIN Code</span>
+                      <span className="font-semibold text-slate-800 mt-0.5 block">
+                        {profile.nativePlaceDetails?.pincode || 'Not Specified'}
+                      </span>
+                    </div>
+                    {profile.nativePlaceDetails?.description && (
+                      <div className="bg-slate-50 p-3.5 rounded-2xl sm:col-span-2">
+                        <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Hometown Details</span>
+                        <span className="font-semibold text-slate-800 mt-0.5 block">{profile.nativePlaceDetails.description}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {profile.nativePlaceDetails?.formattedAddress && (
+                    <div className="p-3 rounded-xl bg-slate-50 text-xs text-slate-600 flex items-center gap-2">
+                      <Home className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span>{profile.nativePlaceDetails.formattedAddress}</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-5 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-3">
+                  <p className="text-xs text-slate-500">
+                    Permanent / native place address has not been provided yet. Add your permanent family residence details to complete your profile.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => openSectionModal('permanent_address')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-rose-50 text-xs font-bold text-slate-700 hover:text-[#E51F3E] transition shadow-2xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-[#E51F3E]" />
+                    <span>Add Permanent Address</span>
+                  </button>
+                </div>
+              )}
+            </section>
+
             {/* 6. MEDICAL EDUCATION & QUALIFICATIONS */}
             <section
               id="medical-education"
@@ -2088,6 +2410,14 @@ export default function MyProfilePage() {
                     )}
                   </span>
                 </div>
+                <div className="bg-slate-50 p-3.5 rounded-2xl">
+                  <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Willing to Relocate</span>
+                  <span className="font-semibold text-slate-800 mt-0.5 block">
+                    {profile.partnerExpectations?.willingToRelocate || (
+                      <button onClick={() => openSectionModal('preferences')} className="text-[#E51F3E] font-bold cursor-pointer">+ Add Relocation Preference</button>
+                    )}
+                  </span>
+                </div>
                 <div className="bg-slate-50 p-3.5 rounded-2xl sm:col-span-2">
                   <span className="text-slate-400 text-[10.5px] font-bold uppercase tracking-wider block">Other Preferences</span>
                   <span className="font-semibold text-slate-800 mt-0.5 block">
@@ -2358,6 +2688,110 @@ export default function MyProfilePage() {
                 )}
               </div>
             </section>
+
+            {/* 14. ACTIVE DEVICE SESSIONS & SECURITY */}
+            <section
+              id="device-sessions"
+              className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-5"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <Laptop className="w-5 h-5 text-[#E51F3E]" />
+                  <div>
+                    <h3 className="font-serif text-lg font-bold text-[#0F172A]">Active Device Sessions & Security</h3>
+                    <p className="text-[11px] text-slate-500">Monitor signed-in devices and securely terminate remote sessions</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadSessions}
+                  disabled={loadingSessions}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-[#E51F3E] transition cursor-pointer self-start sm:self-auto"
+                >
+                  <span>{loadingSessions ? 'Refreshing...' : '↻ Refresh Sessions'}</span>
+                </button>
+              </div>
+
+              {/* Sessions List */}
+              <div className="space-y-3">
+                {loadingSessions && activeSessions.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-slate-400">Loading active sessions...</div>
+                ) : activeSessions.length === 0 ? (
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
+                    No active session records found.
+                  </div>
+                ) : (
+                  activeSessions.map((s, idx) => (
+                    <div
+                      key={s.id || idx}
+                      className={`p-4 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        s.isCurrent
+                          ? 'bg-emerald-50/40 border-emerald-200'
+                          : 'bg-slate-50/70 border-slate-200'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                            <Laptop className="w-4 h-4 text-slate-500" />
+                            <span>{s.device || s.userAgent || 'Web Browser'}</span>
+                          </span>
+                          {s.isCurrent ? (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-200">
+                              ✓ Current Device (This Session)
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold">
+                              Other Active Device
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                          <span>IP Address: <strong>{s.ipAddress || 'IP Not Recorded'}</strong></span>
+                          <span>•</span>
+                          <span>Signed In: {new Date(s.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Security Telemetry Disclaimer */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-start gap-2.5 text-xs text-slate-600">
+                <ShieldCheck className="w-4 h-4 text-[#E51F3E] shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  <strong>Device Metadata Notice:</strong> Browser User-Agent descriptions and masked IP addresses are network telemetry recorded for account security. They do not constitute verified physical identity.
+                </p>
+              </div>
+
+              {/* Remote Logout Action */}
+              {activeSessions.filter((s) => !s.isCurrent).length > 0 ? (
+                <div className="p-4 rounded-2xl bg-rose-50/60 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-bold text-rose-950 flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-[#E51F3E]" />
+                      <span>{activeSessions.filter((s) => !s.isCurrent).length} other device session(s) active</span>
+                    </span>
+                    <p className="text-[11px] text-slate-600">
+                      If you do not recognize any active session, log out all other devices immediately to protect your account.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowLogoutConfirm(true)}
+                    className="px-4 py-2 rounded-xl bg-[#E51F3E] hover:bg-[#CC1432] text-white text-xs font-bold transition shadow-2xs whitespace-nowrap cursor-pointer self-start sm:self-auto"
+                  >
+                    Log Out Other Devices
+                  </button>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-2xl bg-emerald-50/40 border border-emerald-100 flex items-center gap-2 text-xs text-emerald-900">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Your account is currently active only on this device. No other active sessions detected.</span>
+                </div>
+              )}
+            </section>
           </div>
 
           {/* ══════════════════════════════════════════════════
@@ -2374,6 +2808,8 @@ export default function MyProfilePage() {
                 {[
                   { id: 'basic-details', label: 'Basic Details' },
                   { id: 'about-me', label: 'About Me' },
+                  { id: 'current-address', label: 'Current Address' },
+                  { id: 'permanent-address', label: 'Permanent Address' },
                   { id: 'medical-education', label: 'Medical Education' },
                   { id: 'medical-career', label: 'Medical Career' },
                   { id: 'medical-registration', label: 'Medical Registration' },
@@ -2382,6 +2818,7 @@ export default function MyProfilePage() {
                   { id: 'horoscope', label: 'Horoscope' },
                   { id: 'lifestyle', label: 'Lifestyle & Interests' },
                   { id: 'photos', label: 'Photos' },
+                  { id: 'device-sessions', label: 'Device Sessions & Security' },
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -2895,6 +3332,8 @@ export default function MyProfilePage() {
                 <h3 className="font-serif text-xl font-bold text-[#0F172A]">
                   {activeModal === 'basic' && 'Edit Basic Information'}
                   {activeModal === 'about' && 'Edit About Me & Profile Meta'}
+                  {activeModal === 'current_address' && 'Edit Current Residential Address'}
+                  {activeModal === 'permanent_address' && 'Edit Permanent / Native Address'}
                   {activeModal === 'medical_edu' && 'Edit Medical Education & Qualifications'}
                   {activeModal === 'medical_career' && 'Edit Medical Career & Practice'}
                   {activeModal === 'medical_reg' && 'Edit Medical Registration'}
@@ -2953,6 +3392,218 @@ export default function MyProfilePage() {
                       <option value="Parents">Parents</option>
                       <option value="Sibling">Sibling</option>
                     </select>
+                  </div>
+                </>
+              )}
+
+              {/* CURRENT RESIDENTIAL ADDRESS */}
+              {activeModal === 'current_address' && (
+                <>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Flat / House No., Apartment / Building Name
+                    </label>
+                    <input
+                      type="text"
+                      name="addressLine1"
+                      value={modalFormData.addressLine1 || ''}
+                      onChange={handleInputChange}
+                      placeholder="e.g. Flat 402, Royal Palms Residency"
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Street / Area / Sector / Colony
+                    </label>
+                    <input
+                      type="text"
+                      name="addressLine2"
+                      value={modalFormData.addressLine2 || ''}
+                      onChange={handleInputChange}
+                      placeholder="e.g. Baner Road, Near Pancard Club"
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        Landmark
+                      </label>
+                      <input
+                        type="text"
+                        name="landmark"
+                        value={modalFormData.landmark || ''}
+                        onChange={handleInputChange}
+                        placeholder="e.g. Opposite Jupiter Hospital"
+                        className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        PIN Code
+                      </label>
+                      <input
+                        type="text"
+                        name="pincode"
+                        value={modalFormData.pincode || ''}
+                        onChange={handleInputChange}
+                        placeholder="e.g. 411045"
+                        maxLength={10}
+                        className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        City / Town
+                      </label>
+                      <input
+                        type="text"
+                        name="city"
+                        value={modalFormData.city || ''}
+                        onChange={handleInputChange}
+                        placeholder="e.g. Pune"
+                        className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        State
+                      </label>
+                      <input
+                        type="text"
+                        name="state"
+                        value={modalFormData.state || ''}
+                        onChange={handleInputChange}
+                        placeholder="e.g. Maharashtra"
+                        className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Country
+                    </label>
+                    <input
+                      type="text"
+                      name="country"
+                      value={modalFormData.country || 'India'}
+                      onChange={handleInputChange}
+                      placeholder="e.g. India"
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* PERMANENT / NATIVE PLACE ADDRESS */}
+              {activeModal === 'permanent_address' && (
+                <>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Ancestral House / Street / Village
+                    </label>
+                    <input
+                      type="text"
+                      name="permAddressLine1"
+                      value={modalFormData.permAddressLine1 || ''}
+                      onChange={handleInputChange}
+                      placeholder="e.g. Deshmukh Wada, Main Road"
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Area / Tehsil / Sub-district
+                    </label>
+                    <input
+                      type="text"
+                      name="permAddressLine2"
+                      value={modalFormData.permAddressLine2 || ''}
+                      onChange={handleInputChange}
+                      placeholder="e.g. Post Baramati, Taluka Baramati"
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        Landmark
+                      </label>
+                      <input
+                        type="text"
+                        name="permLandmark"
+                        value={modalFormData.permLandmark || ''}
+                        onChange={handleInputChange}
+                        placeholder="e.g. Near Gram Panchayat Office"
+                        className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        PIN Code
+                      </label>
+                      <input
+                        type="text"
+                        name="permPincode"
+                        value={modalFormData.permPincode || ''}
+                        onChange={handleInputChange}
+                        placeholder="e.g. 413102"
+                        maxLength={10}
+                        className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        Native Town / City
+                      </label>
+                      <input
+                        type="text"
+                        name="permCity"
+                        value={modalFormData.permCity || ''}
+                        onChange={handleInputChange}
+                        placeholder="e.g. Baramati / Pune"
+                        className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        State
+                      </label>
+                      <input
+                        type="text"
+                        name="permState"
+                        value={modalFormData.permState || ''}
+                        onChange={handleInputChange}
+                        placeholder="e.g. Maharashtra"
+                        className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Hometown / Ancestral Roots Overview
+                    </label>
+                    <input
+                      type="text"
+                      name="permDescription"
+                      value={modalFormData.permDescription || ''}
+                      onChange={handleInputChange}
+                      placeholder="e.g. Ancestral home in Western Maharashtra, family settled for 3 generations"
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    />
                   </div>
                 </>
               )}
@@ -3370,6 +4021,21 @@ export default function MyProfilePage() {
                   </div>
 
                   <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Willing to Relocate</label>
+                    <select
+                      name="willingToRelocate"
+                      value={modalFormData.willingToRelocate || ''}
+                      onChange={handleInputChange}
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#E51F3E]"
+                    >
+                      <option value="">Select Relocation Preference</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                      <option value="Flexible">Flexible / Open to discussion</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1">Other Expectations</label>
                     <textarea
                       name="otherPreferences"
@@ -3697,6 +4363,60 @@ export default function MyProfilePage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════
+          LOGOUT OTHER DEVICES CONFIRMATION MODAL
+         ════════════════════════════════════════════════════ */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 space-y-5 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-50 text-[#E51F3E] flex items-center justify-center shrink-0 border border-rose-100">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-serif text-lg font-bold text-[#0F172A]">Log Out Other Devices</h3>
+                <p className="text-xs text-slate-500">Revoke all remote authenticated sessions</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2 text-xs text-slate-600 leading-relaxed">
+              <p>
+                Are you sure you want to log out all other devices? This action will immediately invalidate all active refresh tokens on your other phones, tablets, and computers.
+              </p>
+              <p className="text-[11px] text-slate-500 italic">
+                Note: In-flight stateless access tokens (up to 15-minute lifespan) will automatically expire without renewing. Your current session on this device will stay active.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirm(false)}
+                disabled={loggingOutOther}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleLogoutOtherSessions}
+                disabled={loggingOutOther}
+                className="px-5 py-2.5 rounded-xl bg-[#E51F3E] hover:bg-[#CC1432] text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {loggingOutOther ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Revoking Sessions...</span>
+                  </>
+                ) : (
+                  <span>Yes, Log Out Other Devices</span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

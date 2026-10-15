@@ -49,11 +49,16 @@ exports.getIncompleteRegistrationsCount = getIncompleteRegistrationsCount;
 exports.getAdminRegistrationStats = getAdminRegistrationStats;
 exports.getAdminRegistrations = getAdminRegistrations;
 exports.getAdminRegistrationById = getAdminRegistrationById;
+exports.deleteAdminRegistration = deleteAdminRegistration;
 const crypto_1 = __importDefault(require("crypto"));
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const Registration_1 = require("../models/Registration");
 const User_1 = require("../models/User");
 const Profile_1 = require("../models/Profile");
+const Admin_1 = require("../models/Admin");
+const Payment_1 = require("../models/Payment");
+const Subscription_1 = require("../models/Subscription");
+const AuditLog_1 = require("../models/AuditLog");
 const Location_1 = require("../models/Location");
 const Counter_1 = require("../models/Counter");
 const securityUtils_1 = require("../utils/securityUtils");
@@ -1494,7 +1499,9 @@ async function completeRegistration(req, res, next) {
                 qualification: partnerExp.qualification || pref.prefEducation || raw.prefEducation || undefined,
                 specialization: partnerExp.specialization || pref.prefProfession || raw.prefProfession || undefined,
                 location: partnerExp.location || { city: pref.prefCity || raw.prefCity || undefined },
-                willingToRelocate: partnerExp.willingToRelocate,
+                willingToRelocate: partnerExp.willingToRelocate !== undefined && partnerExp.willingToRelocate !== ''
+                    ? partnerExp.willingToRelocate
+                    : undefined,
                 maritalStatus: partnerExp.maritalStatus || undefined,
                 lifestyle: partnerExp.lifestyle || { diet: pref.prefDiet || raw.prefDiet || undefined },
                 familyExpectations: partnerExp.familyExpectations || undefined,
@@ -1929,6 +1936,119 @@ async function getAdminRegistrationById(req, res, next) {
                 registration: sanitized,
                 sectionStatus,
             },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+}
+/**
+ * 11. DELETE INCOMPLETE REGISTRATION (DELETE /api/admin/registrations/:id)
+ * Safely soft-deletes an incomplete candidate registration record
+ */
+async function deleteAdminRegistration(req, res, next) {
+    try {
+        const callerId = req.user?.userId;
+        if (!callerId) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+        // 1. Authorization: Verify admin has 'all', 'users', or 'admins' permission or is primary admin
+        const callerAdmin = await Admin_1.Admin.findOne({ user: callerId });
+        const callerPerms = callerAdmin?.permissions || [];
+        const canDelete = callerPerms.includes('all') ||
+            callerPerms.includes('users') ||
+            callerPerms.includes('admins');
+        if (!canDelete) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied: Insufficient permissions to delete registration records.',
+            });
+        }
+        const { id } = req.params;
+        if (!id || typeof id !== 'string') {
+            return res.status(400).json({ success: false, message: 'Invalid ID provided' });
+        }
+        // 2. Find target registration
+        const isMongoId = (0, securityUtils_1.isValidObjectId)(id);
+        const registration = await Registration_1.Registration.findOne({
+            $or: [
+                isMongoId ? { _id: id } : null,
+                { registrationId: id.trim().toUpperCase() },
+            ].filter(Boolean),
+            isDeleted: false,
+        });
+        if (!registration) {
+            return res.status(404).json({
+                success: false,
+                code: 'NOT_FOUND',
+                message: 'Registration record not found or already deleted',
+            });
+        }
+        // 3. Eligibility check: Reject completed registrations
+        if (registration.status === 'COMPLETED') {
+            return res.status(400).json({
+                success: false,
+                code: 'CANNOT_DELETE_COMPLETED',
+                message: 'Completed registrations cannot be deleted from incomplete registration records. Please manage completed candidates via the Profiles module.',
+            });
+        }
+        // 4. Protection: Reject if linked to an active user account
+        if (registration.user) {
+            const linkedUser = await User_1.User.findById(registration.user);
+            if (linkedUser && !linkedUser.isDeleted && linkedUser.isActive && linkedUser.status === 'Active') {
+                return res.status(400).json({
+                    success: false,
+                    code: 'CANNOT_DELETE_ACTIVE_USER',
+                    message: 'This registration is linked to an active candidate account and cannot be deleted.',
+                });
+            }
+        }
+        // 5. Protection: Reject if linked to completed payments or active subscriptions
+        if (registration.user) {
+            const [completedPayment, activeSub] = await Promise.all([
+                Payment_1.Payment.findOne({ user: registration.user, status: 'SUCCESS' }),
+                Subscription_1.Subscription.findOne({ user: registration.user, status: { $in: ['ACTIVE', 'PENDING'] } }),
+            ]);
+            if (completedPayment || activeSub) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'CANNOT_DELETE_FINANCIAL_RECORDS',
+                    message: 'Cannot delete registration: candidate is linked to existing payment or subscription records.',
+                });
+            }
+        }
+        // 6. Execute soft deletion
+        await Registration_1.Registration.findByIdAndUpdate(registration._id, {
+            isDeleted: true,
+        });
+        // 7. Record audit log
+        try {
+            await AuditLog_1.AuditLog.create({
+                adminEmail: req.user?.email || 'admin@wonderfuljodi.com',
+                adminId: callerId,
+                action: 'REGISTRATION_DELETED',
+                targetModel: 'Registration',
+                targetId: String(registration._id),
+                previousStatus: registration.status,
+                newStatus: 'DELETED',
+                reason: req.body?.reason || 'Incomplete registration soft-deleted by administrator',
+                details: `Soft-deleted registration ${registration.registrationId} for candidate ${registration.candidateName || 'Unnamed'}`,
+                metadata: {
+                    registrationId: registration.registrationId,
+                    candidateName: registration.candidateName,
+                    currentStep: registration.currentStep,
+                    completionPercentage: registration.completionPercentage,
+                },
+                status: 'SUCCESS',
+            });
+        }
+        catch (auditErr) {
+            console.error('Audit logging for registration deletion failed:', auditErr);
+        }
+        return res.json({
+            success: true,
+            message: 'Incomplete registration deleted successfully',
+            registrationId: registration.registrationId,
         });
     }
     catch (error) {

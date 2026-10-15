@@ -24,6 +24,7 @@ router.get('/registrations/incomplete/count', registrationController_1.getIncomp
 router.get('/registrations/stats', registrationController_1.getAdminRegistrationStats);
 router.get('/registrations', registrationController_1.getAdminRegistrations);
 router.get('/registrations/:id', registrationController_1.getAdminRegistrationById);
+router.delete('/registrations/:id', registrationController_1.deleteAdminRegistration);
 // 2. Users
 router.get('/users', adminController_1.getUsers);
 router.get('/users/:id', adminController_1.getUserById);
@@ -53,6 +54,7 @@ router.get('/memberships', (req, res, next) => {
     return (0, membershipPlanAdminController_1.getAllPlans)(req, res, next);
 });
 router.post('/memberships', membershipPlanAdminController_1.createPlan);
+router.post('/memberships/grant', adminController_1.grantMembershipBySuperAdmin);
 router.get('/memberships/:id', membershipPlanAdminController_1.getPlanById);
 router.put('/memberships/:id', (req, res, next) => {
     if (req.query.type === 'subscriptions') {
@@ -64,6 +66,7 @@ router.delete('/memberships/:id', membershipPlanAdminController_1.deletePlan);
 router.patch('/memberships/:id/status', membershipPlanAdminController_1.togglePlanStatus);
 // User Subscriptions dedicated routes
 router.get('/subscriptions', adminController_1.getMemberships);
+router.post('/subscriptions/grant', adminController_1.grantMembershipBySuperAdmin);
 router.put('/subscriptions/:id', adminController_1.updateMembership);
 // 6. Payments
 const paymentController_1 = require("../controllers/paymentController");
@@ -124,8 +127,10 @@ router.get('/notifications/:id', adminController_1.getBroadcastById);
 router.delete('/notifications/:id', adminController_1.deleteBroadcast);
 // 10. Admin Accounts
 router.get('/admins', adminController_1.getAdmins);
+router.get('/admins/:id', adminController_1.getAdminById);
 router.post('/admins', adminController_1.createAdmin);
 router.put('/admins/:id', adminController_1.updateAdmin);
+router.delete('/admins/:id', adminController_1.deleteAdmin);
 // 11. Platform Settings & Maintenance Mode
 router.get('/settings', adminController_1.getSettings);
 router.put('/settings', adminController_1.updateSettings);

@@ -550,7 +550,7 @@ function RegisterForm() {
   const [prefCountry, setPrefCountry] = useState('India');
   const [prefState, setPrefState] = useState('');
   const [prefCity, setPrefCity] = useState('');
-  const [prefWillingToRelocate, setPrefWillingToRelocate] = useState('Yes');
+  const [prefWillingToRelocate, setPrefWillingToRelocate] = useState('');
   const [prefMaritalStatus, setPrefMaritalStatus] = useState('Never Married');
   const [prefDiet, setPrefDiet] = useState('Any Diet Preference');
   const [prefSmoking, setPrefSmoking] = useState('Does Not Matter');
@@ -935,7 +935,15 @@ function RegisterForm() {
             if (pExp.location?.city || pref.prefCity) setPrefCity(pExp.location?.city || pref.prefCity || '');
             if (pExp.location?.state) setPrefState(pExp.location.state);
             if (pExp.location?.country) setPrefCountry(pExp.location.country);
-            if (pExp.willingToRelocate) setPrefWillingToRelocate(String(pExp.willingToRelocate));
+            if (pExp.willingToRelocate !== undefined && pExp.willingToRelocate !== null) {
+              setPrefWillingToRelocate(
+                pExp.willingToRelocate === true
+                  ? 'Yes'
+                  : pExp.willingToRelocate === false
+                  ? 'No'
+                  : String(pExp.willingToRelocate)
+              );
+            }
             if (pExp.maritalStatus) setPrefMaritalStatus(pExp.maritalStatus);
             if (pExp.lifestyle?.diet || pref.prefDiet) setPrefDiet(pExp.lifestyle?.diet || pref.prefDiet || 'Any Diet Preference');
             if (pExp.lifestyle?.smoking) setPrefSmoking(pExp.lifestyle.smoking);
@@ -1699,7 +1707,7 @@ function RegisterForm() {
                 state: prefState,
                 city: prefCity,
               },
-              willingToRelocate: prefWillingToRelocate,
+              willingToRelocate: prefWillingToRelocate || undefined,
               maritalStatus: prefMaritalStatus,
               lifestyle: {
                 diet: prefDiet,
@@ -1799,7 +1807,7 @@ function RegisterForm() {
               state: prefState,
               city: prefCity,
             },
-            willingToRelocate: prefWillingToRelocate,
+            willingToRelocate: prefWillingToRelocate || undefined,
             maritalStatus: prefMaritalStatus,
             lifestyle: {
               diet: prefDiet,
@@ -2278,8 +2286,17 @@ function RegisterForm() {
                       />
                       <button
                         type="button"
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        aria-pressed={showPassword}
+                        title={showPassword ? 'Hide password' : 'Show password'}
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault();
+                            setShowPassword(!showPassword);
+                          }
+                        }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none focus:text-slate-800 transition p-1 rounded-md"
                       >
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
@@ -2313,8 +2330,17 @@ function RegisterForm() {
                       />
                       <button
                         type="button"
+                        aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                        aria-pressed={showConfirmPassword}
+                        title={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
                         onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault();
+                            setShowConfirmPassword(!showConfirmPassword);
+                          }
+                        }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none focus:text-slate-800 transition p-1 rounded-md"
                       >
                         {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
@@ -4447,6 +4473,7 @@ function RegisterForm() {
                       onChange={(e) => setPrefWillingToRelocate(e.target.value)}
                       className="w-full h-[44px] rounded-[12px] border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:border-[#E51F3E]"
                     >
+                      <option value="">Select Relocation Preference</option>
                       <option value="Yes">Yes</option>
                       <option value="No">No</option>
                       <option value="Flexible">Flexible / Open to discussion</option>

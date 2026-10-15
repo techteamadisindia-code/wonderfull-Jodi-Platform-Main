@@ -26,6 +26,7 @@ import {
   rejectAllUserVerifications,
   getMemberships,
   updateMembership,
+  grantMembershipBySuperAdmin,
   getPayments,
   getInterests,
   updateInterestStatus,
@@ -60,8 +61,10 @@ import {
   sendNotification,
   deleteBroadcast,
   getAdmins,
+  getAdminById,
   createAdmin,
   updateAdmin,
+  deleteAdmin,
   getSettings,
   updateSettings,
   getMaintenanceSettings,
@@ -102,12 +105,14 @@ import {
   getAdminRegistrationStats,
   getAdminRegistrations,
   getAdminRegistrationById,
+  deleteAdminRegistration,
 } from '../controllers/registrationController';
 
 router.get('/registrations/incomplete/count', getIncompleteRegistrationsCount);
 router.get('/registrations/stats', getAdminRegistrationStats);
 router.get('/registrations', getAdminRegistrations);
 router.get('/registrations/:id', getAdminRegistrationById);
+router.delete('/registrations/:id', deleteAdminRegistration);
 
 // 2. Users
 router.get('/users', getUsers);
@@ -141,6 +146,7 @@ router.get('/memberships', (req, res, next) => {
   return getAllPlans(req, res, next);
 });
 router.post('/memberships', createPlan);
+router.post('/memberships/grant', grantMembershipBySuperAdmin);
 router.get('/memberships/:id', getPlanById);
 router.put('/memberships/:id', (req, res, next) => {
   if (req.query.type === 'subscriptions') {
@@ -153,6 +159,7 @@ router.patch('/memberships/:id/status', togglePlanStatus);
 
 // User Subscriptions dedicated routes
 router.get('/subscriptions', getMemberships);
+router.post('/subscriptions/grant', grantMembershipBySuperAdmin);
 router.put('/subscriptions/:id', updateMembership);
 
 // 6. Payments
@@ -229,8 +236,10 @@ router.delete('/notifications/:id', deleteBroadcast);
 
 // 10. Admin Accounts
 router.get('/admins', getAdmins);
+router.get('/admins/:id', getAdminById);
 router.post('/admins', createAdmin);
 router.put('/admins/:id', updateAdmin);
+router.delete('/admins/:id', deleteAdmin);
 
 // 11. Platform Settings & Maintenance Mode
 router.get('/settings', getSettings);

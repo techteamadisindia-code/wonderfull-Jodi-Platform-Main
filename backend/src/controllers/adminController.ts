@@ -16,6 +16,7 @@ import { Notification } from '../models/Notification';
 import { Broadcast } from '../models/Broadcast';
 import { Admin } from '../models/Admin';
 import { Setting } from '../models/Setting';
+import { MembershipPlan } from '../models/MembershipPlan';
 import { ContactInquiry } from '../models/ContactInquiry';
 import { AuditLog } from '../models/AuditLog';
 import { RefreshToken } from '../models/RefreshToken';
@@ -73,6 +74,52 @@ async function logAdminAction(
   } catch (err) {
     console.error('Audit logging failed:', err);
   }
+}
+
+// Data masking helpers for least-privilege administrative access
+export function maskEmail(email: string): string {
+  if (!email || typeof email !== 'string') return '••••••••';
+  const parts = email.split('@');
+  if (parts.length !== 2) return '••••••••';
+  const name = parts[0];
+  const domain = parts[1];
+  if (name.length <= 2) return `${name[0]}***@${domain}`;
+  return `${name[0]}${'•'.repeat(Math.min(name.length - 2, 5))}${name[name.length - 1]}@${domain}`;
+}
+
+export function maskMobile(mobile: string): string {
+  if (!mobile || typeof mobile !== 'string') return '••••••••••';
+  const clean = mobile.trim();
+  if (clean.length <= 5) return '••••••';
+  const prefix = clean.slice(0, 3);
+  const suffix = clean.slice(-2);
+  return `${prefix}•••••${suffix}`;
+}
+
+/**
+ * Redacts private address components when caller lacks privateInfo.view permission.
+ * Redacts formattedAddress and completely removes/omits addressLine1, addressLine2, landmark, pincode.
+ * Preserves approved location metadata (country, state, city, village, IDs) without mutating shared DB objects.
+ */
+export function redactPrivateAddress(locationObj: any) {
+  if (!locationObj || typeof locationObj !== 'object') return locationObj;
+  const redacted = { ...locationObj };
+  const hasPrivateData = Boolean(
+    redacted.formattedAddress ||
+    redacted.addressLine1 ||
+    redacted.addressLine2 ||
+    redacted.landmark ||
+    redacted.pincode
+  );
+
+  if (hasPrivateData) {
+    redacted.formattedAddress = '[Private Address - View Permission Required]';
+  }
+  delete redacted.addressLine1;
+  delete redacted.addressLine2;
+  delete redacted.landmark;
+  delete redacted.pincode;
+  return redacted;
 }
 
 
@@ -496,10 +543,16 @@ export async function getUsers(req: AuthRequest, res: Response, next: NextFuncti
     const profileMap = new Map(profiles.map((p: any) => [String(p.user), p]));
     const subscriptionMap = new Map(subscriptions.map((s: any) => [String(s.user), s]));
 
+    const callerId = req.user?.userId || req.user?._id || req.user?.id;
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    const callerPerms: string[] = callerAdmin?.permissions || [];
+    const isSuperAdmin = callerPerms.includes('all');
+    const canViewPrivate = isSuperAdmin || callerPerms.includes('privateInfo.view');
+
     const users = rawUsers.map((u: any) => {
       const p = profileMap.get(String(u._id));
       const s = subscriptionMap.get(String(u._id));
-      return {
+      const userObj = {
         ...u,
         profileId: p?._id ? String(p._id) : undefined,
         profilePhoto: p?.primaryPhoto || p?.photos?.[0] || '',
@@ -507,6 +560,12 @@ export async function getUsers(req: AuthRequest, res: Response, next: NextFuncti
         lastActiveAt: p?.lastActiveAt || u.updatedAt || u.createdAt,
         membershipPlan: s?.plan || 'FREE',
       };
+
+      if (!canViewPrivate) {
+        userObj.email = u.email ? maskEmail(u.email) : undefined;
+        userObj.mobile = u.mobile ? maskMobile(u.mobile) : undefined;
+      }
+      return userObj;
     });
 
     res.json({
@@ -517,6 +576,7 @@ export async function getUsers(req: AuthRequest, res: Response, next: NextFuncti
         page: pageNumber,
         pages: Math.ceil(total / pageSize) || 1,
         limit: pageSize,
+        canViewPrivateContact: canViewPrivate,
       },
     });
   } catch (error) {
@@ -541,14 +601,40 @@ export async function getUserById(req: AuthRequest, res: Response, next: NextFun
     const verifications = await Verification.find({ user: user._id }).sort({ createdAt: -1 });
     const payments = await Payment.find({ user: user._id }).sort({ createdAt: -1 });
 
+    const callerId = req.user?.userId || req.user?._id || req.user?.id;
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    const callerPerms: string[] = callerAdmin?.permissions || [];
+    const isSuperAdmin = callerPerms.includes('all');
+    const canViewPrivate = isSuperAdmin || callerPerms.includes('privateInfo.view');
+    const canEditPrivate = isSuperAdmin || callerPerms.includes('privateInfo.edit');
+
+    const userObj = user ? (typeof user.toObject === 'function' ? user.toObject() : { ...user }) : null;
+    const profileObj = profile ? (typeof profile.toObject === 'function' ? profile.toObject() : { ...profile }) : null;
+
+    if (!canViewPrivate) {
+      if (userObj) {
+        userObj.email = userObj.email ? maskEmail(userObj.email) : undefined;
+        userObj.mobile = userObj.mobile ? maskMobile(userObj.mobile) : undefined;
+      }
+      if (profileObj?.currentLocation) {
+        profileObj.currentLocation = redactPrivateAddress(profileObj.currentLocation);
+      }
+      if (profileObj?.nativePlaceDetails) {
+        profileObj.nativePlaceDetails = redactPrivateAddress(profileObj.nativePlaceDetails);
+      }
+    }
+
     res.json({
       success: true,
       data: {
-        user,
-        profile,
+        user: userObj,
+        profile: profileObj,
         subscription,
         verifications,
         payments,
+        canViewPrivateContact: canViewPrivate,
+        canEditPrivateContact: canEditPrivate,
+        isPrivateContactMasked: !canViewPrivate,
       },
     });
   } catch (error) {
@@ -710,13 +796,40 @@ export async function getProfiles(req: AuthRequest, res: Response, next: NextFun
       .skip(skip)
       .limit(Number(limit));
 
+    const callerId = req.user?.userId || req.user?._id || req.user?.id;
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    const callerPerms: string[] = callerAdmin?.permissions || [];
+    const isSuperAdmin = callerPerms.includes('all');
+    const canViewPrivate = isSuperAdmin || callerPerms.includes('privateInfo.view');
+
+    const sanitizedProfiles = profiles.map((p: any) => {
+      const pObj = typeof p.toObject === 'function' ? p.toObject() : { ...p };
+      if (!canViewPrivate) {
+        if (pObj.user) {
+          pObj.user = {
+            ...pObj.user,
+            email: pObj.user.email ? maskEmail(pObj.user.email) : undefined,
+            mobile: pObj.user.mobile ? maskMobile(pObj.user.mobile) : undefined,
+          };
+        }
+        if (pObj.currentLocation) {
+          pObj.currentLocation = redactPrivateAddress(pObj.currentLocation);
+        }
+        if (pObj.nativePlaceDetails) {
+          pObj.nativePlaceDetails = redactPrivateAddress(pObj.nativePlaceDetails);
+        }
+      }
+      return pObj;
+    });
+
     res.json({
       success: true,
       data: {
-        profiles,
+        profiles: sanitizedProfiles,
         total,
         page: Number(page),
         pages: Math.ceil(total / Number(limit)),
+        canViewPrivateContact: canViewPrivate,
       },
     });
   } catch (error) {
@@ -750,12 +863,12 @@ export async function getProfileById(req: AuthRequest, res: Response, next: Next
     let user: any = null;
 
     if (profile) {
-      user = await User.findById(profile.user).select('-password');
+      user = await User.findById(profile.userId || profile.user).select('-password');
     } else {
       // Maybe ID is a User ID
       user = await User.findById(id).select('-password');
       if (user) {
-        profile = await Profile.findOne({ user: user._id })
+        profile = await Profile.findOne({ $or: [{ userId: user._id }, { user: user._id }] })
           .populate('currentLocation.countryId', 'name code')
           .populate('currentLocation.stateId', 'name code')
           .populate('currentLocation.districtId', 'name')
@@ -776,7 +889,7 @@ export async function getProfileById(req: AuthRequest, res: Response, next: Next
       return res.status(404).json({ success: false, message: 'Profile or User not found' });
     }
 
-    const userId = user?._id || profile?.user;
+    const userId = user?._id || profile?.userId || profile?.user;
     const profileId = profile?._id;
 
     // Concurrently fetch all auxiliary admin review data
@@ -804,13 +917,43 @@ export async function getProfileById(req: AuthRequest, res: Response, next: Next
     const activeSubscription =
       subscriptions.find((s: any) => s.status === 'ACTIVE') || subscriptions[0] || null;
 
+    const callerId = req.user?.userId || req.user?._id || req.user?.id;
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    const callerPerms: string[] = callerAdmin?.permissions || [];
+    const isSuperAdmin = callerPerms.includes('all');
+    const canViewPrivate = isSuperAdmin || callerPerms.includes('privateInfo.view');
+    const canEditPrivate = isSuperAdmin || callerPerms.includes('privateInfo.edit');
+
     const profileObj = profile ? (typeof profile.toObject === 'function' ? profile.toObject() : profile) : null;
-    const userObj = user ? (typeof user.toObject === 'function' ? user.toObject() : user) : null;
+    let userObj = user ? (typeof user.toObject === 'function' ? user.toObject() : user) : null;
+
+    if (!canViewPrivate) {
+      if (userObj) {
+        userObj = {
+          ...userObj,
+          email: userObj.email ? maskEmail(userObj.email) : undefined,
+          mobile: userObj.mobile ? maskMobile(userObj.mobile) : undefined,
+        };
+      }
+      if (profileObj?.currentLocation) {
+        profileObj.currentLocation = redactPrivateAddress(profileObj.currentLocation);
+      }
+      if (profileObj?.nativePlaceDetails) {
+        profileObj.nativePlaceDetails = redactPrivateAddress(profileObj.nativePlaceDetails);
+      }
+    }
+
+    if (profileObj && !profileObj.user && userObj) {
+      profileObj.user = userObj;
+    }
 
     const responsePayload = {
       ...(profileObj || {}),
       profile: profileObj,
       user: userObj,
+      canViewPrivateContact: canViewPrivate,
+      canEditPrivateContact: canEditPrivate,
+      isPrivateContactMasked: !canViewPrivate,
       verifications: verifications || [],
       subscription: activeSubscription,
       subscriptions: subscriptions || [],
@@ -902,10 +1045,10 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
 
     // 1. Resolve target profile (by Profile._id or User._id)
     let profile = null;
-    if (mongoose.Types.ObjectId.isValid(targetId)) {
+    if (mongoose.Types.ObjectId.isValid(targetId) || isValidObjectId(targetId)) {
       profile = await Profile.findById(targetId);
       if (!profile) {
-        profile = await Profile.findOne({ user: targetId });
+        profile = await Profile.findOne({ $or: [{ userId: targetId }, { user: targetId }] });
       }
     }
 
@@ -913,53 +1056,143 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
       return res.status(404).json({ success: false, message: 'Profile not found' });
     }
 
-    const user = await User.findById(profile.user);
+    const user = await User.findById(profile.userId || profile.user);
 
-    // 2. Strict Backend Security Check: Protected Fields Enforcement
-    // Admins must NEVER be able to edit Full Name, Email Address, or Mobile/Phone Number.
-    const protectedFieldKeys = [
-      'name',
-      'fullname',
-      'firstname',
-      'lastname',
-      'email',
-      'phone',
-      'mobile',
-      'mobilenumber',
-      'displayname',
-    ];
+    // 2. Strict Backend Authorization Check for Profile Edits & Private Contact Info
+    const callerId = req.user?.userId || req.user?._id || req.user?.id;
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    const callerPerms: string[] = callerAdmin?.permissions || [];
+    const isSuperAdmin = callerPerms.includes('all');
+    const canEditPrivate = isSuperAdmin || callerPerms.includes('privateInfo.edit');
+    const canEditProfiles = isSuperAdmin || callerPerms.includes('profiles');
+    const canViewPrivate = isSuperAdmin || callerPerms.includes('privateInfo.view') || canEditPrivate;
 
-    // Check top-level request body
-    const attemptedProtectedField = Object.keys(req.body).find((key) => {
-      const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, '');
-      return protectedFieldKeys.includes(normalizedKey);
-    });
-
-    if (attemptedProtectedField) {
-      return res.status(400).json({
+    if (!isSuperAdmin && !canEditProfiles && !canEditPrivate) {
+      return res.status(403).json({
         success: false,
-        message: 'Name, Email Address and Mobile Number are protected and cannot be modified by administrators.',
-        protectedField: attemptedProtectedField,
+        message: 'Access denied: Insufficient permissions to modify matrimonial profiles.',
       });
     }
 
-    // Check nested user object if provided
-    if (req.body.user && typeof req.body.user === 'object') {
-      const attemptedNestedField = Object.keys(req.body.user).find((key) => {
-        const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, '');
-        return protectedFieldKeys.includes(normalizedKey);
+    // A. Protected Full Name fields (Only Super Admin may modify name)
+    const nameFieldKeys = ['name', 'fullname', 'firstname', 'lastname', 'displayname'];
+    const attemptedNameField = Object.keys(req.body).find((key) => {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, '');
+      return nameFieldKeys.includes(normalizedKey);
+    });
+
+    if (attemptedNameField && !isSuperAdmin) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name fields are protected and cannot be modified by standard administrators.',
+        protectedField: attemptedNameField,
       });
-      if (attemptedNestedField) {
-        return res.status(400).json({
-          success: false,
-          message: 'Name, Email Address and Mobile Number are protected and cannot be modified by administrators.',
-          protectedField: `user.${attemptedNestedField}`,
-        });
+    }
+
+    // B. Private Contact & Contract Fields (Requires privateInfo.edit or Super Admin)
+    const privateContactKeys = ['email', 'phone', 'mobile', 'mobilenumber'];
+    const attemptedTopContact = Object.keys(req.body).find((key) => {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, '');
+      return privateContactKeys.includes(normalizedKey);
+    });
+    const attemptedNestedContact =
+      req.body.user && typeof req.body.user === 'object'
+        ? Object.keys(req.body.user).find((key) => {
+            const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, '');
+            return privateContactKeys.includes(normalizedKey);
+          })
+        : null;
+    const attemptedAddressContact =
+      (req.body.currentLocation && req.body.currentLocation.formattedAddress !== undefined) ||
+      (req.body.nativePlaceDetails && req.body.nativePlaceDetails.formattedAddress !== undefined);
+
+    const isAttemptingPrivateContactEdit = !!(attemptedTopContact || attemptedNestedContact || attemptedAddressContact);
+
+    // Rule: View permission must NEVER imply Edit permission.
+    // Edit permission must be checked independently on every relevant backend mutation endpoint.
+    // Administrators without privateInfo.edit (and not superadmin) must receive HTTP 403.
+    if (isAttemptingPrivateContactEdit && !canEditPrivate) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: privateInfo.edit permission required to modify private contact information.',
+        attemptedField: attemptedTopContact || attemptedNestedContact || 'formattedAddress',
+      });
+    }
+
+    // Handle User model updates if authorized and private contact edit is requested
+    let userContactUpdated = false;
+    let oldEmail = user?.email;
+    let oldMobile = user?.mobile;
+
+    if (canEditPrivate && user) {
+      const newEmail = req.body.email || (req.body.user && req.body.user.email);
+      if (newEmail !== undefined && newEmail !== null) {
+        const trimmedEmail = String(newEmail).toLowerCase().trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+          return res.status(400).json({ success: false, message: 'Invalid email address format.' });
+        }
+        if (trimmedEmail !== user.email) {
+          const existingEmailUser = await User.findOne({
+            email: trimmedEmail,
+            _id: { $ne: user._id },
+          });
+          if (existingEmailUser) {
+            return res.status(400).json({ success: false, message: 'Email address is already in use by another account.' });
+          }
+          user.email = trimmedEmail;
+          userContactUpdated = true;
+        }
+      }
+
+      const newMobile = req.body.mobile || req.body.phone || (req.body.user && (req.body.user.mobile || req.body.user.phone));
+      if (newMobile !== undefined && newMobile !== null) {
+        const trimmedMobile = String(newMobile).trim();
+        if (trimmedMobile.length < 8) {
+          return res.status(400).json({ success: false, message: 'Mobile number must be at least 8 digits.' });
+        }
+        if (trimmedMobile !== user.mobile) {
+          const existingMobileUser = await User.findOne({
+            mobile: trimmedMobile,
+            _id: { $ne: user._id },
+          });
+          if (existingMobileUser) {
+            return res.status(400).json({ success: false, message: 'Mobile number is already in use by another account.' });
+          }
+          user.mobile = trimmedMobile;
+          userContactUpdated = true;
+        }
+      }
+
+      if (isSuperAdmin && (req.body.fullName || req.body.name)) {
+        user.fullName = (req.body.fullName || req.body.name).trim();
+        userContactUpdated = true;
+      }
+
+      if (userContactUpdated) {
+        await user.save();
       }
     }
 
     // 3. Explicitly Whitelist Editable Fields (Do NOT pass req.body directly into the database update)
     const updateData: Record<string, any> = {};
+
+    // Address updates for authorized administrators
+    if (canEditPrivate) {
+      if (req.body.currentLocation && req.body.currentLocation.formattedAddress !== undefined) {
+        updateData.currentLocation = {
+          ...(profile.currentLocation || {}),
+          ...req.body.currentLocation,
+          formattedAddress: req.body.currentLocation.formattedAddress,
+        };
+      }
+      if (req.body.nativePlaceDetails && req.body.nativePlaceDetails.formattedAddress !== undefined) {
+        updateData.nativePlaceDetails = {
+          ...(profile.nativePlaceDetails || {}),
+          ...req.body.nativePlaceDetails,
+          formattedAddress: req.body.nativePlaceDetails.formattedAddress,
+        };
+      }
+    }
 
     // Personal Details
     if (req.body.gender !== undefined) updateData.gender = req.body.gender;
@@ -1151,12 +1384,49 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
       );
     }
 
+    if (userContactUpdated || attemptedAddressContact) {
+      await logAdminAction(
+        req.user?.email || 'admin@wonderfuljodi.com',
+        'PRIVATE_CONTACT_UPDATED',
+        `Admin updated private contact information for candidate ${profile.displayName || profile.candidateId || profile._id}`,
+        'Profile',
+        String(profile._id),
+        {
+          adminId: callerId,
+          adminName: req.user?.fullName || (req.user?.email ? req.user.email.split('@')[0] : 'Administrator'),
+          targetProfileId: profile._id,
+          targetUserId: user?._id || profile.userId || profile.user,
+          reason: 'Authorized administrator updated private contact details',
+          metadata: {
+            userContactUpdated,
+            addressContactUpdated: !!attemptedAddressContact,
+          },
+        }
+      );
+    }
+
+    const userObj = user ? (typeof user.toObject === 'function' ? user.toObject() : { ...user }) : undefined;
+    const profileObj = typeof profile.toObject === 'function' ? profile.toObject() : { ...profile };
+
+    if (!canViewPrivate) {
+      if (userObj) {
+        userObj.email = userObj.email ? maskEmail(userObj.email) : undefined;
+        userObj.mobile = userObj.mobile ? maskMobile(userObj.mobile) : undefined;
+      }
+      if (profileObj.currentLocation) {
+        profileObj.currentLocation = redactPrivateAddress(profileObj.currentLocation);
+      }
+      if (profileObj.nativePlaceDetails) {
+        profileObj.nativePlaceDetails = redactPrivateAddress(profileObj.nativePlaceDetails);
+      }
+    }
+
     res.json({
       success: true,
       message: 'Profile updated successfully.',
       data: {
-        ...profile.toObject(),
-        user: user ? user.toObject() : undefined,
+        ...profileObj,
+        user: userObj,
       },
       changesCount: changes.length,
     });
@@ -1600,7 +1870,25 @@ export async function getMemberships(req: AuthRequest, res: Response, next: Next
       .populate('user', 'fullName email mobile')
       .sort({ createdAt: -1 });
 
-    res.json({ success: true, data: subscriptions });
+    const callerId = req.user?.userId || req.user?._id || req.user?.id;
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    const callerPerms: string[] = callerAdmin?.permissions || [];
+    const isSuperAdmin = callerPerms.includes('all');
+    const canViewPrivate = isSuperAdmin || callerPerms.includes('privateInfo.view');
+
+    const sanitizedSubs = subscriptions.map((s: any) => {
+      const sObj = typeof s.toObject === 'function' ? s.toObject() : { ...s };
+      if (!canViewPrivate && sObj.user) {
+        sObj.user = {
+          ...sObj.user,
+          email: sObj.user.email ? maskEmail(sObj.user.email) : undefined,
+          mobile: sObj.user.mobile ? maskMobile(sObj.user.mobile) : undefined,
+        };
+      }
+      return sObj;
+    });
+
+    res.json({ success: true, data: sanitizedSubs, canViewPrivateContact: canViewPrivate });
   } catch (error) {
     next(error);
   }
@@ -1608,11 +1896,34 @@ export async function getMemberships(req: AuthRequest, res: Response, next: Next
 
 export async function updateMembership(req: AuthRequest, res: Response, next: NextFunction) {
   try {
+    const callerId = req.user?.userId || req.user?._id || req.user?.id;
+    if (!callerId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    const callerPerms: string[] = callerAdmin?.permissions || [];
+    const isSuperAdmin = callerPerms.includes('all');
+
+    if (!isSuperAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: Only Super Administrators can modify subscription memberships.',
+      });
+    }
+
     const { plan, status, expiryDate } = req.body;
     const updateData: any = {};
     if (plan) updateData.plan = plan;
     if (status) updateData.status = status;
     if (expiryDate) updateData.expiryDate = new Date(expiryDate);
+
+    // Strictly disallow fabricating payment records or gateway identifiers
+    delete (updateData as any).payment;
+    delete (updateData as any).paymentId;
+    delete (updateData as any).paymentGateway;
+    delete (updateData as any).razorpayPaymentId;
+    delete (updateData as any).transactionId;
 
     const subscription = await Subscription.findByIdAndUpdate(
       req.params.id,
@@ -1625,14 +1936,215 @@ export async function updateMembership(req: AuthRequest, res: Response, next: Ne
     }
 
     await logAdminAction(
-      req.user?.role || 'admin',
+      req.user?.email || 'admin@wonderfuljodi.com',
       'MEMBERSHIP_UPDATED',
-      `Updated subscription ID: ${subscription._id} for plan ${subscription.plan}`,
+      `Super Admin updated subscription ID: ${subscription._id} for plan ${subscription.plan}`,
       'Subscription',
-      String(subscription._id)
+      String(subscription._id),
+      {
+        adminId: callerId,
+        metadata: {
+          updatedFields: Object.keys(updateData),
+        },
+      }
     );
 
     res.json({ success: true, data: subscription });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Super Admin-Only Manual Paid Membership Grant
+ * Creates or extends an ACTIVE Subscription for candidate without fabricating fake payment transactions.
+ * Strictly checks that caller is Super Admin. Records permanent audit trail in AuditLog.
+ */
+export async function grantMembershipBySuperAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    // 1. Strict Super Admin Authorization Gate
+    const callerId = req.user?.userId || req.user?._id || req.user?.id;
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    const callerPerms: string[] = callerAdmin?.permissions || [];
+    const isSuperAdmin = callerPerms.includes('all');
+    if (!isSuperAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: Only Super Administrators can manually grant paid memberships.',
+      });
+    }
+
+    const { userId, planId, durationDays, durationMonths, grantReason, extendExisting } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'Target User ID, Candidate ID, or email is required.' });
+    }
+    if (!planId) {
+      return res.status(400).json({ success: false, message: 'Membership Plan ID, name, or slug is required.' });
+    }
+    if (!grantReason || typeof grantReason !== 'string' || grantReason.trim().length < 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'A detailed grant reason is required (minimum 5 characters) for audit trail compliance.',
+      });
+    }
+
+    // 2. Validate Target User
+    let targetUser = null;
+    if (isValidObjectId(userId)) {
+      targetUser = await User.findById(userId);
+    }
+    if (!targetUser) {
+      const prof = await Profile.findOne({ candidateId: String(userId).trim() });
+      if (prof) {
+        targetUser = await User.findById(prof.userId || prof.user);
+      } else {
+        targetUser = await User.findOne({ email: String(userId).toLowerCase().trim() });
+      }
+    }
+
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: 'Target user not found.' });
+    }
+
+    if (targetUser.isDeleted) {
+      return res.status(400).json({ success: false, message: 'Cannot grant membership to a deleted or deactivated user.' });
+    }
+
+    // 3. Validate Plan
+    let plan: any = null;
+    if (isValidObjectId(planId)) {
+      plan = await MembershipPlan.findById(planId);
+    }
+    if (!plan) {
+      plan = await MembershipPlan.findOne({
+        $or: [
+          { slug: String(planId).toLowerCase().trim() },
+          { planId: String(planId).trim() },
+          { key: String(planId).toUpperCase().trim() },
+          { name: String(planId).trim() },
+        ],
+      });
+    }
+    if (!plan) {
+      const fallbackPlans = [
+        { name: 'Basic Doctor Connect', slug: 'basic-doctor-connect', durationDays: 30, contactRequestLimit: 15 },
+        { name: 'Premium Match', slug: 'premium-match', durationDays: 180, contactRequestLimit: 60 },
+        { name: 'Priority Matchmaking', slug: 'priority-matchmaking', durationDays: 180, contactRequestLimit: 120 },
+        { name: 'Elite Assisted VIP', slug: 'elite-assisted-vip', durationDays: 365, contactRequestLimit: 300 },
+      ];
+      plan = fallbackPlans.find(
+        (p) =>
+          p.slug === String(planId).toLowerCase().trim() ||
+          p.name.toLowerCase() === String(planId).toLowerCase().trim()
+      );
+    }
+
+    if (!plan) {
+      return res.status(404).json({ success: false, message: 'Specified membership plan was not found.' });
+    }
+
+    // 4. Calculate Duration & Expiration
+    let days = Number(durationDays);
+    if (!days || isNaN(days) || days <= 0) {
+      if (durationMonths && Number(durationMonths) > 0) {
+        days = Number(durationMonths) * 30;
+      } else {
+        days = plan.durationDays || 30;
+      }
+    }
+
+    const contactCredits = plan.contactRequestLimit || 30;
+    const now = new Date();
+
+    const existingActiveSub = await Subscription.findOne({
+      user: targetUser._id,
+      status: 'ACTIVE',
+    });
+
+    let subscription: any = null;
+    let isExtended = false;
+
+    if (existingActiveSub && (extendExisting === true || extendExisting === 'true')) {
+      const baseDate =
+        existingActiveSub.expiryDate && existingActiveSub.expiryDate > now
+          ? existingActiveSub.expiryDate
+          : now;
+      const newExpiry = new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000);
+
+      existingActiveSub.expiryDate = newExpiry;
+      existingActiveSub.contactRequestsRemaining = (existingActiveSub.contactRequestsRemaining || 0) + contactCredits;
+      existingActiveSub.paymentReference = `SUPERADMIN_MANUAL_GRANT_${req.user?.email || 'admin'}_${Date.now()}`;
+      await existingActiveSub.save();
+      subscription = existingActiveSub;
+      isExtended = true;
+    } else {
+      if (existingActiveSub) {
+        existingActiveSub.status = 'CANCELLED';
+        await existingActiveSub.save();
+      }
+
+      const expiryDate = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+      subscription = await Subscription.create({
+        user: targetUser._id,
+        userId: targetUser._id,
+        plan: plan.name,
+        planId: String(plan._id || plan.planId || plan.slug),
+        status: 'ACTIVE',
+        startDate: now,
+        expiryDate,
+        contactRequestsRemaining: contactCredits,
+        contactRequestsUsed: 0,
+        paymentReference: `SUPERADMIN_MANUAL_GRANT_${req.user?.email || 'admin'}_${Date.now()}`,
+      });
+    }
+
+    // CRITICAL SECURITY & PAYMENT INTEGRITY:
+    // Do NOT create any Payment record or bypass payment processor.
+    // Manually granted plans must be clearly distinguished from verified paid transactions.
+
+    // 5. Write Comprehensive Audit Log
+    await logAdminAction(
+      req.user?.email || 'admin@wonderfuljodi.com',
+      'MEMBERSHIP_MANUALLY_GRANTED',
+      `Super Admin manually granted ${plan.name} (${days} days) to user ${targetUser.email}. Reason: ${grantReason.trim()}`,
+      'Subscription',
+      String(subscription._id),
+      {
+        adminId: callerId,
+        adminName: req.user?.fullName || req.user?.email,
+        targetUserId: targetUser._id,
+        reason: grantReason.trim(),
+        metadata: {
+          planName: plan.name,
+          planId: plan._id || plan.slug,
+          durationDays: days,
+          expiryDate: subscription.expiryDate,
+          contactCreditsGranted: contactCredits,
+          isExtended,
+          grantReason: grantReason.trim(),
+          grantedBySuperAdmin: req.user?.email,
+          manualGrant: true,
+        },
+      }
+    );
+
+    res.json({
+      success: true,
+      message: `Successfully ${isExtended ? 'extended' : 'granted'} ${plan.name} membership for ${targetUser.fullName || targetUser.email}.`,
+      data: {
+        subscriptionId: subscription._id,
+        userId: targetUser._id,
+        userEmail: targetUser.email,
+        plan: plan.name,
+        status: subscription.status,
+        startDate: subscription.startDate,
+        expiryDate: subscription.expiryDate,
+        contactRequestsRemaining: subscription.contactRequestsRemaining,
+        isExtended,
+        paymentReference: subscription.paymentReference,
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -4032,7 +4544,9 @@ export async function deleteBroadcast(req: AuthRequest, res: Response, next: Nex
 // 10. Admin Accounts & Roles
 export async function getAdmins(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const admins = await User.find({ role: 'admin' }).select('-password').sort({ createdAt: -1 });
+    const admins = await User.find({ role: 'admin', isDeleted: { $ne: true } })
+      .select('-password')
+      .sort({ createdAt: -1 });
     const adminDocs = await Admin.find().populate('user', 'fullName email mobile');
 
     res.json({
@@ -4041,6 +4555,171 @@ export async function getAdmins(req: AuthRequest, res: Response, next: NextFunct
         admins,
         adminPermissions: adminDocs,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getAdminById(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const callerId = req.user?.userId;
+    if (!callerId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    // Authorization: caller must have 'all', 'admins', or 'users' permissions or be superadmin
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    const callerPerms: string[] = callerAdmin?.permissions || [];
+    const isAuthorized =
+      callerPerms.includes('all') ||
+      callerPerms.includes('admins') ||
+      callerPerms.includes('users');
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: Insufficient permissions to view administrator details',
+      });
+    }
+
+    const targetUser = await User.findOne({
+      _id: req.params.id,
+      role: 'admin',
+      isDeleted: { $ne: true },
+    }).select('-password');
+
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'Administrator account not found or already deleted',
+      });
+    }
+
+    const adminDoc = await Admin.findOne({ user: targetUser._id });
+    const permissions = adminDoc?.permissions || [];
+
+    return res.json({
+      success: true,
+      data: {
+        _id: targetUser._id,
+        id: targetUser._id,
+        fullName: targetUser.fullName,
+        email: targetUser.email,
+        mobile: targetUser.mobile,
+        role: targetUser.role,
+        isActive: targetUser.isActive ?? true,
+        status: targetUser.status || 'Active',
+        permissions,
+        createdAt: targetUser.createdAt,
+        updatedAt: targetUser.updatedAt,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const callerId = req.user?.userId;
+    if (!callerId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    // 1. Authorization: Only Super Admin (permissions contains 'all') can delete admin accounts
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    const callerPerms: string[] = callerAdmin?.permissions || [];
+    const isSuperAdmin = callerPerms.includes('all');
+
+    if (!isSuperAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: Only Super Administrators can delete administrator accounts.',
+      });
+    }
+
+    const targetId = req.params.id;
+
+    // 2. Prevent self-deletion
+    if (String(targetId) === String(callerId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Self-deletion is prohibited. You cannot delete your own administrator account.',
+      });
+    }
+
+    // 3. Find target admin user
+    const targetUser = await User.findOne({ _id: targetId, role: 'admin' });
+    if (!targetUser || targetUser.isDeleted) {
+      return res.status(404).json({
+        success: false,
+        message: 'Administrator account not found or already deleted.',
+      });
+    }
+
+    // 4. Check if target is a Super Admin and if they are the last active Super Admin
+    const targetAdminDoc = await Admin.findOne({ user: targetUser._id });
+    const targetPerms: string[] = targetAdminDoc?.permissions || [];
+    const isTargetSuperAdmin = targetPerms.includes('all');
+
+    if (isTargetSuperAdmin) {
+      const allActiveAdmins = await User.find({
+        role: 'admin',
+        isActive: true,
+        isDeleted: { $ne: true },
+        status: { $ne: 'Deleted' },
+      });
+
+      let superAdminCount = 0;
+      for (const adm of allActiveAdmins) {
+        const doc = await Admin.findOne({ user: adm._id });
+        if (doc?.permissions?.includes('all')) {
+          superAdminCount++;
+        }
+      }
+
+      if (superAdminCount <= 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot delete the last active Super Administrator account.',
+        });
+      }
+    }
+
+    // 5. Soft-delete the admin user
+    await User.findByIdAndUpdate(targetUser._id, {
+      isDeleted: true,
+      isActive: false,
+      status: 'Deleted',
+    });
+
+    // 6. Revoke all active sessions and refresh tokens for this admin
+    const { RefreshToken } = await import('../models/RefreshToken');
+    await RefreshToken.updateMany(
+      { user: targetUser._id },
+      { isRevoked: true, isUsed: true }
+    );
+
+    // 7. Audit log
+    await logAdminAction(
+      req.user?.email || 'admin@wonderfuljodi.com',
+      'ADMIN_DELETED',
+      `Soft-deleted administrator account for ${targetUser.email}`,
+      'User',
+      String(targetUser._id),
+      {
+        adminId: callerId,
+        targetUserId: targetUser._id,
+        previousStatus: targetUser.status || 'Active',
+        newStatus: 'Deleted',
+        reason: req.body?.reason || 'Administrator account removed by Superadmin',
+      }
+    );
+
+    return res.json({
+      success: true,
+      message: 'Administrator account deleted successfully',
     });
   } catch (error) {
     next(error);

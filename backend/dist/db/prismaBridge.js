@@ -270,6 +270,7 @@ function cleanUnsupportedModelFields(data, modelName) {
         delete data.statusChangedAt;
         delete data.statusChangedBy;
         delete data.statusChangedById;
+        delete data.weight;
     }
     else if (mName === 'user') {
         delete data.deletedAt;

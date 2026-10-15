@@ -288,6 +288,7 @@ export function cleanUnsupportedModelFields(data: any, modelName?: string): any 
     delete data.statusChangedAt;
     delete data.statusChangedBy;
     delete data.statusChangedById;
+    delete data.weight;
   } else if (mName === 'user') {
     delete data.deletedAt;
     delete data.deletedBy;

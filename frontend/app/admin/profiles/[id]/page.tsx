@@ -350,7 +350,6 @@ function AdminProfileDetailsContent() {
         gender: editForm.gender,
         maritalStatus: editForm.maritalStatus,
         height: editForm.height,
-        weight: editForm.weight,
         religion: editForm.religion,
         caste: editForm.caste,
         subCaste: editForm.subCaste,

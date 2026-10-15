@@ -170,7 +170,6 @@ export function AdminEditProfileModal({
         dob: formData.dob || undefined,
         maritalStatus: formData.maritalStatus,
         height: formData.height,
-        weight: formData.weight,
         religion: formData.religion,
         caste: formData.caste,
         subCaste: formData.subCaste,

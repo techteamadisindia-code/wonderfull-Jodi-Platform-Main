@@ -1200,7 +1200,6 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
     if (req.body.dateOfBirth !== undefined) updateData.dob = req.body.dateOfBirth;
     if (req.body.maritalStatus !== undefined) updateData.maritalStatus = req.body.maritalStatus;
     if (req.body.height !== undefined) updateData.height = req.body.height;
-    if (req.body.weight !== undefined) updateData.weight = req.body.weight;
     if (req.body.religion !== undefined) updateData.religion = req.body.religion;
     if (req.body.caste !== undefined) updateData.caste = req.body.caste;
     if (req.body.subCaste !== undefined) updateData.subCaste = req.body.subCaste;

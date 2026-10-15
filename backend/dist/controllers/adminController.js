@@ -1141,8 +1141,6 @@ async function updateProfile(req, res, next) {
             updateData.maritalStatus = req.body.maritalStatus;
         if (req.body.height !== undefined)
             updateData.height = req.body.height;
-        if (req.body.weight !== undefined)
-            updateData.weight = req.body.weight;
         if (req.body.religion !== undefined)
             updateData.religion = req.body.religion;
         if (req.body.caste !== undefined)

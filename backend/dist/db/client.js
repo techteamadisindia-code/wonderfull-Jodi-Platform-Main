@@ -8,8 +8,10 @@ exports.generateObjectId = generateObjectId;
 exports.toClient = toClient;
 exports.toClientArray = toClientArray;
 exports.testSqlConnection = testSqlConnection;
+require("../config/env");
 const client_1 = require("@prisma/client");
 const crypto_1 = __importDefault(require("crypto"));
+const stagingGuard_1 = require("../utils/stagingGuard");
 function getOptimizedDatabaseUrl() {
     const rawUrl = process.env.DATABASE_URL;
     if (!rawUrl)
@@ -33,6 +35,8 @@ function getOptimizedDatabaseUrl() {
         return rawUrl;
     }
 }
+// Fail-closed staging isolation check before Prisma client initialization
+(0, stagingGuard_1.assertStagingIsolation)();
 const dbUrl = getOptimizedDatabaseUrl();
 exports.prisma = globalThis.prisma ||
     new client_1.PrismaClient({

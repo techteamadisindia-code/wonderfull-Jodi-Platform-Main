@@ -33,6 +33,7 @@ import { Registration } from '../models/Registration';
 import { validateDateOfBirth, validateMedicalQualification } from '../utils/doctorValidation';
 import { getFormattedVisitDate } from '../services/visitTrackingService';
 import { detectCompliance } from '../services/complianceDetector';
+import { findCanonicalProfile } from './profileController';
 
 // Helper for audit logging
 async function logAdminAction(
@@ -102,7 +103,11 @@ export function maskMobile(mobile: string): string {
  * Preserves approved location metadata (country, state, city, village, IDs) without mutating shared DB objects.
  */
 export function redactPrivateAddress(locationObj: any) {
-  if (!locationObj || typeof locationObj !== 'object') return locationObj;
+  if (!locationObj) return locationObj;
+  if (typeof locationObj === 'string') {
+    return '[Private Address - View Permission Required]';
+  }
+  if (typeof locationObj !== 'object') return locationObj;
   const redacted = { ...locationObj };
   const hasPrivateData = Boolean(
     redacted.formattedAddress ||
@@ -839,34 +844,76 @@ export async function getProfiles(req: AuthRequest, res: Response, next: NextFun
 
 export async function getProfileById(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
-    if (!isValidObjectId(id)) {
+    const rawId = (req.params.id || '').trim();
+    if (!rawId) {
       return res.status(400).json({ success: false, message: 'Invalid profile or user ID' });
     }
 
-    // Attempt to locate Profile by Profile ID or User ID
-    let profile = await Profile.findById(id)
-      .populate('currentLocation.countryId', 'name code')
-      .populate('currentLocation.stateId', 'name code')
-      .populate('currentLocation.districtId', 'name')
-      .populate('currentLocation.cityId', 'name type pincode')
-      .populate('nativePlaceDetails.countryId', 'name code')
-      .populate('nativePlaceDetails.stateId', 'name code')
-      .populate('nativePlaceDetails.districtId', 'name')
-      .populate('nativePlaceDetails.cityId', 'name type pincode')
-      .populate('communityDetails.religionId', 'name')
-      .populate('communityDetails.casteId', 'name category')
-      .populate('communityDetails.subCasteId', 'name')
-      .populate('languageDetails.motherTongueId', 'name nativeNames')
-      .populate('languageDetails.otherLanguagesIds', 'name nativeNames');
+    // Helper to calculate age from DOB
+    const calculateAge = (dob: string | Date | undefined): number | null => {
+      if (!dob) return null;
+      const bDate = new Date(dob);
+      if (isNaN(bDate.getTime())) return null;
+      const today = new Date();
+      let age = today.getFullYear() - bDate.getFullYear();
+      const m = today.getMonth() - bDate.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < bDate.getDate())) {
+        age--;
+      }
+      return age >= 0 ? age : null;
+    };
 
+    // Attempt to locate Profile by Profile ID or Candidate ID
+    let profile: any = null;
     let user: any = null;
+
+    if (isValidObjectId(rawId)) {
+      profile = await Profile.findById(rawId)
+        .populate('currentLocation.countryId', 'name code')
+        .populate('currentLocation.stateId', 'name code')
+        .populate('currentLocation.districtId', 'name')
+        .populate('currentLocation.cityId', 'name type pincode')
+        .populate('nativePlaceDetails.countryId', 'name code')
+        .populate('nativePlaceDetails.stateId', 'name code')
+        .populate('nativePlaceDetails.districtId', 'name')
+        .populate('nativePlaceDetails.cityId', 'name type pincode')
+        .populate('communityDetails.religionId', 'name')
+        .populate('communityDetails.casteId', 'name category')
+        .populate('communityDetails.subCasteId', 'name')
+        .populate('languageDetails.motherTongueId', 'name nativeNames')
+        .populate('languageDetails.otherLanguagesIds', 'name nativeNames');
+    }
+
+    if (!profile) {
+      const canonical = await findCanonicalProfile(rawId);
+      if (canonical) {
+        const canonicalId = String(canonical._id || canonical.id);
+        if (isValidObjectId(canonicalId)) {
+          profile = await Profile.findById(canonicalId)
+            .populate('currentLocation.countryId', 'name code')
+            .populate('currentLocation.stateId', 'name code')
+            .populate('currentLocation.districtId', 'name')
+            .populate('currentLocation.cityId', 'name type pincode')
+            .populate('nativePlaceDetails.countryId', 'name code')
+            .populate('nativePlaceDetails.stateId', 'name code')
+            .populate('nativePlaceDetails.districtId', 'name')
+            .populate('nativePlaceDetails.cityId', 'name type pincode')
+            .populate('communityDetails.religionId', 'name')
+            .populate('communityDetails.casteId', 'name category')
+            .populate('communityDetails.subCasteId', 'name')
+            .populate('languageDetails.motherTongueId', 'name nativeNames')
+            .populate('languageDetails.otherLanguagesIds', 'name nativeNames');
+        } else {
+          profile = canonical;
+        }
+      }
+    }
 
     if (profile) {
       user = await User.findById(profile.userId || profile.user).select('-password');
-    } else {
-      // Maybe ID is a User ID
-      user = await User.findById(id).select('-password');
+    } else if (isValidObjectId(rawId)) {
+      // Maybe rawId is a User ID
+      user = await User.findById(rawId).select('-password');
       if (user) {
         profile = await Profile.findOne({ $or: [{ userId: user._id }, { user: user._id }] })
           .populate('currentLocation.countryId', 'name code')
@@ -927,6 +974,80 @@ export async function getProfileById(req: AuthRequest, res: Response, next: Next
     const profileObj = profile ? (typeof profile.toObject === 'function' ? profile.toObject() : profile) : null;
     let userObj = user ? (typeof user.toObject === 'function' ? user.toObject() : user) : null;
 
+    // Safely parse JSON strings if stored in Prisma as text
+    if (profileObj) {
+      if (typeof profileObj.currentLocation === 'string') {
+        try { profileObj.currentLocation = JSON.parse(profileObj.currentLocation); } catch (e) {}
+      }
+      if (typeof profileObj.nativePlaceDetails === 'string') {
+        try { profileObj.nativePlaceDetails = JSON.parse(profileObj.nativePlaceDetails); } catch (e) {}
+      }
+      if (typeof profileObj.communityDetails === 'string') {
+        try { profileObj.communityDetails = JSON.parse(profileObj.communityDetails); } catch (e) {}
+      }
+      if (typeof profileObj.horoscope === 'string') {
+        try { profileObj.horoscope = JSON.parse(profileObj.horoscope); } catch (e) {}
+      }
+      if (!profileObj.horoscope) {
+        profileObj.horoscope = {};
+      }
+
+      // 1. Calculate Age
+      const computedAge = profileObj.age ?? calculateAge(profileObj.dob || userObj?.dob);
+      if (computedAge !== null) {
+        profileObj.age = computedAge;
+        profileObj.calculatedAge = computedAge;
+      }
+
+      // 2. Resolve Sub-Caste fallback
+      const resolvedSubCaste =
+        profileObj.subCaste ||
+        profileObj.communityDetails?.subCasteText ||
+        (typeof profileObj.communityDetails?.subCasteId === 'object' ? profileObj.communityDetails?.subCasteId?.name : null) ||
+        profileObj.communityDetails?.subCaste ||
+        profileObj.casteAndGotra?.subCaste ||
+        '';
+      profileObj.subCaste = resolvedSubCaste;
+
+      // 3. Resolve Pincode fallback
+      const resolvedPincode =
+        profileObj.currentLocation?.pincode ||
+        (typeof profileObj.currentLocation?.cityId === 'object' ? profileObj.currentLocation?.cityId?.pincode : null) ||
+        profileObj.nativePlaceDetails?.pincode ||
+        (typeof profileObj.nativePlaceDetails?.cityId === 'object' ? profileObj.nativePlaceDetails?.cityId?.pincode : null) ||
+        profileObj.pincode ||
+        profileObj.address?.pincode ||
+        '';
+      if (resolvedPincode) {
+        if (!profileObj.currentLocation) profileObj.currentLocation = {};
+        if (!profileObj.currentLocation.pincode) profileObj.currentLocation.pincode = resolvedPincode;
+        profileObj.pincode = resolvedPincode;
+      }
+
+      // 4. Resolve Native Place fallback
+      const resolvedNativePlace =
+        profileObj.nativePlace ||
+        (canViewPrivate ? profileObj.nativePlaceDetails?.formattedAddress : null) ||
+        profileObj.nativePlaceDetails?.city ||
+        profileObj.nativePlaceDetails?.village ||
+        profileObj.familyDetails?.nativePlace ||
+        profileObj.familyDetails?.ancestralOrigin ||
+        '';
+      profileObj.nativePlace = resolvedNativePlace;
+
+      // 5. Resolve Pada / Charan & Lagna fallback
+      const horo = profileObj.horoscope;
+      const pada = horo.pada ?? horo.charan ?? (profileObj as any).pada ?? (profileObj as any).charan ?? null;
+      const lagna = horo.lagna || horo.ascendant || horo.lagnaRashi || (profileObj as any).lagna || null;
+      if (pada !== null && pada !== undefined) {
+        horo.pada = pada;
+        horo.charan = pada;
+      }
+      if (lagna) {
+        horo.lagna = lagna;
+      }
+    }
+
     if (!canViewPrivate) {
       if (userObj) {
         userObj = {
@@ -935,11 +1056,39 @@ export async function getProfileById(req: AuthRequest, res: Response, next: Next
           mobile: userObj.mobile ? maskMobile(userObj.mobile) : undefined,
         };
       }
-      if (profileObj?.currentLocation) {
-        profileObj.currentLocation = redactPrivateAddress(profileObj.currentLocation);
-      }
-      if (profileObj?.nativePlaceDetails) {
-        profileObj.nativePlaceDetails = redactPrivateAddress(profileObj.nativePlaceDetails);
+      if (profileObj) {
+        const rawNativeFormatted = profileObj.nativePlaceDetails?.formattedAddress;
+
+        if (profileObj.currentLocation) {
+          profileObj.currentLocation = redactPrivateAddress(profileObj.currentLocation);
+        }
+        if (profileObj.nativePlaceDetails) {
+          profileObj.nativePlaceDetails = redactPrivateAddress(profileObj.nativePlaceDetails);
+        }
+        if (profileObj.address) {
+          profileObj.address = redactPrivateAddress(profileObj.address);
+        }
+
+        // Scrub root-level private residential pincode and address aliases
+        delete profileObj.pincode;
+        delete (profileObj as any).pinCode;
+        delete (profileObj as any).postalCode;
+        delete (profileObj as any).zipCode;
+
+        // Ensure nativePlace does NOT expose formattedAddress or detailed residential street address
+        if (
+          profileObj.nativePlace &&
+          (profileObj.nativePlace === rawNativeFormatted ||
+            profileObj.nativePlace.includes('[Private Address') ||
+            (rawNativeFormatted && profileObj.nativePlace === rawNativeFormatted))
+        ) {
+          profileObj.nativePlace =
+            profileObj.nativePlaceDetails?.city ||
+            profileObj.nativePlaceDetails?.village ||
+            profileObj.familyDetails?.nativePlace ||
+            profileObj.familyDetails?.ancestralOrigin ||
+            '';
+        }
       }
     }
 
@@ -1911,9 +2060,87 @@ export async function updateMembership(req: AuthRequest, res: Response, next: Ne
       });
     }
 
-    const { plan, status, expiryDate } = req.body;
+    const existingSub = await Subscription.findById(req.params.id);
+    if (!existingSub) {
+      return res.status(404).json({ success: false, message: 'Subscription not found' });
+    }
+
+    const {
+      plan,
+      planId,
+      status,
+      expiryDate,
+      durationDays,
+      reason,
+      preserveCredits,
+      additionalCredits,
+      contactRequestsRemaining,
+    } = req.body;
     const updateData: any = {};
-    if (plan) updateData.plan = plan;
+
+    const planIdentifier = planId || plan;
+    if (planIdentifier) {
+      let matchedPlan: any = null;
+      if (isValidObjectId(planIdentifier)) {
+        matchedPlan = await MembershipPlan.findById(planIdentifier);
+      }
+      if (!matchedPlan) {
+        matchedPlan = await MembershipPlan.findOne({
+          $or: [
+            { slug: String(planIdentifier).toLowerCase().trim() },
+            { planId: String(planIdentifier).trim() },
+            { key: String(planIdentifier).toUpperCase().trim() },
+            { name: String(planIdentifier).trim() },
+          ],
+        });
+      }
+      if (!matchedPlan) {
+        const fallbackPlans = [
+          { name: 'Standard Free', slug: 'free', durationDays: 3650, contactRequestLimit: 0 },
+          { name: 'Basic Doctor Connect', slug: 'basic-doctor-connect', durationDays: 30, contactRequestLimit: 15 },
+          { name: 'Premium Match', slug: 'premium-match', durationDays: 180, contactRequestLimit: 60 },
+          { name: 'Priority Matchmaking', slug: 'priority-matchmaking', durationDays: 180, contactRequestLimit: 120 },
+          { name: 'Elite Assisted VIP', slug: 'elite-assisted-vip', durationDays: 365, contactRequestLimit: 300 },
+        ];
+        matchedPlan = fallbackPlans.find(
+          (p) =>
+            p.slug === String(planIdentifier).toLowerCase().trim() ||
+            p.name.toLowerCase() === String(planIdentifier).toLowerCase().trim()
+        );
+      }
+
+      if (!matchedPlan) {
+        return res.status(404).json({ success: false, message: 'Specified membership plan was not found.' });
+      }
+
+      updateData.plan = matchedPlan.name;
+      updateData.planId = String(matchedPlan._id || matchedPlan.planId || matchedPlan.slug);
+
+      // Recalculate duration and expiry if not explicitly passed
+      if (!expiryDate) {
+        const days = durationDays ? Number(durationDays) : (matchedPlan.durationDays || 30);
+        updateData.expiryDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      }
+
+      // Contact credit preservation and reset rules:
+      // 1. Explicit contactRequestsRemaining provided: set exact number
+      // 2. preserveCredits === true: retain user's existing unused credits
+      // 3. additionalCredits: add onto user's existing unused credits
+      // 4. default approved rule on plan change: reset to the new plan's default credit limit
+      if (contactRequestsRemaining !== undefined) {
+        updateData.contactRequestsRemaining = Math.max(0, Number(contactRequestsRemaining));
+      } else if (preserveCredits === true || preserveCredits === 'true') {
+        updateData.contactRequestsRemaining = existingSub.contactRequestsRemaining ?? matchedPlan.contactRequestLimit ?? 0;
+      } else if (additionalCredits !== undefined && !isNaN(Number(additionalCredits))) {
+        updateData.contactRequestsRemaining = Math.max(
+          0,
+          (existingSub.contactRequestsRemaining || 0) + Number(additionalCredits)
+        );
+      } else if (matchedPlan.contactRequestLimit !== undefined) {
+        updateData.contactRequestsRemaining = matchedPlan.contactRequestLimit;
+      }
+    }
+
     if (status) updateData.status = status;
     if (expiryDate) updateData.expiryDate = new Date(expiryDate);
 
@@ -1923,6 +2150,14 @@ export async function updateMembership(req: AuthRequest, res: Response, next: Ne
     delete (updateData as any).paymentGateway;
     delete (updateData as any).razorpayPaymentId;
     delete (updateData as any).transactionId;
+
+    const previousSnapshot = {
+      plan: existingSub.plan,
+      planId: existingSub.planId,
+      status: existingSub.status,
+      expiryDate: existingSub.expiryDate,
+      contactRequestsRemaining: existingSub.contactRequestsRemaining,
+    };
 
     const subscription = await Subscription.findByIdAndUpdate(
       req.params.id,
@@ -1934,19 +2169,57 @@ export async function updateMembership(req: AuthRequest, res: Response, next: Ne
       return res.status(404).json({ success: false, message: 'Subscription not found' });
     }
 
-    await logAdminAction(
-      req.user?.email || 'admin@wonderfuljodi.com',
-      'MEMBERSHIP_UPDATED',
-      `Super Admin updated subscription ID: ${subscription._id} for plan ${subscription.plan}`,
-      'Subscription',
-      String(subscription._id),
-      {
+    // Write to permanent AuditLog and logAdminAction with compensating rollback on failure
+    try {
+      await AuditLog.create({
+        adminUser: callerId,
         adminId: callerId,
+        adminEmail: req.user?.email || 'admin@wonderfuljodi.com',
+        adminName: req.user?.fullName || req.user?.email,
+        action: 'MEMBERSHIP_PLAN_CHANGED',
+        targetModel: 'Subscription',
+        targetId: String(subscription._id),
+        targetUserId: subscription.user?._id || subscription.user,
+        previousStatus: existingSub.plan,
+        newStatus: subscription.plan,
+        reason: reason || 'Super Admin manual plan modification',
+        details: `Plan changed from ${existingSub.plan} to ${subscription.plan} by Super Admin`,
+        status: 'SUCCESS',
         metadata: {
+          previousPlan: existingSub.plan,
+          newPlan: subscription.plan,
           updatedFields: Object.keys(updateData),
+          adminEmail: req.user?.email,
         },
-      }
-    );
+      });
+
+      await logAdminAction(
+        req.user?.email || 'admin@wonderfuljodi.com',
+        'MEMBERSHIP_UPDATED',
+        `Super Admin updated subscription ID: ${subscription._id} from ${existingSub.plan} to plan ${subscription.plan}`,
+        'Subscription',
+        String(subscription._id),
+        {
+          adminId: callerId,
+          metadata: {
+            previousPlan: existingSub.plan,
+            newPlan: subscription.plan,
+            updatedFields: Object.keys(updateData),
+          },
+        }
+      );
+    } catch (auditErr: any) {
+      console.error(
+        '[Membership] CRITICAL: Audit log persistence failed. Rolling back membership update:',
+        auditErr?.message
+      );
+      // Revert subscription back to previous state to prevent unaudited state changes
+      await Subscription.findByIdAndUpdate(req.params.id, { $set: previousSnapshot });
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to record administrative audit log. Membership update was rolled back for compliance.',
+      });
+    }
 
     res.json({ success: true, data: subscription });
   } catch (error) {

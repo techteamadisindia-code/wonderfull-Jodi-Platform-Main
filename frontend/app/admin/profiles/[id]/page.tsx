@@ -48,6 +48,10 @@ import {
   X,
   Compass,
   BookOpen,
+  FileX,
+  Edit3,
+  Crown,
+  CheckCheck,
 } from 'lucide-react';
 import {
   fetchProfileById,
@@ -69,6 +73,20 @@ import {
 } from '../../../../services/profileApi';
 import { AdminEditProfileModal } from '../../../../components/admin/AdminEditProfileModal';
 import { getAdminUser } from '../../../../services/authApi';
+import apiClient from '../../../../services/api';
+
+function calculateAge(dob?: string | Date): number | null {
+  if (!dob) return null;
+  const bDate = new Date(dob);
+  if (isNaN(bDate.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - bDate.getFullYear();
+  const m = today.getMonth() - bDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < bDate.getDate())) {
+    age--;
+  }
+  return age >= 0 ? age : null;
+}
 
 type TabKey =
   | 'overview'
@@ -120,6 +138,14 @@ function AdminProfileDetailsContent() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxDoc, setLightboxDoc] = useState<{ url: string; title: string; type: string } | null>(null);
+
+  // Manual Membership Plan Change Modal (Super Admin)
+  const [changePlanModalOpen, setChangePlanModalOpen] = useState(false);
+  const [selectedPlanSlug, setSelectedPlanSlug] = useState('premium-match');
+  const [planReason, setPlanReason] = useState('');
+  const [customDays, setCustomDays] = useState('');
+  const [planChangeSubmitting, setPlanChangeSubmitting] = useState(false);
+  const [planChangeError, setPlanChangeError] = useState<string | null>(null);
 
   // Admin Note Input
   const [newNote, setNewNote] = useState('');
@@ -270,6 +296,40 @@ function AdminProfileDetailsContent() {
       showToast(err?.response?.data?.message || 'Failed to delete profile.', 'error');
     } finally {
       setDeleteSubmitting(false);
+    }
+  };
+
+  // Handler: Confirm Manual Membership Plan Change (Super Admin)
+  const handleConfirmPlanChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!planReason.trim() || planReason.trim().length < 5) {
+      setPlanChangeError('Please provide an audit reason of at least 5 characters.');
+      return;
+    }
+    setPlanChangeSubmitting(true);
+    setPlanChangeError(null);
+
+    try {
+      const targetUserId = data?.user?._id || (data?.user as any)?.id || (data as any)?.userId || profileId;
+      const payload: any = {
+        userId: targetUserId,
+        planId: selectedPlanSlug,
+        grantReason: planReason.trim(),
+      };
+      if (customDays && Number(customDays) > 0) {
+        payload.durationDays = Number(customDays);
+      }
+
+      await apiClient.post('/admin/subscriptions/grant-manual', payload);
+      showToast('Membership plan successfully updated.');
+      setChangePlanModalOpen(false);
+      setPlanReason('');
+      setCustomDays('');
+      await loadProfile();
+    } catch (err: any) {
+      setPlanChangeError(err?.response?.data?.message || 'Failed to update membership plan.');
+    } finally {
+      setPlanChangeSubmitting(false);
     }
   };
 
@@ -1242,7 +1302,9 @@ function AdminProfileDetailsContent() {
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Calculated Age</span>
-                <span className="font-bold text-slate-800">{data.age || '—'} Years</span>
+                <span className="font-bold text-slate-800">
+                  {data.age ? `${data.age} Years` : (data.dob ? `${calculateAge(data.dob)} Years` : '—')}
+                </span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Gender</span>
@@ -1289,7 +1351,9 @@ function AdminProfileDetailsContent() {
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Sub-Caste</span>
-                <span className="font-bold text-slate-800">{data.subCaste || data.communityDetails?.subCasteText || '—'}</span>
+                <span className="font-bold text-slate-800">
+                  {data.subCaste || data.communityDetails?.subCasteText || (typeof data.communityDetails?.subCasteId === 'object' ? data.communityDetails?.subCasteId?.name : null) || '—'}
+                </span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Gotra</span>
@@ -1319,7 +1383,7 @@ function AdminProfileDetailsContent() {
               <div className="p-4 bg-slate-50/70 rounded-xl border border-slate-100 space-y-2">
                 <span className="font-bold text-slate-900 uppercase text-[11px] block">Current Residence</span>
                 <p className="text-slate-800 font-semibold">{data.city}, {data.state}, {data.country}</p>
-                <p className="text-slate-500">Pincode: {data.currentLocation?.pincode || '—'}</p>
+                <p className="text-slate-500">Pincode: {(data as any).pincode || data.currentLocation?.pincode || data.nativePlaceDetails?.pincode || '—'}</p>
                 <p className="text-slate-600 text-[11px] leading-relaxed">
                   Full Formatted Address: {data.currentLocation?.formattedAddress || '—'}
                 </p>
@@ -1327,7 +1391,7 @@ function AdminProfileDetailsContent() {
 
               <div className="p-4 bg-slate-50/70 rounded-xl border border-slate-100 space-y-2">
                 <span className="font-bold text-slate-900 uppercase text-[11px] block">Native Place (Ancestral Origin)</span>
-                <p className="text-slate-800 font-semibold">{data.nativePlace || data.nativePlaceDetails?.formattedAddress || '—'}</p>
+                <p className="text-slate-800 font-semibold">{data.nativePlace || data.nativePlaceDetails?.formattedAddress || (data as any).familyDetails?.nativePlace || '—'}</p>
                 <p className="text-slate-500">
                   {data.nativePlaceDetails?.city ? `${data.nativePlaceDetails.city}, ${data.nativePlaceDetails.state}` : '—'}
                 </p>
@@ -1356,11 +1420,11 @@ function AdminProfileDetailsContent() {
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Pada / Charan</span>
-                <span className="font-bold text-slate-800">{data.horoscope?.pada || '—'}</span>
+                <span className="font-bold text-slate-800">{data.horoscope?.pada || (data.horoscope as any)?.charan || '—'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Lagna (Ascendant)</span>
-                <span className="font-bold text-slate-800">{data.horoscope?.lagna || '—'}</span>
+                <span className="font-bold text-slate-800">{data.horoscope?.lagna || (data.horoscope as any)?.ascendant || '—'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Manglik Status</span>
@@ -1837,10 +1901,25 @@ function AdminProfileDetailsContent() {
         <div className="space-y-5">
           {/* Active Plan Card */}
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-6 space-y-4">
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2 border-b pb-3">
-              <CreditCard className="w-4 h-4 text-purple-600" />
-              <span>Current Matrimonial Subscription</span>
-            </h3>
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-purple-600" />
+                <span>Current Matrimonial Subscription</span>
+              </h3>
+              {isSuperAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPlanChangeError(null);
+                    setChangePlanModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Change Plan Manually</span>
+                </button>
+              )}
+            </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
               <div className="p-3.5 bg-purple-50/50 rounded-xl border border-purple-100">
@@ -2510,59 +2589,12 @@ function AdminProfileDetailsContent() {
         </div>
       )}
 
-      {/* 6. Document Viewer Lightbox Modal */}
+      {/* 6. Authenticated Document Viewer Lightbox Modal */}
       {lightboxDoc && (
-        <div
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 sm:p-8"
-          onClick={() => setLightboxDoc(null)}
-        >
-          <div
-            className="bg-white rounded-2xl border border-slate-200 max-w-4xl w-full h-[85vh] flex flex-col overflow-hidden shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between p-4 border-b bg-slate-50">
-              <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-[#E51F3E]" />
-                <h3 className="font-bold text-slate-900 text-sm truncate max-w-md">{lightboxDoc.title}</h3>
-              </div>
-              <div className="flex items-center gap-2">
-                <a
-                  href={lightboxDoc.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Open Direct</span>
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setLightboxDoc(null)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 bg-slate-100 p-4 flex items-center justify-center overflow-auto">
-              {lightboxDoc.type.includes('image') ||
-              lightboxDoc.url.match(/\.(jpg|jpeg|png|webp)($|\?)/i) ? (
-                <img
-                  src={lightboxDoc.url}
-                  alt={lightboxDoc.title}
-                  className="max-w-full max-h-full object-contain rounded-xl shadow-md"
-                />
-              ) : (
-                <iframe
-                  src={lightboxDoc.url}
-                  title={lightboxDoc.title}
-                  className="w-full h-full rounded-xl border border-slate-200 bg-white"
-                />
-              )}
-            </div>
-          </div>
-        </div>
+        <AdminDocumentLightbox
+          doc={lightboxDoc}
+          onClose={() => setLightboxDoc(null)}
+        />
       )}
 
       {/* 7. Edit Profile Modal (Admin Protected Editing) */}
@@ -2576,6 +2608,293 @@ function AdminProfileDetailsContent() {
           await loadProfile();
         }}
       />
+
+      {/* 8. Super Admin Manual Membership Plan Change Modal */}
+      {changePlanModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => !planChangeSubmitting && setChangePlanModalOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 max-w-md w-full p-6 shadow-2xl space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <Crown className="w-5 h-5 text-amber-500" />
+                <h3 className="font-bold text-slate-900 text-base">Change Membership Plan</h3>
+              </div>
+              <button
+                type="button"
+                disabled={planChangeSubmitting}
+                onClick={() => setChangePlanModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {planChangeError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{planChangeError}</span>
+              </div>
+            )}
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Select New Plan *</label>
+                <select
+                  value={selectedPlanSlug}
+                  onChange={(e) => setSelectedPlanSlug(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-rose-500 font-medium"
+                >
+                  <option value="free">Free / Basic Profile (0 Contacts)</option>
+                  <option value="silver">Silver Doctor Plan (25 Contacts, 90 Days)</option>
+                  <option value="gold">Gold Doctor Plan (50 Contacts, 180 Days)</option>
+                  <option value="diamond">Diamond Super Plan (100 Contacts, 365 Days)</option>
+                  <option value="custom">Custom Plan</option>
+                </select>
+              </div>
+
+              {selectedPlanSlug === 'custom' && (
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Custom Duration (Days)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="1825"
+                    value={customDays}
+                    onChange={(e) => setCustomDays(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-rose-500 font-medium"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Audit Reason / Justification *</label>
+                <textarea
+                  rows={3}
+                  value={planReason}
+                  onChange={(e) => setPlanReason(e.target.value)}
+                  placeholder="e.g. VIP promotional upgrade requested by director, or complimentary extension approved by Super Admin."
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-rose-500 font-medium resize-none"
+                />
+              </div>
+
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-[11px] space-y-1">
+                <p className="font-bold flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Audit Trail Enforcement</span>
+                </p>
+                <p>
+                  This manual administrative action will be permanently recorded in the system audit logs with your acting administrator ID, previous plan, new plan, and reason.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={planChangeSubmitting}
+                onClick={() => setChangePlanModalOpen(false)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={planChangeSubmitting}
+                onClick={handleConfirmPlanChange}
+                className="px-4 py-2 rounded-xl bg-[#E51F3E] hover:bg-rose-700 text-white text-xs font-bold shadow-md transition cursor-pointer flex items-center gap-1.5"
+              >
+                {planChangeSubmitting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Updating Plan...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCheck className="w-4 h-4" />
+                    <span>Confirm Plan Change</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminDocumentLightbox({
+  doc,
+  onClose,
+}: {
+  doc: { url: string; title: string; type: string };
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [status, setStatus] = useState<'LOADING' | 'READY' | 'NOT_SUBMITTED' | 'UNAVAILABLE' | 'FORBIDDEN' | 'FAILED'>('LOADING');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    let createdUrl: string | null = null;
+
+    if (!doc.url || doc.url.trim() === '' || doc.url === '—') {
+      setStatus('NOT_SUBMITTED');
+      setLoading(false);
+      return;
+    }
+
+    const loadDoc = async () => {
+      try {
+        setLoading(true);
+        setStatus('LOADING');
+        // Fetch document through authenticated apiClient as a blob to preserve server authorization
+        const response = await apiClient.get(doc.url, {
+          responseType: 'blob',
+        });
+
+        if (!active) return;
+        const blob = new Blob([response.data], {
+          type: doc.type || (typeof response.headers['content-type'] === 'string' ? response.headers['content-type'] : 'application/pdf'),
+        });
+        createdUrl = URL.createObjectURL(blob);
+        setBlobUrl(createdUrl);
+        setStatus('READY');
+      } catch (err: any) {
+        if (!active) return;
+        const statusCode = err.response?.status;
+        if (statusCode === 403) {
+          setStatus('FORBIDDEN');
+          setErrorMessage('Access denied. You do not have the required administrative permissions to view private medical verification documents.');
+        } else if (statusCode === 404) {
+          setStatus('UNAVAILABLE');
+          setErrorMessage('This verification document is unavailable or was not found on the secure storage server.');
+        } else {
+          setStatus('FAILED');
+          setErrorMessage(err.message || 'Failed to securely preview the document.');
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    loadDoc();
+
+    return () => {
+      active = false;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
+    };
+  }, [doc.url, doc.type]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 sm:p-8"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl border border-slate-200 max-w-4xl w-full h-[85vh] flex flex-col overflow-hidden shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-4 border-b bg-slate-50">
+          <div className="flex items-center gap-2">
+            <FileText className="w-5 h-5 text-[#E51F3E]" />
+            <h3 className="font-bold text-slate-900 text-sm truncate max-w-md">{doc.title}</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            {status === 'READY' && blobUrl && (
+              <a
+                href={blobUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open in Tab</span>
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 bg-slate-100 p-4 flex items-center justify-center overflow-auto">
+          {loading && (
+            <div className="text-center p-8 space-y-3">
+              <div className="w-8 h-8 border-3 border-rose-500 border-t-transparent rounded-full animate-spin mx-auto" />
+              <p className="text-xs font-bold text-slate-600">Loading secure medical verification document...</p>
+            </div>
+          )}
+
+          {!loading && status === 'NOT_SUBMITTED' && (
+            <div className="text-center p-8 space-y-3 max-w-sm">
+              <div className="w-12 h-12 rounded-2xl bg-slate-200 text-slate-500 flex items-center justify-center mx-auto">
+                <FileX className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-bold text-slate-800">No Document Submitted</p>
+              <p className="text-xs text-slate-500">The candidate has not submitted any file for this verification category.</p>
+            </div>
+          )}
+
+          {!loading && status === 'UNAVAILABLE' && (
+            <div className="text-center p-8 space-y-3 max-w-sm">
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-bold text-slate-800">Document Unavailable</p>
+              <p className="text-xs text-slate-500">{errorMessage || 'The document file is not accessible on the server.'}</p>
+            </div>
+          )}
+
+          {!loading && status === 'FORBIDDEN' && (
+            <div className="text-center p-8 space-y-3 max-w-sm">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center mx-auto">
+                <Lock className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-bold text-slate-800">Permission Denied</p>
+              <p className="text-xs text-slate-500">{errorMessage}</p>
+            </div>
+          )}
+
+          {!loading && status === 'FAILED' && (
+            <div className="text-center p-8 space-y-3 max-w-sm">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center mx-auto">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-bold text-slate-800">Preview Failed</p>
+              <p className="text-xs text-slate-500">{errorMessage}</p>
+            </div>
+          )}
+
+          {!loading && status === 'READY' && blobUrl && (
+            doc.type.includes('image') || doc.url.match(/\.(jpg|jpeg|png|webp)($|\?)/i) ? (
+              <img
+                src={blobUrl}
+                alt={doc.title}
+                className="max-w-full max-h-full object-contain rounded-xl shadow-md"
+              />
+            ) : (
+              <iframe
+                src={blobUrl}
+                title={doc.title}
+                className="w-full h-full rounded-xl border border-slate-200 bg-white"
+              />
+            )
+          )}
+        </div>
+      </div>
     </div>
   );
 }

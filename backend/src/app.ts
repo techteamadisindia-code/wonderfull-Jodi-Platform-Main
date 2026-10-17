@@ -1,3 +1,4 @@
+import './config/env';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -567,6 +568,11 @@ app.use(
 
 app.use(
   '/api/verifications',
+  verificationRoutes
+);
+
+app.use(
+  '/api/verification',
   verificationRoutes
 );
 

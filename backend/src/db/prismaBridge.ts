@@ -11,6 +11,25 @@ export interface QueryOptions {
 }
 
 /**
+ * Whitelist of auxiliary, non-security-critical delegates where a missing table (P2021)
+ * is explicitly justified to degrade gracefully to empty results without compromising
+ * authentication, authorization, eligibility, billing, messaging, or security boundaries.
+ */
+export const JUSTIFIED_AUXILIARY_MISSING_TABLE_DELEGATES = new Set<string>([
+  'dailyUserVisit',
+  'visitLog',
+  'searchHistory',
+  'siteConfig',
+  'testimonial',
+  'faq',
+  'jobApplication',
+  'jobOpening',
+  'award',
+  'blogPost',
+]);
+
+
+/**
  * Unescapes regex special characters for Prisma string queries.
  */
 function unescapeRegexPattern(str: string): string {
@@ -1155,6 +1174,11 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
 
     const formatRecord = (rec: any) => {
       if (!rec) return rec;
+      if (this.delegateName === 'profile') {
+        if (rec.user === undefined && rec.userId !== undefined) {
+          rec.user = rec.userId;
+        }
+      }
       if (this.delegateName === 'conversation' && Array.isArray(rec.participants)) {
         if (this.populateParticipants) {
           rec.participants = rec.participants.map((cp: any) =>
@@ -1194,16 +1218,25 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
         return clientRecords as unknown as T;
       }
     } catch (err: any) {
-      if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
-        if (this.delegateName === 'block') {
-          console.error(
-            `[PrismaBridge] CRITICAL: Schema error on security-critical delegate 'block'. Failing closed to protect block boundaries:`,
-            err.message
-          );
-          throw err;
-        }
+      // 1. Security-critical delegate 'block' must ALWAYS fail closed (never swallow errors or return empty results)
+      if (this.delegateName === 'block') {
+        console.error(
+          `[PrismaBridge] CRITICAL: Schema error on security-critical delegate 'block'. Failing closed to protect block boundaries:`,
+          err.message
+        );
+        throw err;
+      }
+
+      // 2. Only strictly allow missing-table (P2021) fallbacks for explicitly justified auxiliary delegates.
+      // Do NOT swallow P2022 (unknown column), 'Unknown column', or 'Unknown arg' for ANY delegate.
+      // Propagate unexpected schema errors so controllers can handle them safely.
+      const isMissingTable =
+        err.code === 'P2021' ||
+        (err.message && err.message.includes('does not exist in the current database') && !err.message.includes('column'));
+
+      if (isMissingTable && JUSTIFIED_AUXILIARY_MISSING_TABLE_DELEGATES.has(this.delegateName)) {
         console.warn(
-          `[PrismaBridge] Missing table encountered for delegate '${this.delegateName}' (P2021). Returning empty fallback result.`
+          `[PrismaBridge] Missing auxiliary table for delegate '${this.delegateName}' (P2021). Returning empty fallback result.`
         );
         return (this.isFindOne ? null : []) as unknown as T;
       }
@@ -1819,11 +1852,14 @@ export function createPrismaModelAdapter<T = any>(
       const where = normalizeFilter(filter, fieldMap);
       return await delegate.count({ where });
     } catch (err: any) {
-      if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
-        if (String(delegateName) === 'block') {
-          throw err;
-        }
-        console.warn(`[PrismaBridge] Table for delegate '${String(delegateName)}' does not exist yet. Returning 0 count.`);
+      if (String(delegateName) === 'block') {
+        throw err;
+      }
+      const isMissingTable =
+        err.code === 'P2021' ||
+        (err.message && err.message.includes('does not exist in the current database') && !err.message.includes('column'));
+      if (isMissingTable && JUSTIFIED_AUXILIARY_MISSING_TABLE_DELEGATES.has(String(delegateName))) {
+        console.warn(`[PrismaBridge] Table for auxiliary delegate '${String(delegateName)}' does not exist yet. Returning 0 count.`);
         return 0;
       }
       throw err;
@@ -1835,11 +1871,14 @@ export function createPrismaModelAdapter<T = any>(
       const count = await this.countDocuments(filter);
       return count > 0 ? { _id: true } : null;
     } catch (err: any) {
-      if (err.code === 'P2021' || (err.message && err.message.includes('does not exist in the current database'))) {
-        if (String(delegateName) === 'block') {
-          throw err;
-        }
-        console.warn(`[PrismaBridge] Table for delegate '${String(delegateName)}' does not exist yet. Returning null for exists.`);
+      if (String(delegateName) === 'block') {
+        throw err;
+      }
+      const isMissingTable =
+        err.code === 'P2021' ||
+        (err.message && err.message.includes('does not exist in the current database') && !err.message.includes('column'));
+      if (isMissingTable && JUSTIFIED_AUXILIARY_MISSING_TABLE_DELEGATES.has(String(delegateName))) {
+        console.warn(`[PrismaBridge] Table for auxiliary delegate '${String(delegateName)}' does not exist yet. Returning null for exists.`);
         return null;
       }
       throw err;

@@ -35,7 +35,7 @@ import {
   Crown,
 } from 'lucide-react';
 import { formatHeightDisplay } from '../../../lib/doctorConstants';
-import { addShortlist, removeShortlist, getAuthToken, getMyProfile } from '../../../lib/api';
+import { addShortlist, removeShortlist, getShortlisted, getAuthToken, getMyProfile } from '../../../lib/api';
 import apiClient from '../../../services/api';
 import { fetchMySubscription, UserSubscriptionDetails } from '../../../services/membershipApi';
 import {
@@ -89,6 +89,7 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isShortlisted, setIsShortlisted] = useState(false);
+  const [shortlistLoading, setShortlistLoading] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState<string>('');
   
   // Real Database Interest & Chat State
@@ -157,11 +158,12 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
             if (isOwn) {
               setIsMyOwnProfile(true);
             } else {
-              const [statusRes, accessRes, blockedRes, subRes] = await Promise.all([
+              const [statusRes, accessRes, blockedRes, subRes, shortlistedList] = await Promise.all([
                 checkInterestStatus(id).catch(() => null),
                 fetchContactAccessStatus(id).catch(() => null),
                 fetchBlockedProfiles().catch(() => []),
                 fetchMySubscription().catch(() => null),
+                getShortlisted().catch(() => []),
               ]);
               if (statusRes) setInterestStatus(statusRes);
               if (accessRes) setContactAccess(accessRes);
@@ -180,6 +182,20 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                     String(b.blockedUser?._id) === String(targetUserId)
                 );
                 setIsBlocked(blocked);
+              }
+              if (Array.isArray(shortlistedList)) {
+                const targetProfileId = String(profileData._id || id);
+                const targetCandidateId = profileData.candidateId ? String(profileData.candidateId) : null;
+                const isItemShortlisted = shortlistedList.some((item: any) => {
+                  const pId = String(item.profile?._id || item.profile?.id || item.profile || '');
+                  const cId = item.profile?.candidateId ? String(item.profile.candidateId) : null;
+                  return (
+                    pId === targetProfileId ||
+                    pId === String(id) ||
+                    (targetCandidateId && (cId === targetCandidateId || pId === targetCandidateId))
+                  );
+                });
+                setIsShortlisted(isItemShortlisted);
               }
             }
           } catch {
@@ -317,24 +333,38 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
   };
 
   const handleShortlist = async () => {
-    if (!profile?._id) return;
+    if (!profile?._id || shortlistLoading) return;
     const token = getAuthToken();
     if (!token) {
       router.push(`/login?redirect=/profile/${id}`);
       return;
     }
 
+    setShortlistLoading(true);
     const nextState = !isShortlisted;
-    setIsShortlisted(nextState);
 
     try {
       if (nextState) {
         await addShortlist(profile._id);
+        setIsShortlisted(true);
+        setFeedbackMessage({ text: 'Profile added to your shortlist.', type: 'success' });
       } else {
         await removeShortlist(profile._id);
+        setIsShortlisted(false);
+        setFeedbackMessage({ text: 'Profile removed from your shortlist.', type: 'success' });
       }
-    } catch (e) {
-      console.error('Error updating shortlist:', e);
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.message || err.message || '';
+      const errorCode = err.response?.data?.code || '';
+      if (errorCode === 'ALREADY_SHORTLISTED' || /already shortlisted/i.test(errorMsg)) {
+        setIsShortlisted(true);
+        setFeedbackMessage({ text: 'This profile is already in your shortlist.', type: 'success' });
+      } else {
+        console.error('Error updating shortlist:', err);
+        setFeedbackMessage({ text: errorMsg || 'Unable to update shortlist.', type: 'error' });
+      }
+    } finally {
+      setShortlistLoading(false);
     }
   };
 
@@ -431,6 +461,7 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
 
   // ── Send Express Interest ──
   const handleSendInterest = async () => {
+    if (interestActionLoading) return;
     const token = getAuthToken();
     if (!token) {
       router.push(`/login?redirect=/profile/${id}`);
@@ -926,15 +957,16 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
 
                 <button
                   type="button"
+                  disabled={shortlistLoading}
                   onClick={handleShortlist}
-                  className={`inline-flex items-center justify-center gap-2 rounded-full border px-5 py-3 text-xs sm:text-sm font-bold transition cursor-pointer ${
+                  className={`inline-flex items-center justify-center gap-2 rounded-full border px-5 py-3 text-xs sm:text-sm font-bold transition cursor-pointer disabled:opacity-50 ${
                     isShortlisted
                       ? 'bg-rose-50 border-rose-300 text-[#E51F3E]'
                       : 'border-slate-200 bg-white text-slate-700 hover:border-rose-200 hover:bg-rose-50/50'
                   }`}
                 >
                   <Sparkles className="w-4 h-4 text-[#E51F3E]" />
-                  <span>{isShortlisted ? 'Shortlisted' : 'Shortlist Profile'}</span>
+                  <span>{shortlistLoading ? 'Updating...' : (isShortlisted ? 'Shortlisted' : 'Shortlist Profile')}</span>
                 </button>
 
                 {/* Safety Actions: Block & Report */}

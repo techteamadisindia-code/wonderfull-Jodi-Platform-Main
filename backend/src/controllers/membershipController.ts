@@ -537,33 +537,37 @@ export interface RazorpayCredentials {
 export function getRazorpayCredentials(envSource: Record<string, string | undefined> = process.env): RazorpayCredentials {
   const keyId = (
     envSource.RAZORPAY_KEY_ID ||
-    envSource.RAZORPAY_KEY ||
     envSource.RAPIDPAY_KEY_ID ||
+    envSource.RAZORPAY_KEY ||
     ''
   ).trim();
 
   // Secret must remain strictly server-side (never read from NEXT_PUBLIC_*)
   const keySecret = (
     envSource.RAZORPAY_KEY_SECRET ||
-    envSource.RAZORPAY_SECRET ||
     envSource.RAPIDPAY_KEY_SECRET ||
+    envSource.RAZORPAY_SECRET ||
     ''
   ).trim();
 
   const isPlaceholderKey =
     !keyId ||
     keyId === 'rzp_test_mock' ||
-    keyId.includes('your_actual_key_id') ||
-    keyId.includes('YOUR_ACTUAL_KEY_ID') ||
-    keyId.includes('YOUR_KEY_ID') ||
+    keyId.toLowerCase().includes('your_actual_key_id') ||
+    keyId.toLowerCase().includes('your_key_id') ||
+    keyId.toLowerCase().includes('placeholder') ||
+    keyId.toLowerCase().includes('change_me') ||
+    keyId.toLowerCase().includes('dummy') ||
     keyId === 'rzp_live_your_actual_key_id';
 
   const isPlaceholderSecret =
     !keySecret ||
     keySecret === 'rzp_secret_mock' ||
-    keySecret.includes('your_actual_key_secret') ||
-    keySecret.includes('YOUR_ACTUAL_KEY_SECRET') ||
-    keySecret.includes('YOUR_KEY_SECRET');
+    keySecret.toLowerCase().includes('your_actual_key_secret') ||
+    keySecret.toLowerCase().includes('your_key_secret') ||
+    keySecret.toLowerCase().includes('placeholder') ||
+    keySecret.toLowerCase().includes('change_me') ||
+    keySecret.toLowerCase().includes('dummy');
 
   const isConfigured = Boolean(keyId && keySecret && !isPlaceholderKey && !isPlaceholderSecret);
   const isLiveGateway = Boolean(isConfigured && keyId.startsWith('rzp_'));

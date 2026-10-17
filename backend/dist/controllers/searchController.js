@@ -25,11 +25,16 @@ async function searchProfiles(req, res, next) {
                 const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026');
                 if (decoded?.userId || decoded?.id) {
                     currentUserId = decoded.userId || decoded.id;
-                    // Find users blocked by or who blocked current user
-                    const blocks = await Block_1.Block.find({
-                        $or: [{ blocker: currentUserId }, { blockedUser: currentUserId }],
-                    });
-                    blockedUserIds = blocks.map((b) => b.blocker.toString() === currentUserId ? b.blockedUser.toString() : b.blocker.toString());
+                    try {
+                        // Find users blocked by or who blocked current user
+                        const blocks = await Block_1.Block.find({
+                            $or: [{ blocker: currentUserId }, { blockedUser: currentUserId }],
+                        });
+                        blockedUserIds = blocks.map((b) => b.blocker.toString() === currentUserId ? b.blockedUser.toString() : b.blocker.toString());
+                    }
+                    catch (blockErr) {
+                        console.warn('[SearchController] Non-fatal block query warning:', blockErr?.message);
+                    }
                 }
             }
             catch {

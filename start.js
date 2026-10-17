@@ -15,13 +15,26 @@ const path = require('path');
 const fs = require('fs');
 
 const initialPort = process.env.PORT;
-// Load environment variables if backend/.env is present (for local testing)
-const backendEnvPath = path.join(__dirname, 'backend', '.env');
-if (fs.existsSync(backendEnvPath)) {
-  try {
-    require('dotenv').config({ path: backendEnvPath });
-  } catch (e) {
-    // dotenv optional
+const isStagingMode = process.env.NODE_ENV === 'staging' || process.env.STAGING_MODE === 'true';
+
+if (isStagingMode) {
+  const stagingEnvPath = path.join(__dirname, 'backend', '.env.staging');
+  if (fs.existsSync(stagingEnvPath)) {
+    try {
+      require('dotenv').config({ path: stagingEnvPath });
+    } catch (e) {
+      // dotenv optional
+    }
+  }
+} else {
+  // Load environment variables if backend/.env is present (for local testing / production)
+  const backendEnvPath = path.join(__dirname, 'backend', '.env');
+  if (fs.existsSync(backendEnvPath)) {
+    try {
+      require('dotenv').config({ path: backendEnvPath });
+    } catch (e) {
+      // dotenv optional
+    }
   }
 }
 

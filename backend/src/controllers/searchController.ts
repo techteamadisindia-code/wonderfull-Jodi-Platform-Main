@@ -65,13 +65,17 @@ export async function searchProfiles(req: Request, res: Response, next: NextFunc
         if (decoded?.userId || decoded?.id) {
           currentUserId = decoded.userId || decoded.id;
 
-          // Find users blocked by or who blocked current user
-          const blocks = await Block.find({
-            $or: [{ blocker: currentUserId }, { blockedUser: currentUserId }],
-          });
-          blockedUserIds = blocks.map((b) =>
-            b.blocker.toString() === currentUserId ? b.blockedUser.toString() : b.blocker.toString()
-          );
+          try {
+            // Find users blocked by or who blocked current user
+            const blocks = await Block.find({
+              $or: [{ blocker: currentUserId }, { blockedUser: currentUserId }],
+            });
+            blockedUserIds = blocks.map((b) =>
+              b.blocker.toString() === currentUserId ? b.blockedUser.toString() : b.blocker.toString()
+            );
+          } catch (blockErr: any) {
+            console.warn('[SearchController] Non-fatal block query warning:', blockErr?.message);
+          }
         }
       } catch {
         // Continue unauthenticated

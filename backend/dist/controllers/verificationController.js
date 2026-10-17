@@ -236,7 +236,8 @@ async function getUserVerificationById(req, res, next) {
         const requesterId = String(req.user?.userId || req.user?.id || '');
         const ownerId = getVerificationOwnerId(verification);
         const isOwner = Boolean(requesterId && ownerId && requesterId === ownerId);
-        const isAdmin = Boolean(req.user && req.user.role === 'admin');
+        const isAdmin = Boolean(req.user &&
+            (req.user.role === 'admin' || req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN'));
         if (!isOwner && !isAdmin) {
             return res.status(403).json({ success: false, message: 'Access forbidden: You do not own this document.' });
         }
@@ -282,7 +283,8 @@ async function serveVerificationDocument(req, res, next) {
         const requesterId = String(req.user?.userId || req.user?.id || '');
         const ownerId = getVerificationOwnerId(verification);
         const isOwner = Boolean(requesterId && ownerId && requesterId === ownerId);
-        const isAdmin = Boolean(req.user && req.user.role === 'admin');
+        const isAdmin = Boolean(req.user &&
+            (req.user.role === 'admin' || req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN'));
         if (!isOwner && !isAdmin) {
             return res.status(403).json({
                 success: false,
@@ -294,11 +296,12 @@ async function serveVerificationDocument(req, res, next) {
         if (!filePath || !fs_1.default.existsSync(filePath)) {
             return res.status(404).json({ success: false, message: 'Document file is missing on storage.' });
         }
-        // 5. Set secure headers: private/no-store caching, strict CSP, and verified Content-Type
+        // 5. Set secure headers: private/no-store caching, iframe-friendly strict CSP, inline disposition, and verified Content-Type
         const contentType = getDocumentContentType(safeFilename, verification.fileType);
         res.setHeader('Content-Type', contentType);
         res.setHeader('X-Content-Type-Options', 'nosniff');
-        res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
+        res.setHeader('Content-Security-Policy', "default-src 'self' blob: data:; style-src 'unsafe-inline'; frame-ancestors 'self'");
+        res.setHeader('Content-Disposition', `inline; filename="${safeFilename}"`);
         res.setHeader('Cache-Control', 'private, no-store');
         // 6. Stream file with error handling to avoid unhandled stream errors
         const fileStream = fs_1.default.createReadStream(filePath);

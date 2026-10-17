@@ -38,8 +38,11 @@ async function resolveTargetUserId(body) {
     }
     // 1. Resolve canonical profile (handles candidateId like WJ-100092, profile _id, legacy WJ-[hex])
     const profile = await (0, profileController_1.findCanonicalProfile)(rawId);
-    if (profile && profile.user) {
-        return String(profile.user._id || profile.user.id || profile.user);
+    if (profile) {
+        const u = profile.user || profile.userId;
+        if (u) {
+            return String(u._id || u.id || u);
+        }
     }
     // 2. Direct User lookup if rawId matches ObjectId or UUID format
     if ((0, securityUtils_1.isValidObjectId)(rawId) || /^[0-9a-fA-F]{24}$/.test(rawId) || /^[A-Za-z0-9_-]{20,36}$/.test(rawId)) {
@@ -86,13 +89,23 @@ async function createInterest(req, res, next) {
             }
         }
         // Free members can send interests freely without paid restrictions
-        // Verify no block relationship
-        const isBlocked = await Block_1.Block.findOne({
-            $or: [
-                { blocker: senderUserId, blockedUser: targetUserId },
-                { blocker: targetUserId, blockedUser: senderUserId },
-            ],
-        });
+        // Verify no block relationship (fail-closed: do not continue if block check fails)
+        let isBlocked = null;
+        try {
+            isBlocked = await Block_1.Block.findOne({
+                $or: [
+                    { blocker: senderUserId, blockedUser: targetUserId },
+                    { blocker: targetUserId, blockedUser: senderUserId },
+                ],
+            });
+        }
+        catch (blockErr) {
+            console.error('[Interest] Block verification failed (database/schema error):', blockErr?.message);
+            return res.status(503).json({
+                success: false,
+                message: 'Unable to verify member eligibility at this time. Please try again later.',
+            });
+        }
         if (isBlocked) {
             return res.status(403).json({ success: false, message: 'Cannot send interest to this member' });
         }

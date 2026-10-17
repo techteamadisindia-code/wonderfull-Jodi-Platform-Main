@@ -1,5 +1,7 @@
+import '../config/env';
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
+import { assertStagingIsolation } from '../utils/stagingGuard';
 
 // Singleton instance of PrismaClient
 declare global {
@@ -28,6 +30,9 @@ function getOptimizedDatabaseUrl(): string | undefined {
     return rawUrl;
   }
 }
+
+// Fail-closed staging isolation check before Prisma client initialization
+assertStagingIsolation();
 
 const dbUrl = getOptimizedDatabaseUrl();
 

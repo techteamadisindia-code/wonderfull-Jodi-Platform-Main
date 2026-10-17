@@ -20,13 +20,25 @@ async function addShortlist(req, res, next) {
         if (!profileExists) {
             return res.status(404).json({ success: false, message: 'Profile not found' });
         }
+        // Prevent self-shortlisting: resolve target profile to canonical user ID
+        const targetUserId = String(profileExists.user?._id ||
+            profileExists.user?.id ||
+            (typeof profileExists.user === 'string' ? profileExists.user : '') ||
+            profileExists.userId ||
+            '');
+        if (targetUserId && String(userId) === targetUserId) {
+            return res.status(400).json({
+                success: false,
+                message: 'You cannot shortlist your own profile',
+            });
+        }
         const canonicalProfileId = String(profileExists._id || profileExists.id);
         const existing = await Shortlist_1.Shortlist.findOne({
             user: userId,
             $or: [{ profile: canonicalProfileId }, { profile: rawProfileId }],
         });
         if (existing) {
-            return res.status(400).json({ success: false, message: 'Profile already shortlisted' });
+            return res.status(400).json({ success: false, code: 'ALREADY_SHORTLISTED', message: 'Profile already shortlisted' });
         }
         const shortlist = await Shortlist_1.Shortlist.create({ user: userId, profile: canonicalProfileId });
         res.status(201).json({ success: true, data: shortlist });

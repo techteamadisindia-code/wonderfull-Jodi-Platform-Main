@@ -149,13 +149,22 @@ export async function sendMessage(req: AuthRequest, res: Response, next: NextFun
       });
     }
 
-    // Check if blocked
-    const isBlocked = await Block.findOne({
-      $or: [
-        { blocker: senderId, blockedUser: actualReceiverId },
-        { blocker: actualReceiverId, blockedUser: senderId },
-      ],
-    });
+    // Check if blocked (fail-closed for security)
+    let isBlocked = null;
+    try {
+      isBlocked = await Block.findOne({
+        $or: [
+          { blocker: senderId, blockedUser: actualReceiverId },
+          { blocker: actualReceiverId, blockedUser: senderId },
+        ],
+      });
+    } catch (blockErr: any) {
+      console.error('[MessageController] Block verification failed (database/schema error):', blockErr?.message);
+      return res.status(503).json({
+        success: false,
+        message: 'Unable to verify messaging permissions at this time. Please try again later.',
+      });
+    }
     if (isBlocked) {
       return res.status(403).json({
         success: false,

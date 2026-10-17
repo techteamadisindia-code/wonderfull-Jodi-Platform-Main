@@ -22,13 +22,29 @@ export async function addShortlist(req: AuthRequest, res: Response, next: NextFu
       return res.status(404).json({ success: false, message: 'Profile not found' });
     }
 
+    // Prevent self-shortlisting: resolve target profile to canonical user ID
+    const targetUserId = String(
+      profileExists.user?._id ||
+      profileExists.user?.id ||
+      (typeof profileExists.user === 'string' ? profileExists.user : '') ||
+      (profileExists as any).userId ||
+      ''
+    );
+
+    if (targetUserId && String(userId) === targetUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot shortlist your own profile',
+      });
+    }
+
     const canonicalProfileId = String(profileExists._id || profileExists.id);
     const existing = await Shortlist.findOne({
       user: userId,
       $or: [{ profile: canonicalProfileId }, { profile: rawProfileId }],
     });
     if (existing) {
-      return res.status(400).json({ success: false, message: 'Profile already shortlisted' });
+      return res.status(400).json({ success: false, code: 'ALREADY_SHORTLISTED', message: 'Profile already shortlisted' });
     }
 
     const shortlist = await Shortlist.create({ user: userId, profile: canonicalProfileId });

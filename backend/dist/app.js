@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.registerNextHandler = registerNextHandler;
+require("./config/env");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
@@ -406,6 +407,7 @@ app.use('/api/messages', messageRoutes_1.default);
 app.use('/api/conversations', messageRoutes_1.default);
 app.use('/api/upload', uploadRoutes_1.default);
 app.use('/api/verifications', verificationRoutes_1.default);
+app.use('/api/verification', verificationRoutes_1.default);
 app.use('/api/search', searchRoutes_1.default);
 app.use('/api/matches', searchRoutes_1.default);
 app.use('/api/interests', interestRoutes_1.default);

@@ -50,6 +50,10 @@ import {
   rejectVerification,
 } from '../../../services/verificationApi';
 
+function getAuthenticatedDocUrl(url?: string): string {
+  return url || '';
+}
+
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1254,7 +1258,7 @@ export default function AdminDashboardPage() {
               <div className="min-h-[280px] max-h-[420px] bg-slate-100 rounded-2xl border border-slate-200/80 flex flex-col items-center justify-center p-4 overflow-hidden relative">
                 {previewDoc.documentUrl ? (
                   <img
-                    src={previewDoc.documentUrl}
+                    src={getAuthenticatedDocUrl(previewDoc.documentUrl)}
                     alt={previewDoc.documentType}
                     className="max-h-[380px] w-auto max-w-full object-contain rounded-lg shadow-sm"
                     onError={(e) => {
@@ -1272,7 +1276,7 @@ export default function AdminDashboardPage() {
 
               <div className="flex items-center justify-between pt-2">
                 <a
-                  href={previewDoc.documentUrl}
+                  href={getAuthenticatedDocUrl(previewDoc.documentUrl)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition"

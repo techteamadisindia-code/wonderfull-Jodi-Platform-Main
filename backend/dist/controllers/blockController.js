@@ -16,8 +16,10 @@ async function resolveTargetUserId(idOrProfileId) {
         return null;
     // 1. Check canonical profile resolution (handles candidateId like WJ-100092, profile _id, legacy WJ-[hex])
     const profile = await (0, profileController_1.findCanonicalProfile)(rawId);
-    if (profile && profile.user) {
-        return String(profile.user._id || profile.user.id || profile.user);
+    if (profile) {
+        const u = profile.user || profile.userId;
+        if (u)
+            return String(u._id || u.id || u);
     }
     // 2. Direct User lookup if rawId matches ObjectId or UUID format
     if ((0, securityUtils_1.isValidObjectId)(rawId) || /^[0-9a-fA-F]{24}$/.test(rawId) || /^[A-Za-z0-9_-]{20,36}$/.test(rawId)) {
@@ -45,7 +47,17 @@ async function blockUser(req, res, next) {
         if (String(userId) === String(resolvedUserId)) {
             return res.status(400).json({ success: false, message: 'You cannot block your own profile' });
         }
-        const block = await Block_1.Block.findOneAndUpdate({ blocker: userId, blockedUser: resolvedUserId }, { blocker: userId, blockedUser: resolvedUserId, reason: (reason || '').trim().slice(0, 500) }, { upsert: true, new: true });
+        let block = null;
+        try {
+            block = await Block_1.Block.findOneAndUpdate({ blocker: userId, blockedUser: resolvedUserId }, { blocker: userId, blockedUser: resolvedUserId, reason: (reason || '').trim().slice(0, 500) }, { upsert: true, new: true });
+        }
+        catch (blockDbErr) {
+            console.error('[BlockController] Error blocking user (table schema error):', blockDbErr?.message);
+            return res.status(503).json({
+                success: false,
+                message: 'Profile blocking service is currently unavailable. Please contact support.',
+            });
+        }
         res.status(201).json({ success: true, message: 'Profile blocked successfully', data: block });
     }
     catch (error) {
@@ -66,7 +78,17 @@ async function unblockUser(req, res, next) {
         if (!resolvedUserId) {
             return res.status(404).json({ success: false, message: 'User or profile not found' });
         }
-        const block = await Block_1.Block.findOneAndDelete({ blocker: userId, blockedUser: resolvedUserId });
+        let block = null;
+        try {
+            block = await Block_1.Block.findOneAndDelete({ blocker: userId, blockedUser: resolvedUserId });
+        }
+        catch (unblockDbErr) {
+            console.error('[BlockController] Error unblocking user (table schema error):', unblockDbErr?.message);
+            return res.status(503).json({
+                success: false,
+                message: 'Profile unblocking service is currently unavailable. Please contact support.',
+            });
+        }
         if (!block) {
             return res.status(404).json({ success: false, message: 'Blocked record not found' });
         }
@@ -82,17 +104,29 @@ async function getBlockedUsers(req, res, next) {
         if (!userId) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
-        const blocks = await Block_1.Block.find({ blocker: userId })
-            .sort({ createdAt: -1 })
-            .populate('blockedUser', 'fullName email verificationStatus isActive')
-            .lean();
+        let blocks = [];
+        try {
+            blocks = await Block_1.Block.find({ blocker: userId })
+                .sort({ createdAt: -1 })
+                .populate('blockedUser', 'fullName email verificationStatus isActive')
+                .lean();
+        }
+        catch (dbErr) {
+            console.error('[BlockController] Error fetching blocked users (database/schema error):', dbErr?.message);
+            return res.status(503).json({
+                success: false,
+                message: 'Blocked profiles list is temporarily unavailable. Please try again later.',
+            });
+        }
         const blockedUserIds = blocks.map((b) => b.blockedUser?._id).filter(Boolean);
         const profiles = await Profile_1.Profile.find({ user: { $in: blockedUserIds } })
             .select('user displayName primaryPhoto photos education degree profession city state verificationStatus')
             .lean();
         const profileMap = new Map();
         profiles.forEach((p) => {
-            profileMap.set(String(p.user), p);
+            const u = p.user ? String(p.user._id || p.user.id || p.user) : String(p.userId || '');
+            if (u)
+                profileMap.set(u, p);
         });
         const enrichedBlocks = blocks.map((b) => {
             const uId = b.blockedUser?._id ? String(b.blockedUser._id) : null;

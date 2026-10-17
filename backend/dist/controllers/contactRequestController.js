@@ -15,6 +15,8 @@ const Subscription_1 = require("../models/Subscription");
 const User_1 = require("../models/User");
 const Profile_1 = require("../models/Profile");
 const Notification_1 = require("../models/Notification");
+const Block_1 = require("../models/Block");
+const securityUtils_1 = require("../utils/securityUtils");
 const profileController_1 = require("./profileController");
 /**
  * 1. POST /api/contact-requests
@@ -27,29 +29,33 @@ async function createContactRequest(req, res, next) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
         const { recipientId, profileId, targetUserId: explicitTargetUserId, message } = req.body;
-        let targetUserId = recipientId || explicitTargetUserId || null;
-        // If profileId provided, resolve user from Profile (supports candidate ID or Profile ID)
-        if (!targetUserId && profileId) {
-            const resolvedProfile = await (0, profileController_1.findCanonicalProfile)(String(profileId).trim());
-            if (!resolvedProfile) {
-                return res.status(404).json({ success: false, message: 'Profile not found' });
-            }
-            targetUserId = String(resolvedProfile.user?._id || resolvedProfile.user?.id || resolvedProfile.user);
-        }
-        else if (targetUserId) {
-            // If recipientId is a candidate ID or profile ID, resolve via canonical profile
-            const resolvedProfile = await (0, profileController_1.findCanonicalProfile)(String(targetUserId).trim());
-            if (resolvedProfile && resolvedProfile.user) {
-                targetUserId = String(resolvedProfile.user?._id || resolvedProfile.user?.id || resolvedProfile.user);
-            }
-        }
-        if (!targetUserId) {
+        const rawTarget = (recipientId || explicitTargetUserId || profileId || '').trim();
+        if (!rawTarget) {
             return res.status(400).json({
                 success: false,
                 message: 'Recipient ID or Profile ID is required to request contact.',
             });
         }
-        if (!prismaBridge_1.default.Types.ObjectId.isValid(targetUserId)) {
+        let targetUserId = null;
+        // 1. Resolve via canonical profile (supports candidate ID like WJ-100092, profile _id, or legacy WJ-[hex])
+        const resolvedProfile = await (0, profileController_1.findCanonicalProfile)(rawTarget);
+        if (resolvedProfile) {
+            const u = resolvedProfile.user || resolvedProfile.userId;
+            if (u) {
+                targetUserId = String(u._id || u.id || u);
+            }
+        }
+        // 2. Direct User lookup if rawTarget is an ObjectId or UUID format
+        if (!targetUserId && ((0, securityUtils_1.isValidObjectId)(rawTarget) || /^[0-9a-fA-F]{24}$/.test(rawTarget) || /^[0-9a-fA-F-]{36}$/.test(rawTarget))) {
+            const directUser = await User_1.User.findById(rawTarget).select('_id');
+            if (directUser) {
+                targetUserId = String(directUser._id || directUser.id);
+            }
+        }
+        if (!targetUserId) {
+            if (!resolvedProfile && (rawTarget.startsWith('WJ-') || rawTarget.startsWith('wj-'))) {
+                return res.status(404).json({ success: false, message: 'Profile not found' });
+            }
             return res.status(400).json({ success: false, message: 'Invalid recipient ID' });
         }
         if (requesterId.toString() === targetUserId.toString()) {
@@ -61,6 +67,29 @@ async function createContactRequest(req, res, next) {
         const recipientUser = await User_1.User.findById(targetUserId);
         if (!recipientUser) {
             return res.status(404).json({ success: false, message: 'Member account not found' });
+        }
+        if (recipientUser.isBlocked || recipientUser.status === 'SUSPENDED' || recipientUser.status === 'DELETED') {
+            return res.status(404).json({ success: false, message: 'Member account not found or inactive' });
+        }
+        // Fail-closed block check: do not allow contact requests if blocked or if block query fails
+        let isBlocked = null;
+        try {
+            isBlocked = await Block_1.Block.findOne({
+                $or: [
+                    { blocker: requesterId, blockedUser: targetUserId },
+                    { blocker: targetUserId, blockedUser: requesterId },
+                ],
+            });
+        }
+        catch (blockErr) {
+            console.error('[ContactRequest] Block verification failed (database/schema error):', blockErr?.message);
+            return res.status(503).json({
+                success: false,
+                message: 'Unable to verify member eligibility at this time. Please try again later.',
+            });
+        }
+        if (isBlocked) {
+            return res.status(403).json({ success: false, message: 'Cannot request contact details from this member' });
         }
         // 1. Check requester's subscription & credit availability
         const now = new Date();
@@ -364,7 +393,10 @@ async function getContactAccessStatus(req, res, next) {
         if (!targetProfile) {
             return res.status(404).json({ success: false, message: 'Profile not found' });
         }
-        const targetUserId = targetProfile.user?._id?.toString() || targetProfile.user?.id?.toString() || targetProfile.user?.toString();
+        const targetUserId = targetProfile.user?._id?.toString() ||
+            targetProfile.user?.id?.toString() ||
+            (typeof targetProfile.user === 'string' ? targetProfile.user : null) ||
+            targetProfile.userId?.toString();
         // Guest / non-logged-in users cannot access contact details
         if (!userId) {
             return res.json({

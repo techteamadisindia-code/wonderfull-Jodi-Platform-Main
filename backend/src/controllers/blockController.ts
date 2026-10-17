@@ -14,8 +14,9 @@ async function resolveTargetUserId(idOrProfileId: string): Promise<string | null
 
   // 1. Check canonical profile resolution (handles candidateId like WJ-100092, profile _id, legacy WJ-[hex])
   const profile = await findCanonicalProfile(rawId);
-  if (profile && profile.user) {
-    return String(profile.user._id || profile.user.id || profile.user);
+  if (profile) {
+    const u = profile.user || (profile as any).userId;
+    if (u) return String(u._id || u.id || u);
   }
 
   // 2. Direct User lookup if rawId matches ObjectId or UUID format
@@ -50,11 +51,20 @@ export async function blockUser(req: AuthRequest, res: Response, next: NextFunct
       return res.status(400).json({ success: false, message: 'You cannot block your own profile' });
     }
 
-    const block = await Block.findOneAndUpdate(
-      { blocker: userId, blockedUser: resolvedUserId },
-      { blocker: userId, blockedUser: resolvedUserId, reason: (reason || '').trim().slice(0, 500) },
-      { upsert: true, new: true }
-    );
+    let block: any = null;
+    try {
+      block = await Block.findOneAndUpdate(
+        { blocker: userId, blockedUser: resolvedUserId },
+        { blocker: userId, blockedUser: resolvedUserId, reason: (reason || '').trim().slice(0, 500) },
+        { upsert: true, new: true }
+      );
+    } catch (blockDbErr: any) {
+      console.error('[BlockController] Error blocking user (table schema error):', blockDbErr?.message);
+      return res.status(503).json({
+        success: false,
+        message: 'Profile blocking service is currently unavailable. Please contact support.',
+      });
+    }
 
     res.status(201).json({ success: true, message: 'Profile blocked successfully', data: block });
   } catch (error) {
@@ -79,7 +89,17 @@ export async function unblockUser(req: AuthRequest, res: Response, next: NextFun
       return res.status(404).json({ success: false, message: 'User or profile not found' });
     }
 
-    const block = await Block.findOneAndDelete({ blocker: userId, blockedUser: resolvedUserId });
+    let block: any = null;
+    try {
+      block = await Block.findOneAndDelete({ blocker: userId, blockedUser: resolvedUserId });
+    } catch (unblockDbErr: any) {
+      console.error('[BlockController] Error unblocking user (table schema error):', unblockDbErr?.message);
+      return res.status(503).json({
+        success: false,
+        message: 'Profile unblocking service is currently unavailable. Please contact support.',
+      });
+    }
+
     if (!block) {
       return res.status(404).json({ success: false, message: 'Blocked record not found' });
     }
@@ -97,10 +117,19 @@ export async function getBlockedUsers(req: AuthRequest, res: Response, next: Nex
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const blocks = await Block.find({ blocker: userId })
-      .sort({ createdAt: -1 })
-      .populate('blockedUser', 'fullName email verificationStatus isActive')
-      .lean();
+    let blocks: any[] = [];
+    try {
+      blocks = await Block.find({ blocker: userId })
+        .sort({ createdAt: -1 })
+        .populate('blockedUser', 'fullName email verificationStatus isActive')
+        .lean();
+    } catch (dbErr: any) {
+      console.error('[BlockController] Error fetching blocked users (database/schema error):', dbErr?.message);
+      return res.status(503).json({
+        success: false,
+        message: 'Blocked profiles list is temporarily unavailable. Please try again later.',
+      });
+    }
 
     const blockedUserIds = blocks.map((b: any) => b.blockedUser?._id).filter(Boolean);
     const profiles = await Profile.find({ user: { $in: blockedUserIds } })
@@ -109,7 +138,8 @@ export async function getBlockedUsers(req: AuthRequest, res: Response, next: Nex
 
     const profileMap = new Map();
     profiles.forEach((p: any) => {
-      profileMap.set(String(p.user), p);
+      const u = p.user ? String(p.user._id || p.user.id || p.user) : String(p.userId || '');
+      if (u) profileMap.set(u, p);
     });
 
     const enrichedBlocks = blocks.map((b: any) => {

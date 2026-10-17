@@ -335,7 +335,7 @@ async function runSuite() {
         // Headers check
         assert.strictEqual(res.getHeader('content-type'), 'image/jpeg');
         assert.strictEqual(res.getHeader('x-content-type-options'), 'nosniff');
-        assert.strictEqual(res.getHeader('content-security-policy'), "default-src 'none'; style-src 'unsafe-inline'");
+        assert.strictEqual(res.getHeader('content-security-policy'), "default-src 'self' blob: data:; style-src 'unsafe-inline'; frame-ancestors 'self'");
         assert.strictEqual(res.getHeader('cache-control'), 'private, no-store');
       } finally {
         Verification.findOne = originalFindOne;
@@ -439,6 +439,59 @@ async function runSuite() {
         const req = {
           params: { id: '507f1f77bcf86cd799439011' },
           user: { userId: 'other_user_999', role: 'user' },
+        };
+        const res = createMockRes();
+        await getUserVerificationById(req, res, () => {});
+
+        assert.strictEqual(res.statusCode, 403);
+        assert.strictEqual(res.body?.success, false);
+      } finally {
+        Verification.findById = originalFindById;
+      }
+    });
+
+    await runTest('7.3 getUserVerificationById allows admin, ADMIN, and SUPER_ADMIN roles', async () => {
+      const originalFindById = Verification.findById;
+      Verification.findById = () =>
+        Promise.resolve({
+          id: '507f1f77bcf86cd799439011',
+          userId: 'owner_user_123',
+          documentName: 'Registration Certificate',
+          status: 'PENDING',
+        });
+
+      try {
+        const roles = ['admin', 'ADMIN', 'SUPER_ADMIN'];
+        for (const role of roles) {
+          const req = {
+            params: { id: '507f1f77bcf86cd799439011' },
+            user: { userId: 'admin_caller_555', role },
+          };
+          const res = createMockRes();
+          await getUserVerificationById(req, res, () => {});
+
+          assert.strictEqual(res.statusCode, 200, `Expected 200 for role: ${role}`);
+          assert.strictEqual(res.body?.success, true);
+          assert.strictEqual(res.body?.data?.documentName, 'Registration Certificate');
+        }
+      } finally {
+        Verification.findById = originalFindById;
+      }
+    });
+
+    await runTest('7.4 getUserVerificationById blocks unauthenticated requests with HTTP 403', async () => {
+      const originalFindById = Verification.findById;
+      Verification.findById = () =>
+        Promise.resolve({
+          id: '507f1f77bcf86cd799439011',
+          userId: 'owner_user_123',
+          status: 'PENDING',
+        });
+
+      try {
+        const req = {
+          params: { id: '507f1f77bcf86cd799439011' },
+          // user is undefined
         };
         const res = createMockRes();
         await getUserVerificationById(req, res, () => {});

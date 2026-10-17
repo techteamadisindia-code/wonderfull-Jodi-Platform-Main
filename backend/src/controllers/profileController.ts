@@ -497,24 +497,32 @@ export async function findCanonicalProfile(
     return q;
   };
 
+  // Helper to ensure profile.user is set from userId if not populated
+  const ensureUserField = (p: any) => {
+    if (p && !p.user && (p as any).userId) {
+      p.user = (p as any).userId;
+    }
+    return p;
+  };
+
   // 1. Direct candidateId lookup (case-insensitive / uppercase)
   let profile = await populateQuery(
     Profile.findOne({ candidateId: id.toUpperCase(), isDeleted: { $ne: true } })
   );
-  if (profile) return profile;
+  if (profile) return ensureUserField(profile);
 
   // 2. Direct _id / id lookup (if valid ObjectId format or exact id string)
   if (isValidObjectId(id) || /^[0-9a-fA-F]{24}$/.test(id) || /^[A-Za-z0-9_-]{20,36}$/.test(id)) {
     profile = await populateQuery(
       Profile.findOne({ _id: id, isDeleted: { $ne: true } })
     );
-    if (profile) return profile;
+    if (profile) return ensureUserField(profile);
 
     // Check if the provided ID corresponds to a User ID
     profile = await populateQuery(
       Profile.findOne({ user: id, isDeleted: { $ne: true } })
     );
-    if (profile) return profile;
+    if (profile) return ensureUserField(profile);
   }
 
   // 3. Legacy hex-suffix lookup: WJ-[6 hex chars] (e.g. WJ-CCE711 matches _id ending with cce711)
@@ -527,7 +535,7 @@ export async function findCanonicalProfile(
         isDeleted: { $ne: true },
       })
     );
-    if (profile) return profile;
+    if (profile) return ensureUserField(profile);
   }
 
   return null;

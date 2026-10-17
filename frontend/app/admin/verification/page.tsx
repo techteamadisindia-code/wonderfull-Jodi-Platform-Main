@@ -96,6 +96,10 @@ const REJECTION_REASONS = [
   'Other (see custom guidance note below)',
 ];
 
+function getAuthenticatedDocUrl(url?: string): string {
+  return url || '';
+}
+
 export interface UserVerificationGroup {
   userId: string;
   user: {
@@ -1118,7 +1122,7 @@ export default function AdminVerificationPage() {
                     <span>Submitted Document Preview</span>
                   </span>
                   <a
-                    href={selectedItem.documentUrl}
+                    href={getAuthenticatedDocUrl(selectedItem.documentUrl)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 font-bold text-[#E51F3E] hover:underline text-[11px]"
@@ -1139,7 +1143,7 @@ export default function AdminVerificationPage() {
                         <p className="text-slate-500 text-xs">Secure Authenticated PDF Document</p>
                       </div>
                       <a
-                        href={selectedItem.documentUrl}
+                        href={getAuthenticatedDocUrl(selectedItem.documentUrl)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition"
@@ -1150,8 +1154,12 @@ export default function AdminVerificationPage() {
                     </div>
                   ) : (
                     <img
-                      src={selectedItem.documentUrl}
+                      src={getAuthenticatedDocUrl(selectedItem.documentUrl)}
                       alt={selectedItem.documentName}
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src =
+                          'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300" fill="%23f8fafc"><rect width="400" height="300" fill="%23f1f5f9"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="bold" fill="%2394a3b8">Document Preview Unavailable</text></svg>';
+                      }}
                       className="max-h-[380px] rounded-xl object-contain shadow-sm border border-slate-200 bg-white"
                     />
                   )}

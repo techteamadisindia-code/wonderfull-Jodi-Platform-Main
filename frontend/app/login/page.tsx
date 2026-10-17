@@ -4,7 +4,7 @@ import { FormEvent, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import api, { setAuthToken } from '../../lib/api';
-import { Heart, ShieldCheck, Lock, Sparkles, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Heart, ShieldCheck, Lock, Sparkles, ArrowRight, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { FallingHearts } from '../../components/FallingHearts';
 import { Logo } from '../../components/Logo';
 
@@ -15,6 +15,7 @@ function LoginForm() {
 
   const [emailOrMobile, setEmailOrMobile] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -100,14 +101,26 @@ function LoginForm() {
                 Forgot Password?
               </Link>
             </div>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white transition font-medium"
-              placeholder="••••••••"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-4 pr-11 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E] focus:bg-white transition font-medium"
+                placeholder="••••••••"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
+                title={showPassword ? 'Hide password' : 'Show password'}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none focus:text-slate-700 transition p-1 rounded-md"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           {error && (

@@ -4,6 +4,7 @@ exports.mongoose = exports.Schema = exports.Types = exports.PrismaUpdateQuery = 
 exports.normalizeFilter = normalizeFilter;
 exports.normalizeSort = normalizeSort;
 exports.cleanUnsupportedModelFields = cleanUnsupportedModelFields;
+exports.normalizeDelegateRecord = normalizeDelegateRecord;
 exports.cleanPrismaData = cleanPrismaData;
 exports.prepareUpdateData = prepareUpdateData;
 exports.prepareSetOnInsertData = prepareSetOnInsertData;
@@ -299,6 +300,52 @@ function cleanUnsupportedModelFields(data, modelName) {
     }
     return data;
 }
+/**
+ * Normalizes legacy relation / foreign-key field names from Prisma Client scalar fields.
+ * E.g. maps senderId -> sender, receiverId -> receiver, blockerId -> blocker, etc.
+ * Preserves populated objects or existing values if already present.
+ */
+function normalizeDelegateRecord(rec, delegateName) {
+    if (!rec || typeof rec !== 'object')
+        return rec;
+    const dName = String(delegateName || '').toLowerCase();
+    if (dName === 'profile') {
+        if (rec.user === undefined && rec.userId !== undefined) {
+            rec.user = rec.userId;
+        }
+    }
+    else if (dName === 'interest') {
+        if (rec.sender === undefined && rec.senderId !== undefined) {
+            rec.sender = rec.senderId;
+        }
+        if (rec.receiver === undefined && rec.receiverId !== undefined) {
+            rec.receiver = rec.receiverId;
+        }
+        if (rec.senderProfile === undefined && rec.senderProfileId !== undefined) {
+            rec.senderProfile = rec.senderProfileId;
+        }
+        if (rec.receiverProfile === undefined && rec.receiverProfileId !== undefined) {
+            rec.receiverProfile = rec.receiverProfileId;
+        }
+    }
+    else if (dName === 'block') {
+        if (rec.blocker === undefined && rec.blockerId !== undefined) {
+            rec.blocker = rec.blockerId;
+        }
+        if (rec.blockedUser === undefined && rec.blockedUserId !== undefined) {
+            rec.blockedUser = rec.blockedUserId;
+        }
+    }
+    else if (dName === 'shortlist') {
+        if (rec.user === undefined && rec.userId !== undefined) {
+            rec.user = rec.userId;
+        }
+        if (rec.profile === undefined && rec.profileId !== undefined) {
+            rec.profile = rec.profileId;
+        }
+    }
+    return rec;
+}
 function cleanPrismaData(data, fieldMap = {}) {
     if (!data || typeof data !== 'object')
         return data;
@@ -491,7 +538,7 @@ function attachSave(record, delegate, fieldMap = {}, delegateName = '') {
                 create: { id, ...dataToSave },
                 update: dataToSave,
             });
-            Object.assign(self, (0, client_2.toClient)(saved));
+            Object.assign(self, normalizeDelegateRecord((0, client_2.toClient)(saved), String(delegateName)));
             if (currentParticipants !== undefined) {
                 self.participants = currentParticipants;
             }
@@ -1080,11 +1127,7 @@ class PrismaQueryBuilder {
         const formatRecord = (rec) => {
             if (!rec)
                 return rec;
-            if (this.delegateName === 'profile') {
-                if (rec.user === undefined && rec.userId !== undefined) {
-                    rec.user = rec.userId;
-                }
-            }
+            normalizeDelegateRecord(rec, this.delegateName);
             if (this.delegateName === 'conversation' && Array.isArray(rec.participants)) {
                 if (this.populateParticipants) {
                     rec.participants = rec.participants.map((cp) => (0, client_2.toClient)(cp.user ? { ...cp.user, _id: cp.user.id } : { _id: cp.userId, id: cp.userId }));
@@ -1426,6 +1469,7 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
         else if (self._id && !self.id) {
             self.id = self._id;
         }
+        normalizeDelegateRecord(self, String(delegateName));
         attachSave(this, getDelegate(), fieldMap, String(delegateName));
     }
     ModelConstructor.prototype.toObject = function () {
@@ -1485,7 +1529,8 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
             cleanData.statusHistory = cleanData.statusHistory ?? [];
         }
         const created = await delegate.create({ data: cleanData });
-        return attachSave((0, client_2.toClient)(created), delegate, fieldMap, String(delegateName));
+        const clientObj = normalizeDelegateRecord((0, client_2.toClient)(created), String(delegateName));
+        return attachSave(clientObj, delegate, fieldMap, String(delegateName));
     };
     ModelConstructor.insertMany = async function (data, options) {
         return ModelConstructor.create(data);
@@ -1518,7 +1563,7 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
                     where: { id: stringId },
                     data: updateData,
                 });
-                const clientObj = (0, client_2.toClient)(updated);
+                const clientObj = normalizeDelegateRecord((0, client_2.toClient)(updated), String(delegateName));
                 if (delegateName === 'conversation') {
                     const populateParticipantsOpt = opts?.populate?.find((p) => p.path === 'participants');
                     const pRows = await client_2.prisma.conversationParticipant.findMany({
@@ -1548,7 +1593,7 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
                                 ...createData,
                             },
                         });
-                        const clientObj = (0, client_2.toClient)(created);
+                        const clientObj = normalizeDelegateRecord((0, client_2.toClient)(created), String(delegateName));
                         if (opts?.populate && opts.populate.length > 0) {
                             await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
                         }
@@ -1578,7 +1623,7 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
                                 ...createData,
                             },
                         });
-                        const clientObj = (0, client_2.toClient)(created);
+                        const clientObj = normalizeDelegateRecord((0, client_2.toClient)(created), String(delegateName));
                         if (opts?.populate && opts.populate.length > 0) {
                             await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
                         }
@@ -1593,7 +1638,7 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
                                     where: { id: existingRecord.id },
                                     data: updateData,
                                 });
-                                const clientObj = (0, client_2.toClient)(updated);
+                                const clientObj = normalizeDelegateRecord((0, client_2.toClient)(updated), String(delegateName));
                                 if (opts?.populate && opts.populate.length > 0) {
                                     await resolveVirtualPopulates([clientObj], opts.populate, String(delegateName));
                                 }
@@ -1609,7 +1654,7 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
                 where: { id: existing.id },
                 data: updateData,
             });
-            const clientObj = (0, client_2.toClient)(updated);
+            const clientObj = normalizeDelegateRecord((0, client_2.toClient)(updated), String(delegateName));
             if (delegateName === 'conversation') {
                 const populateParticipantsOpt = opts?.populate?.find((p) => p.path === 'participants');
                 const pRows = await client_2.prisma.conversationParticipant.findMany({
@@ -1643,7 +1688,7 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
         const stringId = id?._id ? String(id._id) : id?.id ? String(id.id) : String(id);
         try {
             const deleted = await delegate.delete({ where: { id: stringId } });
-            return (0, client_2.toClient)(deleted);
+            return normalizeDelegateRecord((0, client_2.toClient)(deleted), String(delegateName));
         }
         catch (err) {
             if (err.code === 'P2025')
@@ -1661,7 +1706,7 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
             if (!record)
                 return null;
             await delegate.delete({ where: { id: record.id } });
-            return (0, client_2.toClient)(record);
+            return normalizeDelegateRecord((0, client_2.toClient)(record), String(delegateName));
         }
         catch (err) {
             if (err.code === 'P2025')

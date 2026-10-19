@@ -24,6 +24,36 @@ const updateInterestSchema = z.object({
 });
 
 /**
+ * Safely extracts a string ID from an entity, populated object, or scalar fallback.
+ * Returns an empty string if the ID is missing or invalid, preventing unhandled TypeErrors.
+ */
+export function extractEntityId(entity: any, fallbackId?: any): string {
+  if (entity) {
+    if (typeof entity === 'string') {
+      return entity.trim();
+    }
+    if (typeof entity === 'object') {
+      const directId = entity._id || entity.id;
+      if (directId) {
+        return typeof directId === 'object' && directId !== null
+          ? extractEntityId(directId)
+          : String(directId).trim();
+      }
+      if (typeof entity.toString === 'function' && entity.toString !== Object.prototype.toString) {
+        const str = entity.toString();
+        if (str && str !== '[object Object]') {
+          return str.trim();
+        }
+      }
+    }
+  }
+  if (fallbackId) {
+    return extractEntityId(fallbackId);
+  }
+  return '';
+}
+
+/**
  * Helper to resolve target user ID whether given receiverId, recipientId, profileId, or targetUserId
  * Supports candidate IDs (e.g. WJ-100092), Profile ObjectIds, and User IDs.
  */
@@ -124,7 +154,17 @@ export async function createInterest(req: AuthRequest, res: Response, next: Next
     });
 
     if (existing) {
-      if (existing.sender.toString() === senderUserId) {
+      const existingSenderId = extractEntityId(existing.sender, (existing as any).senderId);
+      const existingReceiverId = extractEntityId(existing.receiver, (existing as any).receiverId);
+
+      if (!existingSenderId || !existingReceiverId) {
+        return res.status(500).json({
+          success: false,
+          message: 'Existing interest record is missing sender or receiver information',
+        });
+      }
+
+      if (existingSenderId === senderUserId) {
         if (existing.status === 'PENDING') {
           return res.status(409).json({
             success: false,
@@ -177,8 +217,9 @@ export async function createInterest(req: AuthRequest, res: Response, next: Next
     const senderDegree = senderProfile?.degree || senderProfile?.education || 'MBBS';
     const senderSpecialization = senderProfile?.profession || senderProfile?.specialization || 'Doctor';
 
+    const existingSenderId = existing ? extractEntityId(existing.sender, (existing as any).senderId) : '';
     const interest =
-      existing && existing.sender.toString() === senderUserId
+      existing && existingSenderId === senderUserId
         ? existing
         : await Interest.create({
             sender: senderUserId,
@@ -282,8 +323,18 @@ export async function checkInterestStatus(req: AuthRequest, res: Response, next:
       });
     }
 
-    const isSender = interest.sender.toString() === userId;
-    const isReceiver = interest.receiver.toString() === userId;
+    const interestSenderId = extractEntityId(interest.sender, (interest as any).senderId);
+    const interestReceiverId = extractEntityId(interest.receiver, (interest as any).receiverId);
+
+    if (!interestSenderId || !interestReceiverId) {
+      return res.status(500).json({
+        success: false,
+        message: 'Interest record has missing sender or receiver details',
+      });
+    }
+
+    const isSender = interestSenderId === userId;
+    const isReceiver = interestReceiverId === userId;
     const canChat = interest.status === 'ACCEPTED';
 
     res.json({
@@ -323,7 +374,17 @@ export async function acceptInterest(req: AuthRequest, res: Response, next: Next
       return res.status(404).json({ success: false, message: 'Interest not found' });
     }
 
-    const isReceiver = interest.receiver.toString() === userId;
+    const interestReceiverId = extractEntityId(interest.receiver, (interest as any).receiverId);
+    const interestSenderId = extractEntityId(interest.sender, (interest as any).senderId);
+
+    if (!interestReceiverId || !interestSenderId) {
+      return res.status(500).json({
+        success: false,
+        message: 'Interest record has missing sender or receiver details',
+      });
+    }
+
+    const isReceiver = interestReceiverId === userId;
     const isAdmin = req.user?.role === 'admin';
 
     if (!isReceiver && !isAdmin) {
@@ -351,7 +412,7 @@ export async function acceptInterest(req: AuthRequest, res: Response, next: Next
     const recipientProfileId = recipientProfile ? String(recipientProfile._id) : '';
 
     // Create database Notification for sender
-    const senderUserId = interest.sender.toString();
+    const senderUserId = interestSenderId;
     const notification = await Notification.create({
       user: senderUserId,
       type: 'INTEREST_ACCEPTED',
@@ -441,7 +502,17 @@ export async function declineInterest(req: AuthRequest, res: Response, next: Nex
       return res.status(404).json({ success: false, message: 'Interest not found' });
     }
 
-    const isReceiver = interest.receiver.toString() === userId;
+    const interestReceiverId = extractEntityId(interest.receiver, (interest as any).receiverId);
+    const interestSenderId = extractEntityId(interest.sender, (interest as any).senderId);
+
+    if (!interestReceiverId || !interestSenderId) {
+      return res.status(500).json({
+        success: false,
+        message: 'Interest record has missing sender or receiver details',
+      });
+    }
+
+    const isReceiver = interestReceiverId === userId;
     const isAdmin = req.user?.role === 'admin';
 
     if (!isReceiver && !isAdmin) {
@@ -467,7 +538,7 @@ export async function declineInterest(req: AuthRequest, res: Response, next: Nex
     const recipientName = recipientProfile?.displayName || recipientUser?.fullName || 'Candidate';
 
     // Create database Notification for sender
-    const senderUserId = interest.sender.toString();
+    const senderUserId = interestSenderId;
     const notification = await Notification.create({
       user: senderUserId,
       type: 'INTEREST_REJECTED',
@@ -522,7 +593,11 @@ export async function updateInterest(req: AuthRequest, res: Response, next: Next
       const { id } = req.params;
       const interest = await Interest.findById(id);
       if (!interest) return res.status(404).json({ success: false, message: 'Interest not found' });
-      if (interest.sender.toString() !== userId && req.user?.role !== 'admin') {
+      const senderUserId = extractEntityId(interest.sender, (interest as any).senderId);
+      if (!senderUserId) {
+        return res.status(500).json({ success: false, message: 'Interest record has missing sender' });
+      }
+      if (senderUserId !== userId && req.user?.role !== 'admin') {
         return res.status(403).json({ success: false, message: 'Only sender can cancel' });
       }
       interest.status = 'CANCELLED';
@@ -560,16 +635,19 @@ export async function getSentInterests(req: AuthRequest, res: Response, next: Ne
       .sort({ createdAt: -1 })
       .lean();
 
-    const receiverIds = interests.map((i: any) => i.receiver?._id).filter(Boolean);
+    const receiverIds = interests.map((i: any) => extractEntityId(i.receiver, i.receiverId)).filter(Boolean);
     const profiles = await Profile.find({ user: { $in: receiverIds } })
       .select('user displayName profession specialization degree education city state primaryPhoto photos age dob gender')
       .lean();
     const profileMap = new Map(profiles.map((p: any) => [String(p.user), p]));
 
-    const enriched = interests.map((i: any) => ({
-      ...i,
-      receiverProfile: i.receiver ? profileMap.get(String(i.receiver._id)) || null : null,
-    }));
+    const enriched = interests.map((i: any) => {
+      const rId = extractEntityId(i.receiver, i.receiverId);
+      return {
+        ...i,
+        receiverProfile: rId ? profileMap.get(rId) || null : null,
+      };
+    });
 
     res.json({ success: true, data: enriched });
   } catch (error) {
@@ -602,16 +680,19 @@ export async function getReceivedInterests(req: AuthRequest, res: Response, next
       .sort({ createdAt: -1 })
       .lean();
 
-    const senderIds = interests.map((i: any) => i.sender?._id).filter(Boolean);
+    const senderIds = interests.map((i: any) => extractEntityId(i.sender, i.senderId)).filter(Boolean);
     const profiles = await Profile.find({ user: { $in: senderIds } })
       .select('user displayName profession specialization degree education city state primaryPhoto photos age dob gender')
       .lean();
     const profileMap = new Map(profiles.map((p: any) => [String(p.user), p]));
 
-    const enriched = interests.map((i: any) => ({
-      ...i,
-      senderProfile: i.sender ? profileMap.get(String(i.sender._id)) || null : null,
-    }));
+    const enriched = interests.map((i: any) => {
+      const sId = extractEntityId(i.sender, i.senderId);
+      return {
+        ...i,
+        senderProfile: sId ? profileMap.get(sId) || null : null,
+      };
+    });
 
     res.json({ success: true, data: enriched });
   } catch (error) {
@@ -638,9 +719,11 @@ export async function getAcceptedConnections(req: AuthRequest, res: Response, ne
       .sort({ updatedAt: -1 })
       .lean();
 
-    const otherUserIds = interests.map((i: any) =>
-      String(i.sender?._id) === String(userId) ? i.receiver?._id : i.sender?._id
-    ).filter(Boolean);
+    const otherUserIds = interests.map((i: any) => {
+      const sId = extractEntityId(i.sender, i.senderId);
+      const rId = extractEntityId(i.receiver, i.receiverId);
+      return sId === String(userId) ? rId : sId;
+    }).filter(Boolean);
 
     const profiles = await Profile.find({ user: { $in: otherUserIds } })
       .select('user displayName profession specialization degree education city state primaryPhoto photos age dob gender')
@@ -648,9 +731,11 @@ export async function getAcceptedConnections(req: AuthRequest, res: Response, ne
     const profileMap = new Map(profiles.map((p: any) => [String(p.user), p]));
 
     const enriched = interests.map((i: any) => {
-      const isSender = String(i.sender?._id) === String(userId);
+      const sId = extractEntityId(i.sender, i.senderId);
+      const isSender = sId === String(userId);
       const otherUser = isSender ? i.receiver : i.sender;
-      const otherProfile = otherUser ? profileMap.get(String(otherUser._id)) || null : null;
+      const otherUserId = isSender ? extractEntityId(i.receiver, i.receiverId) : sId;
+      const otherProfile = otherUserId ? profileMap.get(otherUserId) || null : null;
       return {
         ...i,
         isSender,

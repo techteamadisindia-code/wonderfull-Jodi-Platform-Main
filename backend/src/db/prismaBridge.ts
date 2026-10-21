@@ -828,6 +828,72 @@ async function resolveVirtualPopulates(
       continue;
     }
 
+    // 1b. Interest relations (sender, receiver, senderProfile, receiverProfile)
+    // Handled virtually to safely tolerate orphaned foreign keys without Prisma Inconsistent query result crash
+    if (delegateName === 'interest' && (rawPath === 'sender' || rawPath === 'receiver')) {
+      const fieldId = rawPath === 'sender' ? 'senderId' : 'receiverId';
+      const userIds = new Set<string>();
+      for (const rec of records) {
+        if (!rec) continue;
+        const val =
+          rec[fieldId] ||
+          (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+        if (val && typeof val === 'string') userIds.add(val);
+      }
+      if (userIds.size > 0) {
+        const users = await (prisma as any).user.findMany({
+          where: { id: { in: Array.from(userIds) } },
+          select: selectObj ? { id: true, ...selectObj } : undefined,
+        });
+        const userMap = new Map(users.map((u: any) => [u.id, toClient(u)]));
+        for (const rec of records) {
+          if (!rec) continue;
+          const val =
+            rec[fieldId] ||
+            (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+          rec[rawPath] = (val && userMap.get(val)) || null;
+        }
+      } else {
+        for (const rec of records) {
+          if (!rec) continue;
+          rec[rawPath] = null;
+        }
+      }
+      continue;
+    }
+
+    if (delegateName === 'interest' && (rawPath === 'senderProfile' || rawPath === 'receiverProfile')) {
+      const fieldId = rawPath === 'senderProfile' ? 'senderProfileId' : 'receiverProfileId';
+      const profileIds = new Set<string>();
+      for (const rec of records) {
+        if (!rec) continue;
+        const val =
+          rec[fieldId] ||
+          (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+        if (val && typeof val === 'string') profileIds.add(val);
+      }
+      if (profileIds.size > 0) {
+        const profiles = await (prisma as any).profile.findMany({
+          where: { id: { in: Array.from(profileIds) } },
+          select: selectObj ? { id: true, ...selectObj } : undefined,
+        });
+        const profMap = new Map(profiles.map((p: any) => [p.id, toClient(p)]));
+        for (const rec of records) {
+          if (!rec) continue;
+          const val =
+            rec[fieldId] ||
+            (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+          rec[rawPath] = (val && profMap.get(val)) || null;
+        }
+      } else {
+        for (const rec of records) {
+          if (!rec) continue;
+          rec[rawPath] = null;
+        }
+      }
+      continue;
+    }
+
     if (delegateName === 'report' && rawPath === 'reportedProfile') {
       const profileIds = new Set<string>();
       for (const rec of records) {
@@ -1102,7 +1168,8 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
       if (
         (this.delegateName === 'report' &&
           ['reporter', 'reportedUser', 'reportedProfile', 'moderator', 'handledByAdminId'].includes(targetPath)) ||
-        ((this.delegateName === 'profile' || this.delegateName === 'admin') && targetPath === 'user')
+        ((this.delegateName === 'profile' || this.delegateName === 'admin' || this.delegateName === 'payment' || this.delegateName === 'subscription') && targetPath === 'user') ||
+        (this.delegateName === 'interest' && ['sender', 'receiver', 'senderProfile', 'receiverProfile'].includes(targetPath))
       ) {
         this.virtualPopulates.push({ path: targetPath, select: targetSelect });
         return this;
@@ -1281,7 +1348,144 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
       }
 
       if (
-        (err.message && (err.message.includes('Inconsistent query result') || err.message.includes('Field user is required'))) ||
+        this.delegateName === 'conversation' &&
+        err.message &&
+        err.message.includes('conversation_participants')
+      ) {
+        console.warn(
+          `[PrismaBridge] conversation_participants table missing. Falling back to scalar conversation query and JSON participants.`
+        );
+        const fallbackArgs = { ...args };
+        delete fallbackArgs.include;
+        if (fallbackArgs.select && fallbackArgs.select.participants) {
+          delete fallbackArgs.select.participants;
+        }
+
+        if (this.isFindOne) {
+          const record = await this.prismaDelegate.findFirst(fallbackArgs);
+          if (!record) return null as unknown as T;
+          const convId = record.id || record._id;
+          try {
+            const rawRow: any = await (prisma as any).$queryRawUnsafe(
+              `SELECT participants FROM \`conversations\` WHERE \`_id\` = '${convId}' LIMIT 1`
+            );
+            if (rawRow && rawRow[0] && rawRow[0].participants) {
+              const parsed = JSON.parse(rawRow[0].participants);
+              record.participants = Array.isArray(parsed)
+                ? parsed
+                    .map((item: any) =>
+                      typeof item === 'string' ? item : item?.$oid || item?.id || item?._id
+                    )
+                    .filter(Boolean)
+                : [];
+            }
+          } catch {
+            record.participants = record.participants || [];
+          }
+          if (this.virtualPopulates.length > 0) {
+            await resolveVirtualPopulates([record], this.virtualPopulates, this.delegateName);
+          }
+          const clientRecord = formatRecord(toClient(record));
+          return attachSave(clientRecord, this.prismaDelegate, this.fieldMap, this.delegateName) as unknown as T;
+        } else {
+          const records = await this.prismaDelegate.findMany(fallbackArgs);
+          const convIds = records.map((r: any) => r.id || r._id).filter(Boolean);
+          if (convIds.length > 0) {
+            try {
+              const idList = convIds.map((id: string) => `'${id}'`).join(',');
+              const rawRows: any = await (prisma as any).$queryRawUnsafe(
+                `SELECT _id, participants FROM \`conversations\` WHERE \`_id\` IN (${idList})`
+              );
+              const partMap = new Map();
+              for (const row of rawRows || []) {
+                if (row.participants) {
+                  try {
+                    const parsed = JSON.parse(row.participants);
+                    const pIds = Array.isArray(parsed)
+                      ? parsed
+                          .map((item: any) =>
+                            typeof item === 'string' ? item : item?.$oid || item?.id || item?._id
+                          )
+                          .filter(Boolean)
+                      : [];
+                    partMap.set(row._id, pIds);
+                  } catch {
+                    partMap.set(row._id, []);
+                  }
+                }
+              }
+              for (const r of records) {
+                const cid = r.id || r._id;
+                r.participants = partMap.get(cid) || [];
+              }
+            } catch {
+              for (const r of records) {
+                r.participants = r.participants || [];
+              }
+            }
+          }
+          if (records.length > 0 && this.virtualPopulates.length > 0) {
+            await resolveVirtualPopulates(records, this.virtualPopulates, this.delegateName);
+          }
+          const clientRecords = toClientArray(records).map((r) =>
+            attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap, this.delegateName)
+          );
+          return clientRecords as unknown as T;
+        }
+      }
+
+      if (
+        this.delegateName === 'award' &&
+        err.message &&
+        err.message.includes('created_by')
+      ) {
+        console.warn(
+          `[PrismaBridge] awards.created_by column missing. Falling back to explicit select omitting created_by.`
+        );
+        const awardSelect: any = {
+          id: true,
+          name: true,
+          slug: true,
+          logo: true,
+          shortDescription: true,
+          fullDescription: true,
+          awardYear: true,
+          category: true,
+          organization: true,
+          galleryImages: true,
+          websiteUrl: true,
+          displayOrder: true,
+          isActive: true,
+          isFeatured: true,
+          isDeleted: true,
+          deletedAt: true,
+          deletedById: true,
+          updatedById: true,
+          createdAt: true,
+          updatedAt: true,
+        };
+        const fallbackArgs = { ...args, select: awardSelect };
+        delete fallbackArgs.include;
+        if (this.isFindOne) {
+          const rec = await this.prismaDelegate.findFirst(fallbackArgs);
+          if (!rec) return null as unknown as T;
+          rec.createdById = null;
+          return attachSave(formatRecord(toClient(rec)), this.prismaDelegate, this.fieldMap, this.delegateName) as unknown as T;
+        } else {
+          const recs = await this.prismaDelegate.findMany(fallbackArgs);
+          return recs.map((r: any) => {
+            r.createdById = null;
+            return attachSave(formatRecord(toClient(r)), this.prismaDelegate, this.fieldMap, this.delegateName);
+          }) as unknown as T;
+        }
+      }
+
+      if (
+        (err.message &&
+          (err.message.includes('Inconsistent query result') ||
+            err.message.includes('is required to return data') ||
+            err.message.includes('Field user is required') ||
+            err.message.includes('Field sender is required'))) ||
         err.code === 'P2025'
       ) {
         if (cleanInclude) {
@@ -2064,4 +2268,10 @@ export const mongoose = {
   },
   isValidObjectId: (id: any) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id),
 };
+
+export namespace mongoose {
+  export namespace Types {
+    export type ObjectId = string | any;
+  }
+}
 export default mongoose;

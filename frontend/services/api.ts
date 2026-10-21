@@ -1,7 +1,50 @@
-import axios from 'axios';
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
-const ADMIN_TOKEN_KEY = 'wonderfuljodi_admin_token';
-const USER_TOKEN_KEY = 'wonderfuljodi_token';
+export const ADMIN_TOKEN_KEY = 'wonderfuljodi_admin_token';
+export const USER_TOKEN_KEY = 'wonderfuljodi_token';
+
+let refreshPromise: Promise<string> | null = null;
+
+/**
+ * Shared in-flight authentication session refresh coordinator.
+ * Prevents multiple concurrent requests from firing separate /auth/refresh operations,
+ * avoiding race conditions and false-positive refresh token reuse detection.
+ * Unambiguous contract: resolves with a valid, non-empty access token, or rejects on any failure.
+ */
+export async function refreshAuthSession(): Promise<string> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const response = await axios.post<{
+        success: boolean;
+        token?: string;
+        data?: { token?: string };
+      }>(
+        `${getApiBaseUrl()}/auth/refresh`,
+        {},
+        { withCredentials: true }
+      );
+
+      const rawToken = response.data?.token || response.data?.data?.token;
+      const newToken = typeof rawToken === 'string' ? rawToken.trim() : '';
+
+      if (newToken) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(USER_TOKEN_KEY, newToken);
+        }
+        return newToken;
+      }
+      throw new Error('Refresh response did not return a valid access token');
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
 
 /**
  * Normalizes an API URL to ensure no trailing slashes and avoids duplicate /api suffixes.
@@ -234,15 +277,79 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+/**
+ * Handles expiration of member authentication session:
+ * Clears stored member token and registration drafts.
+ * If currently navigating a protected member page, redirects to login with session_expired query.
+ */
+export function handleMemberSessionExpired() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(USER_TOKEN_KEY);
+  localStorage.removeItem('wj_registration_id');
+  localStorage.removeItem('wj_resume_token');
+  localStorage.removeItem('wj_reg_form_backup');
+
+  const protectedRoutes = ['/dashboard', '/chat', '/matches', '/membership', '/profile', '/messages', '/interests', '/notifications'];
+  const currentPath = window.location.pathname;
+  if (protectedRoutes.some((p) => currentPath === p || currentPath.startsWith(`${p}/`))) {
+    if (!currentPath.includes('/login')) {
+      window.location.href = `/login?session_expired=1&redirect=${encodeURIComponent(currentPath)}`;
+    }
+  }
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (typeof window !== 'undefined' && error.response?.status === 401) {
+  async (error: AxiosError) => {
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+
+    if (!error.response || typeof window === 'undefined') {
+      return Promise.reject(error);
+    }
+
+    const requestUrl = originalRequest?.url || '';
+    const isAdminRequest =
+      requestUrl.includes('/admin') ||
+      window.location.pathname.startsWith('/admin');
+
+    // 1. Admin context 401 handling: clear admin token and redirect to admin login
+    if (error.response.status === 401 && isAdminRequest) {
       if (window.location.pathname.startsWith('/admin') && window.location.pathname !== '/admin/login') {
         localStorage.removeItem(ADMIN_TOKEN_KEY);
         window.location.href = '/admin/login?session_expired=1';
       }
+      return Promise.reject(error);
     }
+
+    // 2. Member token refresh for authentication-related 401s
+    const isAuthEndpoint =
+      requestUrl.includes('/auth/login') ||
+      requestUrl.includes('/auth/register') ||
+      requestUrl.includes('/auth/refresh');
+
+    if (
+      error.response.status === 401 &&
+      originalRequest &&
+      !originalRequest._retry &&
+      !isAdminRequest &&
+      !isAuthEndpoint
+    ) {
+      originalRequest._retry = true;
+
+      try {
+        const newToken = await refreshAuthSession();
+        if (!newToken || typeof newToken !== 'string' || !newToken.trim()) {
+          throw new Error('Refresh response did not return a valid access token');
+        }
+        originalRequest.headers = originalRequest.headers ?? {};
+        (originalRequest.headers as Record<string, string>).Authorization = `Bearer ${newToken}`;
+        return apiClient(originalRequest);
+      } catch (refreshErr) {
+        handleMemberSessionExpired();
+        return Promise.reject(refreshErr);
+      }
+    }
+
     return Promise.reject(error);
   }
 );

@@ -24,6 +24,8 @@ build/
 *.sql
 *.sql.gz
 *.dump
+!backend/prisma/migrations/*.sql
+!backend/prisma/*.sql
 
 # Password or credential files
 apppassword*

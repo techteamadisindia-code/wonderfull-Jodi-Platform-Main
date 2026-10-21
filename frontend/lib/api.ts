@@ -3,9 +3,15 @@ import { SearchResult } from '../types/profile';
 
 const AUTH_TOKEN_KEY = 'wonderfuljodi_token';
 
-import { getApiBaseUrl, normalizeApiUrl } from '../services/api';
+import {
+  ADMIN_TOKEN_KEY,
+  getApiBaseUrl,
+  handleMemberSessionExpired,
+  normalizeApiUrl,
+  refreshAuthSession,
+} from '../services/api';
 
-export { getApiBaseUrl, normalizeApiUrl };
+export { getApiBaseUrl, handleMemberSessionExpired, normalizeApiUrl, refreshAuthSession };
 
 const api = axios.create({
   baseURL: getApiBaseUrl(),
@@ -25,74 +31,55 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-// Response interceptor: Automatic session refresh on 401 Unauthorized
-let isRefreshing = false;
-let failedQueue: Array<{
-  resolve: (value?: unknown) => void;
-  reject: (reason?: unknown) => void;
-}> = [];
-
-const processQueue = (error: AxiosError | null) => {
-  failedQueue.forEach((prom) => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve();
-    }
-  });
-  failedQueue = [];
-};
-
+// Response interceptor: Automatic session refresh on 401 Unauthorized via shared coordinator
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    // If 401 occurs and we haven't retried yet and not already calling /auth/refresh or /auth/login
+    if (!error.response || typeof window === 'undefined') {
+      return Promise.reject(error);
+    }
+
+    const requestUrl = originalRequest?.url || '';
+    const isAdminRequest =
+      requestUrl.includes('/admin') ||
+      window.location.pathname.startsWith('/admin');
+
+    // Admin requests must never invoke member refresh or wipe member tokens
+    if (error.response.status === 401 && isAdminRequest) {
+      if (window.location.pathname.startsWith('/admin') && window.location.pathname !== '/admin/login') {
+        localStorage.removeItem(ADMIN_TOKEN_KEY);
+        window.location.href = '/admin/login?session_expired=1';
+      }
+      return Promise.reject(error);
+    }
+
+    const isAuthEndpoint =
+      requestUrl.includes('/auth/login') ||
+      requestUrl.includes('/auth/register') ||
+      requestUrl.includes('/auth/refresh');
+
     if (
-      error.response?.status === 401 &&
+      error.response.status === 401 &&
       originalRequest &&
       !originalRequest._retry &&
-      !originalRequest.url?.includes('/auth/login') &&
-      !originalRequest.url?.includes('/auth/register') &&
-      !originalRequest.url?.includes('/auth/refresh')
+      !isAdminRequest &&
+      !isAuthEndpoint
     ) {
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        })
-          .then(() => api(originalRequest))
-          .catch((err) => Promise.reject(err));
-      }
-
       originalRequest._retry = true;
-      isRefreshing = true;
 
       try {
-        const refreshResponse = await axios.post(
-          `${getApiBaseUrl()}/auth/refresh`,
-          {},
-          { withCredentials: true }
-        );
-
-        if (refreshResponse.data?.success) {
-          const newToken = refreshResponse.data.token;
-          if (newToken && typeof window !== 'undefined') {
-            localStorage.setItem(AUTH_TOKEN_KEY, newToken);
-            originalRequest.headers = originalRequest.headers ?? {};
-            (originalRequest.headers as Record<string, string>).Authorization = `Bearer ${newToken}`;
-          }
-          processQueue(null);
-          return api(originalRequest);
+        const newToken = await refreshAuthSession();
+        if (!newToken || typeof newToken !== 'string' || !newToken.trim()) {
+          throw new Error('Refresh response did not return a valid access token');
         }
+        originalRequest.headers = originalRequest.headers ?? {};
+        (originalRequest.headers as Record<string, string>).Authorization = `Bearer ${newToken}`;
+        return api(originalRequest);
       } catch (refreshErr) {
-        processQueue(refreshErr as AxiosError);
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem(AUTH_TOKEN_KEY);
-        }
+        handleMemberSessionExpired();
         return Promise.reject(refreshErr);
-      } finally {
-        isRefreshing = false;
       }
     }
 

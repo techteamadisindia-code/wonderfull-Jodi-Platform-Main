@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, requireAdminAuth } from '../middleware/authMiddleware';
+import { requireAuth, requireRole } from '../middleware/authMiddleware';
 import {
   getProfileForBiodata,
   listBiodatas,
@@ -20,7 +20,7 @@ router.get('/public/:publicId', getPublicBiodata);
 
 // Authenticated Routes
 router.get('/profile', requireAuth, getProfileForBiodata);
-router.get('/admin/stats', requireAdminAuth, getAdminBiodataStats);
+router.get('/admin/stats', requireAuth, requireRole('admin'), getAdminBiodataStats);
 
 router.get('/', requireAuth, listBiodatas);
 router.post('/', requireAuth, createBiodata);

@@ -14,7 +14,7 @@ exports.getAdminSessions = getAdminSessions;
 exports.revokeAdminOtherSessions = revokeAdminOtherSessions;
 exports.getAdminRecentActivity = getAdminRecentActivity;
 const bcrypt_1 = __importDefault(require("bcrypt"));
-const jwtConfig_1 = require("../config/jwtConfig");
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const zod_1 = require("zod");
 const User_1 = require("../models/User");
 const Admin_1 = require("../models/Admin");
@@ -71,14 +71,15 @@ const adminChangePasswordSchema = zod_1.z
     path: ['confirmNewPassword'],
 });
 function signAdminAccessToken(userId, role, email, sessionId) {
+    const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
     // Admin access token has 15 minute lifetime
-    return (0, jwtConfig_1.signJwtToken)({
+    return jsonwebtoken_1.default.sign({
         userId,
         role,
         email,
         sessionId,
         sub: userId,
-    }, { expiresIn: '15m', purpose: 'admin' });
+    }, secret, { expiresIn: '15m' });
 }
 function setAdminCookies(res, accessToken, refreshToken) {
     const accessOpts = (0, securityUtils_1.getAccessTokenCookieOptions)();

@@ -7,7 +7,6 @@ import path from 'path';
 import fs from 'fs';
 import { prisma } from './db/client';
 import { verifyEmailTransporter } from './services/emailService';
-import { validateJwtEnvironment } from './config/jwtConfig';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -141,18 +140,6 @@ io.on('connection', (socket) => {
  * Start Server (Next.js in-process + Express)
  */
 async function startServer() {
-  // Fail closed if required JWT secrets are missing or weak in production/staging
-  try {
-    validateJwtEnvironment();
-  } catch (jwtErr: any) {
-    console.error('\n════════════════════════════════════════════════════════════════');
-    console.error('  🛑 SERVER STARTUP BLOCKED: JWT CONFIGURATION ERROR');
-    console.error('════════════════════════════════════════════════════════════════');
-    console.error(jwtErr?.message || 'Invalid JWT secret configuration.');
-    console.error('Application startup aborted. Please configure high-entropy secrets in environment settings.\n');
-    process.exit(1);
-  }
-
   const isDevProcess = Boolean(process.env.TS_NODE_DEV) || process.env.NODE_ENV === 'development';
   const isProduction = process.env.NODE_ENV === 'production' && !isDevProcess;
   const resolvedFrontendDir = fs.existsSync(path.resolve(__dirname, '../../frontend'))

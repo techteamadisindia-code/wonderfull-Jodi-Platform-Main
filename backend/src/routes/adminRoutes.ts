@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAdminAuth } from '../middleware/authMiddleware';
+import { requireAuth, requireRole } from '../middleware/authMiddleware';
 import {
   getDashboardStats,
   getDailyVisitsAnalytics,
@@ -84,8 +84,8 @@ import {
 
 const router = Router();
 
-// All admin routes require valid administrator token & 'admin' role
-router.use(requireAdminAuth);
+// All admin routes require valid JWT & 'admin' role
+router.use(requireAuth, requireRole('admin'));
 
 // 1. Dashboard & Analytics
 router.get('/dashboard', getDashboardStats);

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAdminAuth } from '../middleware/authMiddleware';
+import { requireAuth, requireRole } from '../middleware/authMiddleware';
 import {
   getMasterDataSummary,
   getMasterDataItems,
@@ -16,7 +16,7 @@ import {
 const router = Router();
 
 // Apply admin authentication to all master-data routes
-router.use(requireAdminAuth);
+router.use(requireAuth, requireRole('admin'));
 
 router.get('/summary', getMasterDataSummary);
 router.get('/items', getMasterDataItems);

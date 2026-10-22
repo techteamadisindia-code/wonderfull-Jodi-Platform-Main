@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, requireRole } from '../middleware/authMiddleware';
+import { requireAdminAuth } from '../middleware/authMiddleware';
 import {
   startRegistration,
   saveStep,
@@ -20,7 +20,7 @@ router.post('/step', saveStep);
 router.post('/save', saveStep);
 router.post('/auto-save', autoSave);
 router.get('/check-availability', checkAvailability);
-router.get('/incomplete/count', requireAuth, requireRole('admin'), getIncompleteRegistrationsCount);
+router.get('/incomplete/count', requireAdminAuth, getIncompleteRegistrationsCount);
 router.post('/validate', validateRegistrationDraft);
 router.get('/:registrationId/validate', validateRegistrationDraft);
 router.post('/:registrationId/validate', validateRegistrationDraft);

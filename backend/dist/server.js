@@ -46,6 +46,7 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const client_1 = require("./db/client");
 const emailService_1 = require("./services/emailService");
+const jwtConfig_1 = require("./config/jwtConfig");
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const server = (0, http_1.createServer)(app_1.default);
@@ -131,6 +132,18 @@ io.on('connection', (socket) => {
  * Start Server (Next.js in-process + Express)
  */
 async function startServer() {
+    // Fail closed if required JWT secrets are missing or weak in production/staging
+    try {
+        (0, jwtConfig_1.validateJwtEnvironment)();
+    }
+    catch (jwtErr) {
+        console.error('\n════════════════════════════════════════════════════════════════');
+        console.error('  🛑 SERVER STARTUP BLOCKED: JWT CONFIGURATION ERROR');
+        console.error('════════════════════════════════════════════════════════════════');
+        console.error(jwtErr?.message || 'Invalid JWT secret configuration.');
+        console.error('Application startup aborted. Please configure high-entropy secrets in environment settings.\n');
+        process.exit(1);
+    }
     const isDevProcess = Boolean(process.env.TS_NODE_DEV) || process.env.NODE_ENV === 'development';
     const isProduction = process.env.NODE_ENV === 'production' && !isDevProcess;
     const resolvedFrontendDir = fs_1.default.existsSync(path_1.default.resolve(__dirname, '../../frontend'))

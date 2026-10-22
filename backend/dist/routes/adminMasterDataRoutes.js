@@ -5,7 +5,7 @@ const authMiddleware_1 = require("../middleware/authMiddleware");
 const adminMasterDataController_1 = require("../controllers/adminMasterDataController");
 const router = (0, express_1.Router)();
 // Apply admin authentication to all master-data routes
-router.use(authMiddleware_1.requireAuth, (0, authMiddleware_1.requireRole)('admin'));
+router.use(authMiddleware_1.requireAdminAuth);
 router.get('/summary', adminMasterDataController_1.getMasterDataSummary);
 router.get('/items', adminMasterDataController_1.getMasterDataItems);
 router.post('/items', adminMasterDataController_1.createMasterDataItem);

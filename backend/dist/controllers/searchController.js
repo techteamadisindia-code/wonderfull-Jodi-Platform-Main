@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.searchProfiles = searchProfiles;
 const prismaBridge_1 = __importDefault(require("../db/prismaBridge"));
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const jwtConfig_1 = require("../config/jwtConfig");
 const Profile_1 = require("../models/Profile");
 const User_1 = require("../models/User");
 const Block_1 = require("../models/Block");
@@ -22,7 +22,7 @@ async function searchProfiles(req, res, next) {
         const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : cookieToken;
         if (token) {
             try {
-                const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026');
+                const decoded = (0, jwtConfig_1.verifyAccessToken)(token);
                 if (decoded?.userId || decoded?.id) {
                     currentUserId = decoded.userId || decoded.id;
                     try {

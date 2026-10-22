@@ -8,7 +8,7 @@ const router = (0, express_1.Router)();
 router.get('/public/:publicId', biodataController_1.getPublicBiodata);
 // Authenticated Routes
 router.get('/profile', authMiddleware_1.requireAuth, biodataController_1.getProfileForBiodata);
-router.get('/admin/stats', authMiddleware_1.requireAuth, (0, authMiddleware_1.requireRole)('admin'), biodataController_1.getAdminBiodataStats);
+router.get('/admin/stats', authMiddleware_1.requireAdminAuth, biodataController_1.getAdminBiodataStats);
 router.get('/', authMiddleware_1.requireAuth, biodataController_1.listBiodatas);
 router.post('/', authMiddleware_1.requireAuth, biodataController_1.createBiodata);
 router.get('/:id', authMiddleware_1.requireAuth, biodataController_1.getBiodataById);

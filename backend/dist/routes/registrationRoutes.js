@@ -11,7 +11,7 @@ router.post('/step', registrationController_1.saveStep);
 router.post('/save', registrationController_1.saveStep);
 router.post('/auto-save', registrationController_1.autoSave);
 router.get('/check-availability', registrationController_1.checkAvailability);
-router.get('/incomplete/count', authMiddleware_1.requireAuth, (0, authMiddleware_1.requireRole)('admin'), registrationController_1.getIncompleteRegistrationsCount);
+router.get('/incomplete/count', authMiddleware_1.requireAdminAuth, registrationController_1.getIncompleteRegistrationsCount);
 router.post('/validate', registrationController_1.validateRegistrationDraft);
 router.get('/:registrationId/validate', registrationController_1.validateRegistrationDraft);
 router.post('/:registrationId/validate', registrationController_1.validateRegistrationDraft);

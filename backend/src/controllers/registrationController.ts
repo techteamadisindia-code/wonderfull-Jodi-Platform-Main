@@ -13,6 +13,7 @@ import { getNextCandidateId } from '../models/Counter';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { escapeRegex, isValidObjectId } from '../utils/securityUtils';
 import jwt from 'jsonwebtoken';
+import { signJwtToken } from '../config/jwtConfig';
 import {
   validateDateOfBirth,
   validateMedicalQualification,
@@ -1649,11 +1650,9 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
     }
 
     // 4. Generate Auth JWT Token for immediate login
-    const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
-    const accessToken = jwt.sign(
+    const accessToken = signJwtToken(
       { userId: String(newUser._id || (newUser as any).id), role: newUser.role },
-      secret,
-      { expiresIn: '7d' }
+      { expiresIn: '7d', purpose: 'access' }
     );
 
     return res.status(201).json({

@@ -5,6 +5,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.registerNextHandler = registerNextHandler;
 require("./config/env");
+const jwtConfig_1 = require("./config/jwtConfig");
+// Central JWT environment check at app initialization
+(0, jwtConfig_1.validateJwtEnvironment)();
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));

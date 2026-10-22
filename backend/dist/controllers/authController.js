@@ -52,7 +52,7 @@ exports.resetPassword = resetPassword;
 exports.changePassword = changePassword;
 exports.getCurrentUser = getCurrentUser;
 const bcrypt_1 = __importDefault(require("bcrypt"));
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const jwtConfig_1 = require("../config/jwtConfig");
 const zod_1 = require("zod");
 const User_1 = require("../models/User");
 const Profile_1 = require("../models/Profile");
@@ -168,8 +168,7 @@ const changePasswordSchema = zod_1.z
  * Sign short-lived Access Token (15m)
  */
 function signAccessToken(userId, role) {
-    const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
-    return jsonwebtoken_1.default.sign({ userId, role }, secret, { expiresIn: '15m' });
+    return (0, jwtConfig_1.signJwtToken)({ userId, role }, { expiresIn: '15m', purpose: 'access' });
 }
 /**
  * Issue new Refresh Token with family tracking for rotation

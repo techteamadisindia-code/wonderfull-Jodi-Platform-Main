@@ -1,4 +1,8 @@
 import './config/env';
+import { validateJwtEnvironment } from './config/jwtConfig';
+
+// Central JWT environment check at app initialization
+validateJwtEnvironment();
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';

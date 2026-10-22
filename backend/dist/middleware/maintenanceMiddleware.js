@@ -1,9 +1,12 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getCachedMaintenanceConfig = getCachedMaintenanceConfig;
 exports.invalidateMaintenanceCache = invalidateMaintenanceCache;
 exports.checkMaintenanceMode = checkMaintenanceMode;
-const jwtConfig_1 = require("../config/jwtConfig");
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const Setting_1 = require("../models/Setting");
 // In-memory cache with 10-second TTL to avoid hitting MongoDB on every API request
 let cachedConfig = null;
@@ -68,18 +71,19 @@ async function checkMaintenanceMode(req, res, next) {
     // Check if request is from an authenticated Administrator
     const authHeader = req.headers.authorization;
     let token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
-    if (!token && req.cookies) {
-        token = req.cookies.admin_access_token || req.cookies.access_token;
+    if (!token && req.cookies?.access_token) {
+        token = req.cookies.access_token;
     }
     if (token && config.allowAdminAccess) {
         try {
-            const payload = (0, jwtConfig_1.verifyAdminToken)(token);
+            const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+            const payload = jsonwebtoken_1.default.verify(token, secret);
             if (payload && payload.role === 'admin') {
                 return next();
             }
         }
         catch {
-            // Invalid, expired, or non-administrator token - proceed to maintenance block
+            // Invalid or expired token - proceed to maintenance block
         }
     }
     // Allow admin login attempts during maintenance

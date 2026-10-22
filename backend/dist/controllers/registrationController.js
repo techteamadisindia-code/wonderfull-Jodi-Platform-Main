@@ -62,7 +62,7 @@ const AuditLog_1 = require("../models/AuditLog");
 const Location_1 = require("../models/Location");
 const Counter_1 = require("../models/Counter");
 const securityUtils_1 = require("../utils/securityUtils");
-const jwtConfig_1 = require("../config/jwtConfig");
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const doctorValidation_1 = require("../utils/doctorValidation");
 const termsConfig_1 = require("../config/termsConfig");
 /**
@@ -1565,7 +1565,8 @@ async function completeRegistration(req, res, next) {
             }
         }
         // 4. Generate Auth JWT Token for immediate login
-        const accessToken = (0, jwtConfig_1.signJwtToken)({ userId: String(newUser._id || newUser.id), role: newUser.role }, { expiresIn: '7d', purpose: 'access' });
+        const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+        const accessToken = jsonwebtoken_1.default.sign({ userId: String(newUser._id || newUser.id), role: newUser.role }, secret, { expiresIn: '7d' });
         return res.status(201).json({
             success: true,
             message: 'Registration completed successfully! Welcome to Wonderful Jodi.',

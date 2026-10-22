@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
-import { signJwtToken } from '../config/jwtConfig';
+import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { User } from '../models/User';
 import { Profile } from '../models/Profile';
@@ -137,7 +137,8 @@ const changePasswordSchema = z
  * Sign short-lived Access Token (15m)
  */
 function signAccessToken(userId: string, role: string): string {
-  return signJwtToken({ userId, role }, { expiresIn: '15m', purpose: 'access' });
+  const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+  return jwt.sign({ userId, role }, secret, { expiresIn: '15m' });
 }
 
 /**

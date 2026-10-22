@@ -1,14 +1,11 @@
 import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { verifyAccessToken, verifyAdminToken } from '../config/jwtConfig';
 
 interface JwtPayloadWithRole {
   userId: string;
   role: string;
   email?: string;
   sessionId?: string;
-  tokenType?: string;
-  purpose?: string;
   _id?: string;
   id?: string;
   fullName?: string;
@@ -33,7 +30,8 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
   }
 
   try {
-    const payload = verifyAccessToken(token) as JwtPayloadWithRole;
+    const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+    const payload = jwt.verify(token, secret) as JwtPayloadWithRole;
     req.user = payload;
 
     // Check account status if userId exists to prevent deactivated/deleted users from accessing routes
@@ -89,60 +87,11 @@ export function requireRole(role: string) {
       return res.status(403).json({ success: false, message: 'Access denied: insufficient permissions' });
     }
 
-    // Enforce active administrator account verification and dedicated admin token type
-    if (role === 'admin') {
-      if (req.user.tokenType !== 'admin_access') {
-        return res.status(403).json({
-          success: false,
-          message: 'Access denied: Administrator privileges required.',
-        });
-      }
-
-      if (req.user.userId) {
-        try {
-          const { User } = await import('../models/User');
-          const adminUser = await User.findById(req.user.userId);
-          if (adminUser && (adminUser.isDeleted || adminUser.isActive === false || adminUser.status === 'Deleted')) {
-            return res.status(403).json({
-              success: false,
-              code: 'ADMIN_DEACTIVATED',
-              message: 'Administrator account is deactivated or deleted.',
-            });
-          }
-        } catch (err) {
-          // Fallback
-        }
-      }
-    }
-
-    next();
-  };
-}
-
-export async function requireAdminAuth(req: AuthRequest, res: Response, next: NextFunction) {
-  // 1. Check Bearer Authorization Header
-  const authHeader = req.headers.authorization;
-  let token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
-
-  // 2. Fallback to HttpOnly cookie (admin_access_token or access_token)
-  if (!token && req.cookies) {
-    token = req.cookies.admin_access_token || req.cookies.access_token;
-  }
-
-  if (!token) {
-    return res.status(401).json({ success: false, message: 'Administrator authentication required' });
-  }
-
-  try {
-    // Cryptographically verify against dedicated JWT_ADMIN_SECRET and enforce administrator claims
-    const payload = verifyAdminToken(token) as JwtPayloadWithRole;
-    req.user = payload;
-
     // Enforce active administrator account verification
-    if (payload.userId) {
+    if (role === 'admin' && req.user.userId) {
       try {
         const { User } = await import('../models/User');
-        const adminUser = await User.findById(payload.userId);
+        const adminUser = await User.findById(req.user.userId);
         if (adminUser && (adminUser.isDeleted || adminUser.isActive === false || adminUser.status === 'Deleted')) {
           return res.status(403).json({
             success: false,
@@ -151,24 +100,24 @@ export async function requireAdminAuth(req: AuthRequest, res: Response, next: Ne
           });
         }
       } catch (err) {
-        // Fallback gracefully if database lookup is unavailable in lightweight testing
+        // Fallback
       }
     }
 
     next();
-  } catch (error: any) {
-    if (error?.name === 'TokenExpiredError') {
-      return res.status(401).json({
+  };
+}
+
+export function requireAdminAuth(req: AuthRequest, res: Response, next: NextFunction) {
+  requireAuth(req, res, () => {
+    if (!req.user || req.user.role !== 'admin') {
+      return res.status(403).json({
         success: false,
-        code: 'TOKEN_EXPIRED',
-        message: 'Administrator session has expired. Please sign in again.',
+        message: 'Access denied: Administrator privileges required.',
       });
     }
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid or expired administrator authentication token',
-    });
-  }
+    next();
+  });
 }
 
 /**
@@ -188,7 +137,8 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
   }
 
   try {
-    const payload = verifyAccessToken(token) as any;
+    const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+    const payload = jwt.verify(token, secret) as any;
     req.user = payload;
   } catch {
     // Graceful fallback for invalid/expired tokens in optional context

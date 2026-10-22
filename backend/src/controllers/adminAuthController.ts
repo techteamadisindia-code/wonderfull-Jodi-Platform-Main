@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
-import { signJwtToken } from '../config/jwtConfig';
+import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { User } from '../models/User';
 import { Admin } from '../models/Admin';
@@ -79,8 +79,9 @@ const adminChangePasswordSchema = z
   });
 
 function signAdminAccessToken(userId: string, role: string, email: string, sessionId?: string): string {
+  const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
   // Admin access token has 15 minute lifetime
-  return signJwtToken(
+  return jwt.sign(
     {
       userId,
       role,
@@ -88,7 +89,8 @@ function signAdminAccessToken(userId: string, role: string, email: string, sessi
       sessionId,
       sub: userId,
     },
-    { expiresIn: '15m', purpose: 'admin' }
+    secret,
+    { expiresIn: '15m' }
   );
 }
 

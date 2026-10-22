@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import mongoose from '../db/prismaBridge';
-import { verifyAccessToken } from '../config/jwtConfig';
+import jwt from 'jsonwebtoken';
 import { Profile } from '../models/Profile';
 import { User } from '../models/User';
 import { Block } from '../models/Block';
@@ -58,7 +58,10 @@ export async function searchProfiles(req: Request, res: Response, next: NextFunc
 
     if (token) {
       try {
-        const decoded: any = verifyAccessToken(token);
+        const decoded: any = jwt.verify(
+          token,
+          process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026'
+        );
         if (decoded?.userId || decoded?.id) {
           currentUserId = decoded.userId || decoded.id;
 

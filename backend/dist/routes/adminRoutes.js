@@ -5,8 +5,8 @@ const authMiddleware_1 = require("../middleware/authMiddleware");
 const adminController_1 = require("../controllers/adminController");
 const membershipPlanAdminController_1 = require("../controllers/membershipPlanAdminController");
 const router = (0, express_1.Router)();
-// All admin routes require valid administrator token & 'admin' role
-router.use(authMiddleware_1.requireAdminAuth);
+// All admin routes require valid JWT & 'admin' role
+router.use(authMiddleware_1.requireAuth, (0, authMiddleware_1.requireRole)('admin'));
 // 1. Dashboard & Analytics
 router.get('/dashboard', adminController_1.getDashboardStats);
 router.get('/dashboard/stats', adminController_1.getDashboardStats);

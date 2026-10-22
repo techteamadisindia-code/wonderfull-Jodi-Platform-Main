@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyAdminToken } from '../config/jwtConfig';
+import jwt from 'jsonwebtoken';
 import { Setting } from '../models/Setting';
 
 export interface MaintenanceStatusData {
@@ -94,18 +94,19 @@ export async function checkMaintenanceMode(req: Request, res: Response, next: Ne
   // Check if request is from an authenticated Administrator
   const authHeader = req.headers.authorization;
   let token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
-  if (!token && req.cookies) {
-    token = req.cookies.admin_access_token || req.cookies.access_token;
+  if (!token && req.cookies?.access_token) {
+    token = req.cookies.access_token;
   }
 
   if (token && config.allowAdminAccess) {
     try {
-      const payload = verifyAdminToken(token);
+      const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+      const payload = jwt.verify(token, secret) as { role?: string };
       if (payload && payload.role === 'admin') {
         return next();
       }
     } catch {
-      // Invalid, expired, or non-administrator token - proceed to maintenance block
+      // Invalid or expired token - proceed to maintenance block
     }
   }
 

@@ -189,11 +189,11 @@ async function sendMessage(req, res, next) {
                 lastActivityAt: new Date(),
             });
         }
-        // Check if conversation itself is blocked
-        if (conversation.status === 'BLOCKED' || conversation.complianceStatus === 'BLOCKED') {
+        // Check if conversation itself is blocked or archived
+        if (conversation.status === 'BLOCKED' || conversation.complianceStatus === 'BLOCKED' || conversation.status === 'ARCHIVED') {
             return res.status(403).json({
                 success: false,
-                message: 'This conversation has been restricted by platform safety moderation',
+                message: 'This conversation has been restricted or archived and is read-only',
             });
         }
         // ─── 3. MESSAGE MODERATION & CONTACT INFO DETECTION ───
@@ -442,6 +442,31 @@ async function getConversationMessagesForUser(req, res, next) {
         if (!conversation) {
             return res.status(404).json({ success: false, message: 'Conversation not found' });
         }
+        const conv = conversation;
+        const otherParticipant = conv?.participants?.find((p) => String(p._id || p) !== String(userId));
+        const otherUserId = otherParticipant ? String(otherParticipant._id || otherParticipant) : null;
+        const isAdmin = req.user?.role === 'admin';
+        if (!isAdmin && otherUserId) {
+            const interest = await Interest_1.Interest.findOne({
+                $or: [
+                    { sender: userId, receiver: otherUserId },
+                    { sender: otherUserId, receiver: userId },
+                ],
+            });
+            if (!interest || interest.status !== 'ACCEPTED') {
+                return res.status(403).json({
+                    success: false,
+                    code: 'INTEREST_NOT_ACCEPTED',
+                    message: 'Chat messages are accessible only when the interest connection is accepted.',
+                });
+            }
+        }
+        if (conv.status === 'ARCHIVED' && !isAdmin) {
+            return res.status(403).json({
+                success: false,
+                message: 'This conversation has been archived and is not accessible',
+            });
+        }
         // Mark messages sent by the other user as read
         await Message_1.Message.updateMany({ conversation: id, receiver: userId, read: false }, { $set: { read: true } });
         const messages = await Message_1.Message.find({ conversation: id })
@@ -449,8 +474,6 @@ async function getConversationMessagesForUser(req, res, next) {
             .populate('receiver', 'fullName')
             .sort({ createdAt: 1 })
             .lean();
-        const conv = conversation;
-        const otherParticipant = conv?.participants?.find((p) => String(p._id) !== String(userId));
         const otherProfile = otherParticipant
             ? await Profile_1.Profile.findOne({ user: otherParticipant._id }).select('displayName primaryPhoto photos profession specialization degree education city state').lean()
             : null;

@@ -808,6 +808,11 @@ async function runSuite() {
   await test('blockUser fails closed with HTTP 503 when blocks table schema is un-migrated (never acknowledges false block)', async () => {
     const origFindOneAndUpdate = Block.findOneAndUpdate;
     const origUserFindById = User.findById;
+    const origProfileFindOne = Profile.findOne;
+
+    Profile.findOne = () => ({
+      then(r) { r(null); },
+    });
     User.findById = (id) => ({
       select: async () => ({ _id: id, id }),
       then(r) { r({ _id: id, id, fullName: 'Dr. Target' }); },
@@ -836,12 +841,18 @@ async function runSuite() {
     } finally {
       Block.findOneAndUpdate = origFindOneAndUpdate;
       User.findById = origUserFindById;
+      Profile.findOne = origProfileFindOne;
     }
   });
 
   await test('unblockUser fails closed with HTTP 503 when blocks table schema is un-migrated', async () => {
     const origFindOneAndDelete = Block.findOneAndDelete;
     const origUserFindById = User.findById;
+    const origProfileFindOne = Profile.findOne;
+
+    Profile.findOne = () => ({
+      then(r) { r(null); },
+    });
     User.findById = (id) => ({
       select: async () => ({ _id: id, id }),
       then(r) { r({ _id: id, id, fullName: 'Dr. Target' }); },
@@ -869,6 +880,7 @@ async function runSuite() {
     } finally {
       Block.findOneAndDelete = origFindOneAndDelete;
       User.findById = origUserFindById;
+      Profile.findOne = origProfileFindOne;
     }
   });
 

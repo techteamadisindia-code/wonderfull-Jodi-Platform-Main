@@ -15,6 +15,23 @@ export interface INotification extends Document {
   updatedAt: Date;
 }
 
+/**
+ * Canonical helper to check if a notification has been soft-deleted/trashed.
+ * Soft-deletion is stored within the standard `metadata` JSON column.
+ */
+export function isNotificationTrashed(metadata: any): boolean {
+  if (!metadata) return false;
+  let parsed = metadata;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return false;
+    }
+  }
+  return Boolean(parsed?.isDeleted || parsed?.trashed);
+}
+
 const notificationSchema = new Schema<INotification>(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },

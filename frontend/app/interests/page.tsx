@@ -22,6 +22,7 @@ import {
   AlertCircle,
   Loader2,
   X,
+  UserMinus,
 } from 'lucide-react';
 import {
   fetchReceivedInterests,
@@ -29,6 +30,7 @@ import {
   fetchAcceptedConnections,
   acceptInterest,
   rejectInterest,
+  withdrawInterest,
   InterestItem,
 } from '../../services/interestApi';
 import { fetchMySubscription, UserSubscriptionDetails } from '../../services/membershipApi';
@@ -69,6 +71,10 @@ function InterestsContent() {
 
   // Upgrade Modal State
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+  // Withdraw Confirmation Modal State
+  const [withdrawTarget, setWithdrawTarget] = useState<InterestItem | null>(null);
+  const [withdrawLoading, setWithdrawLoading] = useState(false);
 
   // 1. Check Auth & Load Membership
   useEffect(() => {
@@ -165,6 +171,46 @@ function InterestsContent() {
       });
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  // Handle Withdraw Acceptance
+  const handleWithdrawConfirm = async () => {
+    if (!withdrawTarget || withdrawLoading) return;
+    setWithdrawLoading(true);
+    setFeedback(null);
+    try {
+      await withdrawInterest(withdrawTarget._id);
+
+      // Update UI state immediately without requiring manual page reload:
+      // 1. Remove from acceptedList
+      setAcceptedList((prev) => prev.filter((item) => item._id !== withdrawTarget._id));
+
+      // 2. Add to rejectedList with status 'REJECTED'
+      const updatedItem: InterestItem = {
+        ...withdrawTarget,
+        status: 'REJECTED',
+        updatedAt: new Date().toISOString(),
+      };
+      setRejectedList((prev) => [updatedItem, ...prev]);
+
+      setFeedback({
+        text: 'Connection withdrawn. The other doctor has been notified.',
+        type: 'success',
+      });
+      setWithdrawTarget(null);
+    } catch (err: any) {
+      console.error('Error withdrawing connection:', err);
+      const msg =
+        err.response?.data?.message ||
+        err.message ||
+        'Failed to withdraw connection. Please try again.';
+      setFeedback({
+        text: msg,
+        type: 'error',
+      });
+    } finally {
+      setWithdrawLoading(false);
     }
   };
 
@@ -679,38 +725,51 @@ function InterestsContent() {
                           </div>
 
                           {/* Action Buttons */}
-                          <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                            {profileId ? (
-                              <Link
-                                href={`/profile/${profileId}`}
-                                className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-[#E51F3E] transition"
-                              >
-                                <span>View Profile</span>
-                                <ExternalLink className="w-3 h-3" />
-                              </Link>
-                            ) : (
-                              <div />
-                            )}
+                          <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-3">
+                              {profileId && (
+                                <Link
+                                  href={`/profile/${profileId}`}
+                                  className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-[#E51F3E] transition"
+                                >
+                                  <span>View Profile</span>
+                                  <ExternalLink className="w-3 h-3" />
+                                </Link>
+                              )}
 
-                            {isPaidMember ? (
                               <button
                                 type="button"
-                                onClick={() => handleChatClick(targetUserId, profileId)}
-                                className="inline-flex items-center gap-1.5 px-4.5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+                                disabled={withdrawLoading && withdrawTarget?._id === interest._id}
+                                onClick={() => setWithdrawTarget(interest)}
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                                title="Withdraw acceptance"
                               >
-                                <MessageSquare className="w-3.5 h-3.5" />
-                                <span>Start Chat</span>
+                                <UserMinus className="w-3.5 h-3.5" />
+                                <span>Withdraw acceptance</span>
                               </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setShowUpgradeModal(true)}
-                                className="inline-flex items-center gap-1.5 px-4.5 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold transition shadow-2xs cursor-pointer"
-                              >
-                                <Lock className="w-3.5 h-3.5 text-amber-600" />
-                                <span>Chat 🔒 Upgrade</span>
-                              </button>
-                            )}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {isPaidMember ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleChatClick(targetUserId, profileId)}
+                                  className="inline-flex items-center gap-1.5 px-4.5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                  <span>Start Chat</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowUpgradeModal(true)}
+                                  className="inline-flex items-center gap-1.5 px-4.5 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold transition shadow-2xs cursor-pointer"
+                                >
+                                  <Lock className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>Chat 🔒 Upgrade</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -854,6 +913,66 @@ function InterestsContent() {
                   <Crown className="w-3.5 h-3.5" />
                   <span>Upgrade Membership</span>
                 </Link>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Withdraw Acceptance Confirmation Modal */}
+        {withdrawTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl border border-rose-100 space-y-5 text-center relative animate-scale-up">
+              <button
+                type="button"
+                disabled={withdrawLoading}
+                onClick={() => setWithdrawTarget(null)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 cursor-pointer disabled:opacity-40"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 border border-rose-200 flex items-center justify-center mx-auto shadow-sm">
+                <UserMinus className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="font-serif text-xl font-bold text-slate-900">
+                  Withdraw Accepted Connection?
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  Are you sure you want to withdraw your accepted connection with{' '}
+                  <span className="font-semibold text-slate-900">
+                    {withdrawTarget.otherProfile?.displayName ||
+                      (withdrawTarget.otherUser as any)?.fullName ||
+                      (withdrawTarget.isSender ? withdrawTarget.receiverProfile?.displayName : withdrawTarget.senderProfile?.displayName) ||
+                      'this member'}
+                  </span>
+                  ? This will withdraw the mutual connection, close active messaging access, and notify the member.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={withdrawLoading}
+                  onClick={() => setWithdrawTarget(null)}
+                  className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50 transition cursor-pointer disabled:opacity-50"
+                >
+                  Keep Connection
+                </button>
+                <button
+                  type="button"
+                  disabled={withdrawLoading}
+                  onClick={handleWithdrawConfirm}
+                  className="flex-1 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/25 hover:shadow-lg transition text-center inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {withdrawLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <UserMinus className="w-4 h-4" />
+                  )}
+                  <span>Withdraw acceptance</span>
+                </button>
               </div>
             </div>
           </div>

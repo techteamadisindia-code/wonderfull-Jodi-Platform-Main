@@ -11,6 +11,7 @@ import {
   acceptInterest,
   declineInterest,
   rejectInterest,
+  withdrawInterest,
 } from '../controllers/interestController';
 
 const router = Router();
@@ -26,6 +27,8 @@ router.get('/check/:targetId', checkInterestStatus);
 router.patch('/:id/accept', validateObjectIdParam('id'), acceptInterest);
 router.patch('/:id/decline', validateObjectIdParam('id'), declineInterest);
 router.patch('/:id/reject', validateObjectIdParam('id'), rejectInterest);
+router.patch('/:id/withdraw', validateObjectIdParam('id'), withdrawInterest);
+router.post('/:id/withdraw', validateObjectIdParam('id'), withdrawInterest);
 router.put('/:id', validateObjectIdParam('id'), updateInterest);
 
 export default router;

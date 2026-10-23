@@ -99,6 +99,13 @@ export async function declineInterest(interestId: string): Promise<InterestItem>
   return rejectInterest(interestId);
 }
 
+export async function withdrawInterest(interestId: string): Promise<InterestItem> {
+  const response = await apiClient.patch<{ success: boolean; message: string; data: InterestItem }>(
+    `/interests/${interestId}/withdraw`
+  );
+  return response.data.data;
+}
+
 export async function fetchSentInterests(status?: string): Promise<InterestItem[]> {
   const url = status ? `/interests/sent?status=${encodeURIComponent(status)}` : '/interests/sent';
   const response = await apiClient.get<{ success: boolean; data: InterestItem[] }>(url);

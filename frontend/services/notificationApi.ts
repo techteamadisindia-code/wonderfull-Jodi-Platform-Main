@@ -22,6 +22,11 @@ export interface UserNotificationsResponse {
   page: number;
   limit: number;
   totalPages: number;
+  isTruncated?: boolean;
+  isCapped?: boolean;
+  isTotalCapped?: boolean;
+  isUnreadCapped?: boolean;
+  hasMore?: boolean;
 }
 
 export async function fetchUserNotifications(params?: {
@@ -41,14 +46,22 @@ export async function fetchUserNotifications(params?: {
   return response.data.data;
 }
 
-export async function fetchUnreadNotificationCount(): Promise<number> {
+export async function fetchUnreadNotificationCount(): Promise<{ count: number; isCapped?: boolean } & number> {
   try {
-    const response = await apiClient.get<{ success: boolean; data: { count: number } }>(
+    const response = await apiClient.get<{ success: boolean; data: { count: number; isCapped?: boolean } }>(
       '/notifications/unread-count'
     );
-    return response.data.data?.count ?? 0;
+    const count = response.data.data?.count ?? 0;
+    const isCapped = Boolean(response.data.data?.isCapped);
+    const countObj = new Number(count) as any;
+    countObj.count = count;
+    countObj.isCapped = isCapped;
+    return countObj;
   } catch {
-    return 0;
+    const countObj = new Number(0) as any;
+    countObj.count = 0;
+    countObj.isCapped = false;
+    return countObj;
   }
 }
 
@@ -65,3 +78,11 @@ export async function markAllNotificationsAsRead(): Promise<{ message: string; c
   );
   return response.data;
 }
+
+export async function deleteNotification(id: string): Promise<{ success: boolean; message: string }> {
+  const response = await apiClient.delete<{ success: boolean; message: string; data?: any }>(
+    `/notifications/${id}`
+  );
+  return response.data;
+}
+

@@ -20,12 +20,14 @@ import {
   XCircle,
   Loader2,
   GraduationCap,
+  Trash2,
 } from 'lucide-react';
 import {
   fetchUserNotifications,
   fetchUnreadNotificationCount,
   markNotificationAsRead,
   markAllNotificationsAsRead,
+  deleteNotification,
   UserNotificationItem,
 } from '../services/notificationApi';
 import { acceptInterest, rejectInterest } from '../services/interestApi';
@@ -34,18 +36,21 @@ import { DoctorAvatar } from './DoctorAvatar';
 export function NotificationBell() {
   const router = useRouter();
   const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [isUnreadCapped, setIsUnreadCapped] = useState<boolean>(false);
   const [recentNotifications, setRecentNotifications] = useState<UserNotificationItem[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Fetch unread count
   const refreshUnreadCount = useCallback(async () => {
     try {
-      const count = await fetchUnreadNotificationCount();
-      setUnreadCount(count);
+      const countRes = await fetchUnreadNotificationCount();
+      setUnreadCount(Number(countRes) || 0);
+      setIsUnreadCapped(Boolean(countRes?.isCapped));
     } catch {
       // Ignore unauthenticated / error
     }
@@ -58,6 +63,7 @@ export function NotificationBell() {
       const res = await fetchUserNotifications({ page: 1, limit: 6 });
       setRecentNotifications(res.notifications || []);
       setUnreadCount(res.unreadCount || 0);
+      setIsUnreadCapped(Boolean(res.isUnreadCapped || res.isCapped));
     } catch (err) {
       console.error('Failed to load user notifications:', err);
     } finally {
@@ -155,6 +161,28 @@ export function NotificationBell() {
     }
   };
 
+  // Delete read notification with optimistic UI and error recovery
+  const handleDeleteNotification = async (e: React.MouseEvent, notif: UserNotificationItem) => {
+    e.stopPropagation();
+    if (deletingId) return;
+
+    setDeletingId(notif._id);
+    const prevList = [...recentNotifications];
+    setRecentNotifications((prev) => prev.filter((item) => item._id !== notif._id));
+
+    try {
+      await deleteNotification(notif._id);
+      if (!notif.read) {
+        setUnreadCount((c) => Math.max(0, c - 1));
+      }
+    } catch (err) {
+      console.error('Failed to delete notification:', err);
+      setRecentNotifications(prevList);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   // Format relative timestamp
   const formatTime = (dateStr?: string) => {
     if (!dateStr) return '';
@@ -204,7 +232,7 @@ export function NotificationBell() {
         <Bell className="w-4.5 h-4.5" />
         {unreadCount > 0 && (
           <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#E51F3E] text-white text-[10px] font-extrabold flex items-center justify-center shadow-xs border-2 border-white animate-pulse">
-            {unreadCount > 99 ? '99+' : unreadCount}
+            {isUnreadCapped ? `${unreadCount}+` : unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
@@ -370,7 +398,22 @@ export function NotificationBell() {
                         )}
                       </div>
 
-                      {!item.read && (
+                      {item.read ? (
+                        <button
+                          type="button"
+                          aria-label="Delete notification"
+                          title="Delete notification"
+                          disabled={deletingId === item._id}
+                          onClick={(e) => handleDeleteNotification(e, item)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer disabled:opacity-50 shrink-0 self-center border border-transparent hover:border-rose-100"
+                        >
+                          {deletingId === item._id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      ) : (
                         <span className="w-2 h-2 rounded-full bg-[#E51F3E] shrink-0 self-center" />
                       )}
                     </div>

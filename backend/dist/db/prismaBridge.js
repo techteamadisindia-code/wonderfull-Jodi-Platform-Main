@@ -298,6 +298,12 @@ function cleanUnsupportedModelFields(data, modelName) {
         delete data.suspendedBy;
         delete data.suspensionReason;
     }
+    else if (mName === 'notification') {
+        delete data.isDeleted;
+        delete data.deletedAt;
+        delete data.trashed;
+        delete data.trashedAt;
+    }
     return data;
 }
 /**
@@ -1226,11 +1232,155 @@ class PrismaQueryBuilder {
                 return attachSave(clientRecord, this.prismaDelegate, this.fieldMap, this.delegateName);
             }
             else {
-                const records = await this.prismaDelegate.findMany(args);
+                let records;
+                if (this.delegateName === 'notification') {
+                    // Stable ordering: MariaDB requires a deterministic tie-breaker (id desc) when timestamps can match
+                    if (!args.orderBy) {
+                        args.orderBy = [{ createdAt: 'desc' }, { id: 'desc' }];
+                    }
+                    else if (Array.isArray(args.orderBy)) {
+                        const hasId = args.orderBy.some((o) => o && ('id' in o || '_id' in o));
+                        if (!hasId) {
+                            args.orderBy = [...args.orderBy, { id: 'desc' }];
+                        }
+                    }
+                    else if (typeof args.orderBy === 'object') {
+                        if (!('id' in args.orderBy) && !('_id' in args.orderBy)) {
+                            args.orderBy = [args.orderBy, { id: 'desc' }];
+                        }
+                    }
+                    // Bounded batch pagination for notifications:
+                    // Soft-deleted/trashed notifications stored in JSON metadata must be excluded before pagination.
+                    // To prevent unbounded in-memory collection and protect Node.js heap memory, records are scanned
+                    // in bounded batches of 100 from MariaDB until the requested active page is fulfilled, data is
+                    // exhausted, or a documented safety scan budget is reached.
+                    const hasPagination = args.skip !== undefined || args.take !== undefined;
+                    const reqSkip = args.skip || 0;
+                    const reqTake = args.take;
+                    if (hasPagination) {
+                        const BATCH_SIZE = 100;
+                        const MAX_SCAN_BUDGET = 2000;
+                        const activeCollected = [];
+                        let activeSkipped = 0;
+                        let dbOffset = 0;
+                        let isTruncated = false;
+                        const baseArgs = { ...args };
+                        delete baseArgs.skip;
+                        delete baseArgs.take;
+                        // Projection safety: Ensure required fields for soft-delete & read state are always fetched
+                        if (baseArgs.select) {
+                            baseArgs.select = {
+                                ...baseArgs.select,
+                                id: true,
+                                metadata: true,
+                                read: true,
+                            };
+                        }
+                        while (dbOffset < MAX_SCAN_BUDGET) {
+                            const batch = await this.prismaDelegate.findMany({
+                                ...baseArgs,
+                                skip: dbOffset,
+                                take: BATCH_SIZE,
+                            });
+                            if (!batch || batch.length === 0)
+                                break;
+                            for (const r of batch) {
+                                let meta = r?.metadata;
+                                if (typeof meta === 'string') {
+                                    try {
+                                        meta = JSON.parse(meta);
+                                    }
+                                    catch {
+                                        meta = {};
+                                    }
+                                }
+                                const isTrashed = Boolean(meta?.isDeleted || meta?.trashed);
+                                if (!isTrashed) {
+                                    if (activeSkipped < reqSkip) {
+                                        activeSkipped++;
+                                    }
+                                    else if (reqTake === undefined || activeCollected.length < reqTake) {
+                                        activeCollected.push(r);
+                                        if (reqTake !== undefined && activeCollected.length === reqTake) {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            dbOffset += batch.length;
+                            if ((reqTake !== undefined && activeCollected.length === reqTake) || batch.length < BATCH_SIZE) {
+                                break;
+                            }
+                        }
+                        if (dbOffset >= MAX_SCAN_BUDGET && (reqTake === undefined || activeCollected.length < reqTake)) {
+                            isTruncated = true;
+                        }
+                        records = activeCollected;
+                        records.isTruncated = isTruncated;
+                        records.scanBudgetExceeded = isTruncated;
+                        records.totalScanned = dbOffset;
+                    }
+                    else {
+                        // When no pagination is specified, scan in bounded batches up to a documented safety budget
+                        const BATCH_SIZE = 100;
+                        const MAX_UNPAGINATED_BUDGET = 500;
+                        const activeCollected = [];
+                        let dbOffset = 0;
+                        let isTruncated = false;
+                        const queryArgs = { ...args };
+                        if (queryArgs.select) {
+                            queryArgs.select = {
+                                ...queryArgs.select,
+                                id: true,
+                                metadata: true,
+                                read: true,
+                            };
+                        }
+                        while (dbOffset < MAX_UNPAGINATED_BUDGET) {
+                            const batch = await this.prismaDelegate.findMany({
+                                ...queryArgs,
+                                skip: dbOffset,
+                                take: BATCH_SIZE,
+                            });
+                            if (!batch || batch.length === 0)
+                                break;
+                            for (const r of batch) {
+                                let meta = r?.metadata;
+                                if (typeof meta === 'string') {
+                                    try {
+                                        meta = JSON.parse(meta);
+                                    }
+                                    catch {
+                                        meta = {};
+                                    }
+                                }
+                                if (!(meta?.isDeleted || meta?.trashed)) {
+                                    activeCollected.push(r);
+                                }
+                            }
+                            dbOffset += batch.length;
+                            if (batch.length < BATCH_SIZE)
+                                break;
+                        }
+                        if (dbOffset >= MAX_UNPAGINATED_BUDGET) {
+                            isTruncated = true;
+                        }
+                        records = activeCollected;
+                        records.isTruncated = isTruncated;
+                        records.scanBudgetExceeded = isTruncated;
+                        records.totalScanned = dbOffset;
+                    }
+                }
+                else {
+                    records = await this.prismaDelegate.findMany(args);
+                }
                 if (records.length > 0 && this.virtualPopulates.length > 0) {
                     await resolveVirtualPopulates(records, this.virtualPopulates, this.delegateName);
                 }
                 const clientRecords = (0, client_2.toClientArray)(records).map((r) => attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap, this.delegateName));
+                clientRecords.isTruncated = Boolean(records?.isTruncated);
+                clientRecords.scanBudgetExceeded = Boolean(records?.scanBudgetExceeded);
+                clientRecords.totalScanned = records?.totalScanned;
                 return clientRecords;
             }
         }
@@ -1914,6 +2064,54 @@ function createPrismaModelAdapter(delegateName, fieldMap = {}) {
             if (!delegate)
                 return 0;
             const where = normalizeFilter(filter, fieldMap);
+            if (String(delegateName) === 'notification') {
+                const BATCH_SIZE = 250;
+                const MAX_COUNT_BUDGET = 5000;
+                let count = 0;
+                let dbOffset = 0;
+                let isCapped = false;
+                while (dbOffset < MAX_COUNT_BUDGET) {
+                    const batch = await delegate.findMany({
+                        where,
+                        select: { id: true, read: true, metadata: true },
+                        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                        skip: dbOffset,
+                        take: BATCH_SIZE,
+                    });
+                    if (!batch || batch.length === 0)
+                        break;
+                    for (const r of batch) {
+                        // Defense-in-depth: If filter specified read status, verify field matches projection
+                        if (where.read !== undefined && r.read !== undefined && r.read !== where.read) {
+                            continue;
+                        }
+                        let meta = r?.metadata;
+                        if (typeof meta === 'string') {
+                            try {
+                                meta = JSON.parse(meta);
+                            }
+                            catch {
+                                count++;
+                                continue;
+                            }
+                        }
+                        if (!(meta?.isDeleted || meta?.trashed)) {
+                            count++;
+                        }
+                    }
+                    dbOffset += batch.length;
+                    if (batch.length < BATCH_SIZE)
+                        break;
+                }
+                if (dbOffset >= MAX_COUNT_BUDGET) {
+                    isCapped = true;
+                }
+                const countNum = new Number(count);
+                countNum.count = count;
+                countNum.isCapped = isCapped;
+                countNum.cappedAt = isCapped ? MAX_COUNT_BUDGET : undefined;
+                return countNum;
+            }
             return await delegate.count({ where });
         }
         catch (err) {

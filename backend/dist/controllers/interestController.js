@@ -6,6 +6,7 @@ exports.createInterest = createInterest;
 exports.checkInterestStatus = checkInterestStatus;
 exports.acceptInterest = acceptInterest;
 exports.declineInterest = declineInterest;
+exports.withdrawInterest = withdrawInterest;
 exports.updateInterest = updateInterest;
 exports.getSentInterests = getSentInterests;
 exports.getReceivedInterests = getReceivedInterests;
@@ -26,8 +27,10 @@ const createInterestSchema = zod_1.z.object({
     targetUserId: zod_1.z.string().optional(),
 });
 const updateInterestSchema = zod_1.z.object({
-    status: zod_1.z.enum(['ACCEPTED', 'DECLINED', 'REJECTED', 'CANCELLED']),
+    status: zod_1.z.enum(['ACCEPTED', 'DECLINED', 'REJECTED', 'CANCELLED', 'WITHDRAWN']),
 });
+// Mutex coordinator to serialize concurrent state transitions on the same interest
+const inFlightInterestTransitions = new Map();
 /**
  * Safely extracts a string ID from an entity, populated object, or scalar fallback.
  * Returns an empty string if the ID is missing or invalid, preventing unhandled TypeErrors.
@@ -345,103 +348,283 @@ async function acceptInterest(req, res, next) {
         if (!(0, securityUtils_1.isValidObjectId)(id)) {
             return res.status(400).json({ success: false, message: 'Invalid interest ID' });
         }
-        const interest = await Interest_1.Interest.findById(id);
-        if (!interest) {
-            return res.status(404).json({ success: false, message: 'Interest not found' });
+        const lockKey = `accept:${String(id)}`;
+        while (inFlightInterestTransitions.has(lockKey)) {
+            await inFlightInterestTransitions.get(lockKey);
         }
-        const interestReceiverId = extractEntityId(interest.receiver, interest.receiverId);
-        const interestSenderId = extractEntityId(interest.sender, interest.senderId);
-        if (!interestReceiverId || !interestSenderId) {
-            return res.status(500).json({
-                success: false,
-                message: 'Interest record has missing sender or receiver details',
-            });
-        }
-        const isReceiver = interestReceiverId === userId;
-        const isAdmin = req.user?.role === 'admin';
-        if (!isReceiver && !isAdmin) {
-            return res.status(403).json({
-                success: false,
-                message: 'Only the recipient can accept this interest request',
-            });
-        }
-        if (interest.status !== 'PENDING') {
-            return res.status(400).json({
-                success: false,
-                message: 'Interest request is not pending',
-            });
-        }
-        interest.status = 'ACCEPTED';
-        await interest.save();
-        // Fetch recipient info for sender notification
-        const recipientUser = await User_1.User.findById(userId);
-        const recipientProfile = await Profile_1.Profile.findOne({ user: userId });
-        const recipientName = recipientProfile?.displayName || recipientUser?.fullName || 'Your match';
-        const recipientPhoto = recipientProfile?.primaryPhoto || recipientProfile?.photos?.[0] || '';
-        const recipientProfileId = recipientProfile ? String(recipientProfile._id) : '';
-        // Create database Notification for sender
-        const senderUserId = interestSenderId;
-        const notification = await Notification_1.Notification.create({
-            user: senderUserId,
-            type: 'INTEREST_ACCEPTED',
-            title: 'Interest Accepted! 🎉',
-            message: 'Your interest has been accepted.',
-            actionUrl: `/messages?user=${userId}`,
-            link: `/messages?user=${userId}`,
-            read: false,
-            metadata: {
-                interestId: interest._id,
-                recipientUserId: userId,
-                recipientName,
-                recipientPhoto,
-                recipientProfileId,
-                type: 'INTEREST_ACCEPTED',
-            },
+        let releaseLock;
+        const lockPromise = new Promise((resolve) => {
+            releaseLock = resolve;
         });
-        // Ensure active Conversation exists between participants
-        let conversation = await Conversation_1.Conversation.findOne({
-            participants: { $all: [senderUserId, userId], $size: 2 },
-        });
-        if (!conversation) {
-            conversation = await Conversation_1.Conversation.create({
-                participants: [senderUserId, userId],
-                interest: interest._id,
-                status: 'ACTIVE',
-                complianceStatus: 'SAFE',
-                messageCount: 0,
-                lastActivityAt: new Date(),
-            });
-        }
-        else {
-            conversation.status = 'ACTIVE';
-            conversation.interest = interest._id;
-            await conversation.save();
-        }
-        // Real-time notification via Socket.IO
-        const io = req.app?.get('io');
-        if (io) {
-            io.to(`user:${senderUserId}`).emit('newNotification', {
-                notification,
-                unreadCountDelta: 1,
-            });
-            io.to(`user:${senderUserId}`).emit('interestAccepted', {
-                interest,
-                conversationId: conversation._id,
-                recipient: {
-                    id: userId,
-                    name: recipientName,
-                    photo: recipientPhoto,
+        inFlightInterestTransitions.set(lockKey, lockPromise);
+        try {
+            const interest = await Interest_1.Interest.findById(id);
+            if (!interest) {
+                return res.status(404).json({ success: false, message: 'Interest not found' });
+            }
+            const interestReceiverId = extractEntityId(interest.receiver, interest.receiverId);
+            const interestSenderId = extractEntityId(interest.sender, interest.senderId);
+            if (!interestReceiverId || !interestSenderId) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Interest record has missing sender or receiver details',
+                });
+            }
+            const isReceiver = interestReceiverId === userId;
+            const isAdmin = req.user?.role === 'admin';
+            if (!isReceiver && !isAdmin) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Only the recipient can accept this interest request',
+                });
+            }
+            const senderUserId = interestSenderId;
+            // Idempotent retry handling: if already accepted, return existing connection safely without duplicate notifications
+            if (interest.status === 'ACCEPTED') {
+                const existingConv = await Conversation_1.Conversation.findOne({
+                    participants: { $all: [senderUserId, userId], $size: 2 },
+                });
+                // Self-healing idempotency: ensure the sender has received their acceptance notification
+                let existingNotification = await Notification_1.Notification.findOne({
+                    user: senderUserId,
+                    type: 'INTEREST_ACCEPTED',
+                    'metadata.interestId': String(interest._id),
+                });
+                if (!existingNotification) {
+                    const recipientUser = await User_1.User.findById(userId);
+                    const recipientProfile = await Profile_1.Profile.findOne({ user: userId });
+                    const isNameVisible = recipientProfile?.privacySettings?.nameVisibility !== 'hidden';
+                    const recipientName = (isNameVisible && (recipientProfile?.displayName || recipientUser?.fullName))
+                        ? (recipientProfile?.displayName || recipientUser?.fullName)
+                        : 'Your match';
+                    const recipientPhoto = recipientProfile?.primaryPhoto || recipientProfile?.photos?.[0] || '';
+                    const recipientProfileId = recipientProfile ? String(recipientProfile._id) : '';
+                    existingNotification = await Notification_1.Notification.create({
+                        user: senderUserId,
+                        type: 'INTEREST_ACCEPTED',
+                        title: 'Interest accepted',
+                        message: 'Your interest has been accepted. View your connection to see the next steps.',
+                        actionUrl: '/interests?tab=accepted',
+                        link: '/interests?tab=accepted',
+                        read: false,
+                        metadata: {
+                            interestId: String(interest._id),
+                            recipientUserId: userId,
+                            recipientName,
+                            recipientPhoto,
+                            recipientProfileId,
+                            type: 'INTEREST_ACCEPTED',
+                        },
+                    });
+                }
+                return res.json({
+                    success: true,
+                    message: 'Interest already accepted',
+                    data: {
+                        interest,
+                        conversationId: existingConv?._id,
+                    },
+                });
+            }
+            if (interest.status !== 'PENDING') {
+                return res.status(400).json({
+                    success: false,
+                    message: `Interest request cannot be accepted from current status: ${interest.status}`,
+                });
+            }
+            // Save previous status for compensating rollback if required notification creation fails
+            const previousStatus = interest.status;
+            // Concurrency guard: Perform atomic conditional update if supported to guarantee single-flight acceptance
+            let updateResult = null;
+            if (typeof Interest_1.Interest.updateOne === 'function') {
+                try {
+                    updateResult = await Interest_1.Interest.updateOne({ _id: interest._id, status: 'PENDING' }, { $set: { status: 'ACCEPTED' } });
+                }
+                catch {
+                    // Fall back to document-level save
+                }
+            }
+            if (updateResult && updateResult.modifiedCount === 0) {
+                const current = await Interest_1.Interest.findById(id);
+                if (current?.status === 'ACCEPTED') {
+                    const existingConv = await Conversation_1.Conversation.findOne({
+                        $or: [
+                            { interest: interest._id },
+                            { participants: { $all: [interestSenderId, interestReceiverId], $size: 2 } },
+                        ],
+                    });
+                    return res.json({
+                        success: true,
+                        message: 'Interest already accepted',
+                        data: {
+                            interest: current,
+                            conversationId: existingConv?._id,
+                        },
+                    });
+                }
+                return res.status(400).json({
+                    success: false,
+                    message: `Interest request cannot be accepted from current status: ${current?.status || interest.status}`,
+                });
+            }
+            // M-1: Remove redundant status writes.
+            // If updateResult already persisted the status via updateOne, do not execute a redundant interest.save()
+            if (!updateResult || updateResult.modifiedCount === undefined) {
+                interest.status = 'ACCEPTED';
+                await interest.save();
+            }
+            else {
+                interest.status = 'ACCEPTED';
+            }
+            let notification;
+            let conversation;
+            let recipientName = 'Your match';
+            let recipientPhoto = '';
+            try {
+                // Fetch recipient info for sender notification respecting privacy settings
+                const recipientUser = await User_1.User.findById(userId);
+                const recipientProfile = await Profile_1.Profile.findOne({ user: userId });
+                const isNameVisible = recipientProfile?.privacySettings?.nameVisibility !== 'hidden';
+                const candidateRecipientName = (recipientProfile?.displayName || recipientUser?.fullName) || '';
+                recipientName = (isNameVisible && candidateRecipientName)
+                    ? candidateRecipientName
+                    : 'Your match';
+                recipientPhoto = recipientProfile?.primaryPhoto || recipientProfile?.photos?.[0] || '';
+                const recipientProfileId = recipientProfile ? String(recipientProfile._id) : '';
+                // Check for existing notification to guarantee retries/concurrency cannot create duplicate notifications
+                notification = await Notification_1.Notification.findOne({
+                    user: senderUserId,
+                    type: 'INTEREST_ACCEPTED',
+                    'metadata.interestId': String(interest._id),
+                });
+                if (!notification) {
+                    notification = await Notification_1.Notification.create({
+                        user: senderUserId,
+                        type: 'INTEREST_ACCEPTED',
+                        title: 'Interest accepted',
+                        message: 'Your interest has been accepted. View your connection to see the next steps.',
+                        actionUrl: '/interests?tab=accepted',
+                        link: '/interests?tab=accepted',
+                        read: false,
+                        metadata: {
+                            interestId: String(interest._id),
+                            recipientUserId: userId,
+                            recipientName,
+                            recipientPhoto,
+                            recipientProfileId,
+                            type: 'INTEREST_ACCEPTED',
+                        },
+                    });
+                }
+                // Ensure active Conversation exists between participants
+                conversation = await Conversation_1.Conversation.findOne({
+                    participants: { $all: [senderUserId, userId], $size: 2 },
+                });
+                if (!conversation) {
+                    conversation = await Conversation_1.Conversation.create({
+                        participants: [senderUserId, userId],
+                        interest: interest._id,
+                        status: 'ACTIVE',
+                        complianceStatus: 'SAFE',
+                        messageCount: 0,
+                        lastActivityAt: new Date(),
+                    });
+                }
+                else {
+                    conversation.status = 'ACTIVE';
+                    conversation.interest = interest._id;
+                    if (typeof conversation.save === 'function') {
+                        await conversation.save();
+                    }
+                }
+            }
+            catch (createErr) {
+                // H-2: Conditional compensating rollback!
+                // Attempt rollback ONLY if the current persisted status remains 'ACCEPTED'.
+                // If zero records were modified, another operation changed the state, so do NOT overwrite it.
+                // Never call an unconditional stale interest.save().
+                try {
+                    let rollbackResult = null;
+                    if (typeof Interest_1.Interest.updateOne === 'function') {
+                        try {
+                            rollbackResult = await Interest_1.Interest.updateOne({ _id: interest._id, status: 'ACCEPTED' }, { $set: { status: previousStatus } });
+                        }
+                        catch (updateOneErr) {
+                            if (!updateResult || updateResult.modifiedCount === undefined) {
+                                interest.status = previousStatus;
+                                if (typeof interest.save === 'function') {
+                                    await interest.save();
+                                }
+                                console.warn(`[InterestController] Successfully rolled back interest ${interest._id} to ${previousStatus} following notification/conversation failure via document save.`);
+                                throw createErr;
+                            }
+                            else {
+                                throw updateOneErr;
+                            }
+                        }
+                    }
+                    if (rollbackResult && (rollbackResult.modifiedCount === 1 || rollbackResult.matchedCount === 1)) {
+                        interest.status = previousStatus;
+                        console.warn(`[InterestController] Successfully conditionally rolled back interest ${interest._id} to ${previousStatus} following notification/conversation failure.`);
+                    }
+                    else if (rollbackResult && rollbackResult.modifiedCount === 0) {
+                        console.warn(`[InterestController] Rollback skipped for interest ${interest._id}: persisted status is no longer ACCEPTED (concurrent state change detected across processes).`);
+                    }
+                    else if (!updateResult || updateResult.modifiedCount === undefined) {
+                        // Document fallback when atomic updateOne is not supported or was not used for forward transition
+                        interest.status = previousStatus;
+                        if (typeof interest.save === 'function') {
+                            await interest.save();
+                        }
+                        console.warn(`[InterestController] Successfully rolled back interest ${interest._id} to ${previousStatus} following notification/conversation failure via document save.`);
+                    }
+                    else {
+                        console.warn(`[InterestController] Conditional rollback could not verify status for interest ${interest._id}. State may require manual reconciliation.`);
+                    }
+                }
+                catch (rollbackErr) {
+                    if (rollbackErr === createErr)
+                        throw createErr;
+                    console.error(`[InterestController] CRITICAL: Compensating rollback database call failed for interest ${interest._id} after notification failure. State may require manual reconciliation:`, rollbackErr);
+                }
+                throw createErr;
+            }
+            // Real-time notification via Socket.IO (best effort delivery - durable delivery guaranteed by database record above)
+            const io = req.app?.get('io');
+            if (io) {
+                try {
+                    io.to(`user:${senderUserId}`).emit('newNotification', {
+                        notification,
+                        unreadCountDelta: 1,
+                    });
+                    io.to(`user:${senderUserId}`).emit('interestAccepted', {
+                        interest,
+                        conversationId: conversation?._id,
+                        recipient: {
+                            id: userId,
+                            name: recipientName,
+                            photo: recipientPhoto,
+                        },
+                    });
+                }
+                catch (socketErr) {
+                    console.warn('[InterestController] Non-fatal: Socket.IO notification emission failed:', socketErr);
+                }
+            }
+            res.json({
+                success: true,
+                message: 'Interest accepted successfully. Chat is now available for paid members!',
+                data: {
+                    interest,
+                    conversationId: conversation?._id,
                 },
             });
         }
-        res.json({
-            success: true,
-            message: 'Interest accepted successfully. Chat is now available for paid members!',
-            data: {
-                interest,
-                conversationId: conversation._id,
-            },
-        });
+        finally {
+            inFlightInterestTransitions.delete(lockKey);
+            if (typeof releaseLock === 'function')
+                releaseLock();
+        }
     }
     catch (error) {
         next(error);
@@ -529,6 +712,261 @@ async function declineInterest(req, res, next) {
 }
 exports.rejectInterest = declineInterest;
 /**
+ * Withdraw an accepted connection (transitions from ACCEPTED to REJECTED)
+ */
+async function withdrawInterest(req, res, next) {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+        const { id } = req.params;
+        if (!(0, securityUtils_1.isValidObjectId)(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid interest ID' });
+        }
+        const lockKey = `withdraw:${String(id)}`;
+        while (inFlightInterestTransitions.has(lockKey)) {
+            await inFlightInterestTransitions.get(lockKey);
+        }
+        let releaseLock;
+        const lockPromise = new Promise((resolve) => {
+            releaseLock = resolve;
+        });
+        inFlightInterestTransitions.set(lockKey, lockPromise);
+        try {
+            const interest = await Interest_1.Interest.findById(id);
+            if (!interest) {
+                return res.status(404).json({ success: false, message: 'Interest not found' });
+            }
+            const interestSenderId = extractEntityId(interest.sender, interest.senderId);
+            const interestReceiverId = extractEntityId(interest.receiver, interest.receiverId);
+            if (!interestSenderId || !interestReceiverId) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Interest record has missing sender or receiver details',
+                });
+            }
+            const isParticipant = interestSenderId === userId || interestReceiverId === userId;
+            const isAdmin = req.user?.role === 'admin';
+            if (!isParticipant && !isAdmin) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'You are not authorized to withdraw this connection',
+                });
+            }
+            // Determine the other member who must be notified
+            const partnerUserId = userId === interestReceiverId ? interestSenderId : interestReceiverId;
+            // Idempotency: if already withdrawn / rejected, return safe idempotent success without duplicate notifications
+            if (interest.status === 'REJECTED' || interest.status === 'DECLINED') {
+                // Self-healing: ensure partner received withdrawal notification
+                let existingNotification = await Notification_1.Notification.findOne({
+                    user: partnerUserId,
+                    type: 'INTEREST_WITHDRAWN',
+                    'metadata.interestId': String(interest._id),
+                });
+                if (!existingNotification) {
+                    const withdrawingUser = await User_1.User.findById(userId);
+                    const withdrawingProfile = await Profile_1.Profile.findOne({ user: userId });
+                    const isNameVisible = withdrawingProfile?.privacySettings?.nameVisibility !== 'hidden';
+                    const withdrawingName = (isNameVisible && (withdrawingProfile?.displayName || withdrawingUser?.fullName))
+                        ? (withdrawingProfile?.displayName || withdrawingUser?.fullName)
+                        : 'A member';
+                    existingNotification = await Notification_1.Notification.create({
+                        user: partnerUserId,
+                        type: 'INTEREST_WITHDRAWN',
+                        title: 'Connection withdrawn',
+                        message: `${withdrawingName} has withdrawn the accepted connection.`,
+                        actionUrl: '/interests?tab=rejected',
+                        link: '/interests?tab=rejected',
+                        read: false,
+                        metadata: {
+                            interestId: String(interest._id),
+                            withdrawnByUserId: userId,
+                            type: 'INTEREST_WITHDRAWN',
+                        },
+                    });
+                }
+                return res.json({
+                    success: true,
+                    message: 'Connection already withdrawn',
+                    data: interest,
+                });
+            }
+            if (interest.status !== 'ACCEPTED') {
+                return res.status(400).json({
+                    success: false,
+                    message: `Only accepted connections can be withdrawn. Current status is ${interest.status}`,
+                });
+            }
+            // Save previous status for compensating rollback if required notification or archiving fails
+            const previousStatus = interest.status;
+            // Concurrency guard: Perform atomic conditional update if supported to guarantee single-flight withdrawal
+            let updateResult = null;
+            if (typeof Interest_1.Interest.updateOne === 'function') {
+                try {
+                    updateResult = await Interest_1.Interest.updateOne({ _id: interest._id, status: 'ACCEPTED' }, { $set: { status: 'REJECTED' } });
+                }
+                catch {
+                    // Fall back to document-level save
+                }
+            }
+            if (updateResult && updateResult.modifiedCount === 0) {
+                const current = await Interest_1.Interest.findById(id);
+                if (current?.status === 'REJECTED') {
+                    return res.json({
+                        success: true,
+                        message: 'Connection already withdrawn',
+                        data: current,
+                    });
+                }
+                return res.status(400).json({
+                    success: false,
+                    message: `Only accepted connections can be withdrawn. Current status is ${current?.status || interest.status}`,
+                });
+            }
+            // M-1: Remove redundant status writes.
+            // If updateResult already persisted the status via updateOne, do not execute a redundant interest.save()
+            if (!updateResult || updateResult.modifiedCount === undefined) {
+                interest.status = 'REJECTED';
+                await interest.save();
+            }
+            else {
+                interest.status = 'REJECTED';
+            }
+            let notification;
+            let withdrawingName = 'A member';
+            try {
+                // Archive conversation if one exists so chat access is closed
+                const conversation = await Conversation_1.Conversation.findOne({
+                    $or: [
+                        { interest: interest._id },
+                        { participants: { $all: [interestSenderId, interestReceiverId], $size: 2 } },
+                    ],
+                });
+                if (conversation && conversation.status === 'ACTIVE') {
+                    conversation.status = 'ARCHIVED';
+                    await conversation.save().catch(() => null);
+                }
+                // Fetch withdrawing member details respecting privacy
+                const withdrawingUser = await User_1.User.findById(userId);
+                const withdrawingProfile = await Profile_1.Profile.findOne({ user: userId });
+                const isNameVisible = withdrawingProfile?.privacySettings?.nameVisibility !== 'hidden';
+                const candidateWithdrawingName = (withdrawingProfile?.displayName || withdrawingUser?.fullName) || '';
+                withdrawingName = (isNameVisible && candidateWithdrawingName)
+                    ? candidateWithdrawingName
+                    : 'A member';
+                // Prevent duplicate notification on retries/concurrency
+                notification = await Notification_1.Notification.findOne({
+                    user: partnerUserId,
+                    type: 'INTEREST_WITHDRAWN',
+                    'metadata.interestId': String(interest._id),
+                });
+                if (!notification) {
+                    notification = await Notification_1.Notification.create({
+                        user: partnerUserId,
+                        type: 'INTEREST_WITHDRAWN',
+                        title: 'Connection withdrawn',
+                        message: `${withdrawingName} has withdrawn the accepted connection.`,
+                        actionUrl: '/interests?tab=rejected',
+                        link: '/interests?tab=rejected',
+                        read: false,
+                        metadata: {
+                            interestId: String(interest._id),
+                            withdrawnByUserId: userId,
+                            type: 'INTEREST_WITHDRAWN',
+                        },
+                    });
+                }
+            }
+            catch (withdrawErr) {
+                // H-2: Conditional compensating rollback!
+                // Attempt rollback ONLY if the current persisted status remains 'REJECTED'.
+                // If zero records were modified, another operation changed the state, so do NOT overwrite it.
+                // Never call an unconditional stale interest.save().
+                try {
+                    let rollbackResult = null;
+                    if (typeof Interest_1.Interest.updateOne === 'function') {
+                        try {
+                            rollbackResult = await Interest_1.Interest.updateOne({ _id: interest._id, status: 'REJECTED' }, { $set: { status: previousStatus } });
+                        }
+                        catch (updateOneErr) {
+                            if (!updateResult || updateResult.modifiedCount === undefined) {
+                                interest.status = previousStatus;
+                                if (typeof interest.save === 'function') {
+                                    await interest.save();
+                                }
+                                console.warn(`[InterestController] Successfully rolled back interest ${interest._id} to ${previousStatus} following withdrawal failure via document save.`);
+                                throw withdrawErr;
+                            }
+                            else {
+                                throw updateOneErr;
+                            }
+                        }
+                    }
+                    if (rollbackResult && (rollbackResult.modifiedCount === 1 || rollbackResult.matchedCount === 1)) {
+                        interest.status = previousStatus;
+                        console.warn(`[InterestController] Successfully conditionally rolled back interest ${interest._id} to ${previousStatus} following withdrawal failure.`);
+                    }
+                    else if (rollbackResult && rollbackResult.modifiedCount === 0) {
+                        console.warn(`[InterestController] Rollback skipped for interest ${interest._id}: persisted status is no longer REJECTED (concurrent state change detected across processes).`);
+                    }
+                    else if (!updateResult || updateResult.modifiedCount === undefined) {
+                        // Document fallback when atomic updateOne is not supported or was not used for forward transition
+                        interest.status = previousStatus;
+                        if (typeof interest.save === 'function') {
+                            await interest.save();
+                        }
+                        console.warn(`[InterestController] Successfully rolled back interest ${interest._id} to ${previousStatus} following withdrawal failure via document save.`);
+                    }
+                    else {
+                        console.warn(`[InterestController] Conditional rollback could not verify status for interest ${interest._id}. State may require manual reconciliation.`);
+                    }
+                }
+                catch (rollbackErr) {
+                    if (rollbackErr === withdrawErr)
+                        throw withdrawErr;
+                    console.error(`[InterestController] CRITICAL: Compensating rollback database call failed for interest ${interest._id} after withdrawal failure. State may require manual reconciliation:`, rollbackErr);
+                }
+                throw withdrawErr;
+            }
+            // Real-time notifications via Socket.IO (best effort delivery - durable delivery guaranteed by database record above)
+            const io = req.app?.get('io');
+            if (io) {
+                try {
+                    io.to(`user:${partnerUserId}`).emit('newNotification', {
+                        notification,
+                        unreadCountDelta: 1,
+                    });
+                    io.to(`user:${partnerUserId}`).emit('interestWithdrawn', {
+                        interest,
+                        withdrawnBy: userId,
+                    });
+                    io.to(`user:${userId}`).emit('interestWithdrawn', {
+                        interest,
+                        withdrawnBy: userId,
+                    });
+                }
+                catch (socketErr) {
+                    console.warn('[InterestController] Non-fatal: Socket.IO withdrawal notification emission failed:', socketErr);
+                }
+            }
+            res.json({
+                success: true,
+                message: 'Connection withdrawn successfully',
+                data: interest,
+            });
+        }
+        finally {
+            inFlightInterestTransitions.delete(lockKey);
+            if (typeof releaseLock === 'function')
+                releaseLock();
+        }
+    }
+    catch (error) {
+        next(error);
+    }
+}
+/**
  * Generic update (for backward compatibility)
  */
 async function updateInterest(req, res, next) {
@@ -539,6 +977,9 @@ async function updateInterest(req, res, next) {
         }
         if (status === 'DECLINED' || status === 'REJECTED') {
             return declineInterest(req, res, next);
+        }
+        if (status === 'WITHDRAWN') {
+            return withdrawInterest(req, res, next);
         }
         if (status === 'CANCELLED') {
             const userId = req.user?.userId;

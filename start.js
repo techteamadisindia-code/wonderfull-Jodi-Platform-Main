@@ -18,6 +18,7 @@ const initialPort = process.env.PORT;
 const isStagingMode = process.env.NODE_ENV === 'staging' || process.env.STAGING_MODE === 'true';
 
 if (isStagingMode) {
+  process.env.NODE_ENV = 'staging';
   const stagingEnvPath = path.join(__dirname, 'backend', '.env.staging');
   if (fs.existsSync(stagingEnvPath)) {
     try {
@@ -38,7 +39,9 @@ if (isStagingMode) {
   }
 }
 
-process.env.NODE_ENV = process.env.NODE_ENV || 'production';
+if (!isStagingMode) {
+  process.env.NODE_ENV = process.env.NODE_ENV || 'production';
+}
 // Default to 3000 for unified architecture unless explicitly provided
 const PORT = parseInt(initialPort || (process.env.PORT === '5000' ? '3000' : process.env.PORT) || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';

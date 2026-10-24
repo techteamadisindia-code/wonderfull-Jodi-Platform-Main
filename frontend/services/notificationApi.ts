@@ -9,6 +9,7 @@ export interface UserNotificationItem {
   link?: string;
   read: boolean;
   readAt?: string;
+  isLocked?: boolean;
   metadata?: Record<string, any>;
   createdAt: string;
   updatedAt: string;

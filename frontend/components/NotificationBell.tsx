@@ -21,6 +21,9 @@ import {
   Loader2,
   GraduationCap,
   Trash2,
+  Lock,
+  ChevronRight,
+  Eye,
 } from 'lucide-react';
 import {
   fetchUserNotifications,
@@ -150,6 +153,21 @@ export function NotificationBell() {
       }
     }
     setOpen(false);
+    if (notif.type === 'PROFILE_VIEW') {
+      const isLocked = notif.isLocked || notif.metadata?.isLocked;
+      if (isLocked) {
+        router.push('/membership?feature=profile-viewers');
+        return;
+      }
+      const targetUrl =
+        notif.actionUrl ||
+        notif.link ||
+        (notif.metadata?.visitorProfileId
+          ? `/profile/${notif.metadata.visitorProfileId}`
+          : '/search');
+      router.push(targetUrl);
+      return;
+    }
     const targetUrl = notif.actionUrl || notif.link || '/interests';
     if (targetUrl) {
       router.push(targetUrl);
@@ -220,6 +238,8 @@ export function NotificationBell() {
         return <ShieldCheck className="w-3.5 h-3.5 text-purple-600" />;
       case 'SECURITY':
         return <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />;
+      case 'PROFILE_VIEW':
+        return <Eye className="w-3.5 h-3.5 text-[#E51F3E]" />;
       default:
         return <Info className="w-3.5 h-3.5 text-blue-600" />;
     }
@@ -286,6 +306,8 @@ export function NotificationBell() {
                 const isInterestReceived =
                   item.type === 'INTEREST_RECEIVED' ||
                   (item.type === 'INTEREST' && item.metadata?.interestId);
+                const isProfileView = item.type === 'PROFILE_VIEW';
+                const isProfileViewLocked = isProfileView && (item.isLocked || item.metadata?.isLocked);
                 const feedbackStatus = actionFeedback[item._id];
 
                 return (
@@ -297,7 +319,32 @@ export function NotificationBell() {
                     }`}
                   >
                     <div className="flex items-start gap-3">
-                      {isInterestReceived ? (
+                      {isProfileViewLocked ? (
+                        <div className="relative w-10 h-10 rounded-full overflow-hidden shrink-0 mt-0.5 border border-rose-100 bg-rose-50/60 shadow-2xs">
+                          <div className="w-full h-full flex items-center justify-center bg-gradient-to-tr from-rose-200 via-rose-100 to-amber-100 filter blur-[3px] scale-125 select-none pointer-events-none opacity-80">
+                            <span className="text-rose-400 font-serif font-black text-xs">WJ</span>
+                          </div>
+                          <div className="absolute inset-0 bg-white/20 backdrop-blur-[0.5px]" />
+                          <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-xs border border-white">
+                            <Lock className="w-2.5 h-2.5" />
+                          </div>
+                        </div>
+                      ) : isProfileView ? (
+                        <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 mt-0.5 border border-rose-100 bg-slate-100 shadow-2xs">
+                          {item.metadata?.visitorPhoto ? (
+                            <img
+                              src={item.metadata.visitorPhoto}
+                              alt={item.metadata?.visitorName || 'Doctor'}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <DoctorAvatar
+                              name={item.metadata?.visitorName || 'Doctor'}
+                              className="w-full h-full rounded-full"
+                            />
+                          )}
+                        </div>
+                      ) : isInterestReceived ? (
                         <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-100 shrink-0 border border-rose-100 mt-0.5">
                           {item.metadata?.senderPhoto ? (
                             <img
@@ -404,7 +451,26 @@ export function NotificationBell() {
                         )}
                       </div>
 
-                      {item.read ? (
+                      {isProfileView ? (
+                        <div className="flex items-center gap-1.5 shrink-0 self-center">
+                          {!item.read && (
+                            <span className="w-2 h-2 rounded-full bg-[#E51F3E]" />
+                          )}
+                          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#E51F3E] transition" />
+                          {item.read && (
+                            <button
+                              type="button"
+                              aria-label="Delete notification"
+                              title="Delete notification"
+                              disabled={deletingId === item._id}
+                              onClick={(e) => handleDeleteNotification(e, item)}
+                              className="p-1 rounded-md text-slate-300 hover:text-rose-600 transition"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      ) : item.read ? (
                         <button
                           type="button"
                           aria-label="Delete notification"

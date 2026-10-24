@@ -278,6 +278,32 @@ apiClient.interceptors.request.use((config) => {
 });
 
 /**
+ * Non-sensitive UI hint indicating whether an authentication session might be active.
+ * Checks for:
+ * 1. Bearer token in localStorage (user or admin)
+ * 2. Non-sensitive session hint cookie (wj_session=1) set by backend upon login/refresh
+ *
+ * NOTE: This is purely a client-side UI optimization hint to prevent unauthenticated
+ * background polling by guests. It is NEVER treated as authentication.
+ * The backend strictly validates credentials on every request via requireAuth.
+ */
+export function hasAuthSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const hasToken = Boolean(
+      localStorage.getItem(USER_TOKEN_KEY) ||
+      localStorage.getItem(ADMIN_TOKEN_KEY)
+    );
+    if (hasToken) return true;
+
+    // Check for client-readable non-sensitive session hint cookie
+    return /(?:^|;\s*)wj_session=1/.test(document.cookie);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Handles expiration of member authentication session:
  * Clears stored member token and registration drafts.
  * If currently navigating a protected member page, redirects to login with session_expired query.
@@ -288,6 +314,9 @@ export function handleMemberSessionExpired() {
   localStorage.removeItem('wj_registration_id');
   localStorage.removeItem('wj_resume_token');
   localStorage.removeItem('wj_reg_form_backup');
+  try {
+    document.cookie = 'wj_session=; path=/; max-age=0; SameSite=Lax';
+  } catch {}
 
   const protectedRoutes = ['/dashboard', '/chat', '/matches', '/membership', '/profile', '/messages', '/interests', '/notifications'];
   const currentPath = window.location.pathname;
@@ -321,7 +350,19 @@ apiClient.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // 2. Member token refresh for authentication-related 401s
+    // 2. Prevent background notification polling or explicit non-refresh requests from cascading refresh / logout loops
+    const skipAuthRefresh = Boolean(
+      originalRequest?.headers?.['X-Skip-Auth-Refresh'] ||
+      originalRequest?.headers?.['x-skip-auth-refresh'] ||
+      (originalRequest as any)?.skipAuthRefresh ||
+      requestUrl.includes('/notifications/unread-count')
+    );
+
+    if (error.response.status === 401 && skipAuthRefresh) {
+      return Promise.reject(error);
+    }
+
+    // 3. Member token refresh for authentication-related 401s
     const isAuthEndpoint =
       requestUrl.includes('/auth/login') ||
       requestUrl.includes('/auth/register') ||

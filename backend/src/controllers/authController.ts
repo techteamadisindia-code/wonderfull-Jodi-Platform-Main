@@ -180,6 +180,11 @@ export async function issueRefreshToken(
 function setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
   res.cookie('access_token', accessToken, getAccessTokenCookieOptions());
   res.cookie('refresh_token', refreshToken, getRefreshTokenCookieOptions());
+  // Non-sensitive UI hint cookie for frontend to know an auth session exists (without reading HttpOnly tokens)
+  res.cookie('wj_session', '1', {
+    ...getAccessTokenCookieOptions(),
+    httpOnly: false,
+  });
 }
 
 /**
@@ -188,6 +193,7 @@ function setAuthCookies(res: Response, accessToken: string, refreshToken: string
 function clearAuthCookies(res: Response) {
   res.clearCookie('access_token', { ...getAccessTokenCookieOptions(), maxAge: 0 });
   res.clearCookie('refresh_token', { ...getRefreshTokenCookieOptions(), maxAge: 0 });
+  res.clearCookie('wj_session', { ...getAccessTokenCookieOptions(), httpOnly: false, maxAge: 0 });
 }
 
 export async function registerUser(req: Request, res: Response, next: NextFunction) {

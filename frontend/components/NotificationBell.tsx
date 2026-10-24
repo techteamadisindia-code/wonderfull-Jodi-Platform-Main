@@ -30,6 +30,7 @@ import {
   deleteNotification,
   UserNotificationItem,
 } from '../services/notificationApi';
+import { hasAuthSession } from '../services/api';
 import { acceptInterest, rejectInterest } from '../services/interestApi';
 import { DoctorAvatar } from './DoctorAvatar';
 
@@ -58,6 +59,11 @@ export function NotificationBell() {
 
   // Fetch recent notifications when dropdown opens
   const loadRecentNotifications = useCallback(async () => {
+    if (typeof window !== 'undefined' && !hasAuthSession()) {
+      setRecentNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetchUserNotifications({ page: 1, limit: 6 });

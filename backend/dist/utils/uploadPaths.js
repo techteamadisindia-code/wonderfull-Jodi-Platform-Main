@@ -71,20 +71,30 @@ function getProjectRootDir() {
     return cwd;
 }
 /**
- * Returns the canonical writable uploads directory at <projectRoot>/uploads.
+ * Returns the canonical writable uploads directory.
+ * If UPLOAD_ROOT, UPLOADS_DIR, or UPLOAD_DIR is set in the environment,
+ * that directory is used as the primary writable location (ideal for persistent Hostinger storage).
+ * Otherwise defaults to <projectRoot>/uploads.
  */
 function getCanonicalUploadRootDir() {
+    const envUploadRoot = process.env.UPLOAD_ROOT || process.env.UPLOADS_DIR || process.env.UPLOAD_DIR;
+    if (envUploadRoot && envUploadRoot.trim()) {
+        return path_1.default.resolve(envUploadRoot.trim());
+    }
     return path_1.default.resolve(getProjectRootDir(), 'uploads');
 }
 /**
  * Ensures and returns the canonical writable upload directory for a given subfolder
- * at <projectRoot>/uploads/<subfolder>.
+ * at <canonicalUploadRootDir>/<subfolder>.
  * Does NOT write or touch legacy secondary directories on write.
  */
 function getCanonicalUploadDir(subfolder = 'profiles') {
     const primary = path_1.default.join(getCanonicalUploadRootDir(), subfolder);
     if (!fs_1.default.existsSync(primary)) {
-        fs_1.default.mkdirSync(primary, { recursive: true });
+        try {
+            fs_1.default.mkdirSync(primary, { recursive: true });
+        }
+        catch (_) { }
     }
     return primary;
 }
@@ -95,19 +105,73 @@ function getPrimaryUploadDir(subfolder = 'profiles') {
     return getCanonicalUploadDir(subfolder);
 }
 /**
+ * Discovers potential Hostinger persistent domain and sibling version upload directories.
+ * On Hostinger, applications deploy into versioned paths such as:
+ * /home/u625755214/domains/wonderfuljodi.com/hbuilds/versions/<UUID>/nodejs
+ * Persistent domain uploads reside at:
+ * /home/u625755214/domains/wonderfuljodi.com/uploads or public_html/uploads.
+ * Previous version uploads may also reside in sibling version directories.
+ */
+function getHostingerPersistentCandidateDirs() {
+    const candidates = [];
+    const searchRoots = [__dirname, process.cwd(), getProjectRootDir()];
+    for (const root of searchRoots) {
+        const normalized = path_1.default.resolve(root).replace(/\\/g, '/');
+        const hbuildsIdx = normalized.indexOf('/hbuilds/versions/');
+        if (hbuildsIdx !== -1) {
+            const domainRoot = normalized.substring(0, hbuildsIdx);
+            const persistentDomainUploads = path_1.default.resolve(domainRoot, 'uploads');
+            if (!candidates.includes(persistentDomainUploads)) {
+                candidates.push(persistentDomainUploads);
+            }
+            const persistentPublicHtmlUploads = path_1.default.resolve(domainRoot, 'public_html', 'uploads');
+            if (!candidates.includes(persistentPublicHtmlUploads)) {
+                candidates.push(persistentPublicHtmlUploads);
+            }
+            // Check sibling versions under hbuilds/versions/
+            const versionsDir = path_1.default.resolve(domainRoot, 'hbuilds', 'versions');
+            try {
+                if (fs_1.default.existsSync(versionsDir)) {
+                    const versionEntries = fs_1.default.readdirSync(versionsDir);
+                    for (const ver of versionEntries) {
+                        const sibUploads = path_1.default.resolve(versionsDir, ver, 'nodejs', 'uploads');
+                        if (!candidates.includes(sibUploads) && fs_1.default.existsSync(sibUploads)) {
+                            candidates.push(sibUploads);
+                        }
+                        const sibBackendUploads = path_1.default.resolve(versionsDir, ver, 'nodejs', 'backend', 'uploads');
+                        if (!candidates.includes(sibBackendUploads) && fs_1.default.existsSync(sibBackendUploads)) {
+                            candidates.push(sibBackendUploads);
+                        }
+                    }
+                }
+            }
+            catch (_) { }
+        }
+    }
+    return candidates;
+}
+/**
  * Returns all potential upload base directories in priority order:
- * 1. <projectRoot>/uploads (canonical writable location)
- * 2. <projectRoot>/backend/uploads (legacy read-only fallback)
- * 3. <process.cwd()>/uploads (if different)
- * 4. <process.cwd()>/backend/uploads (if different)
+ * 1. <canonicalUploadRootDir> (from UPLOAD_ROOT or <projectRoot>/uploads)
+ * 2. <projectRoot>/uploads
+ * 3. <projectRoot>/backend/uploads (legacy read-only fallback)
+ * 4. <process.cwd()>/uploads (if different)
+ * 5. <process.cwd()>/backend/uploads (if different)
+ * 6. Hostinger persistent domain root uploads and sibling version directories
  */
 function getUploadBaseDirectories() {
+    const canonicalRoot = getCanonicalUploadRootDir();
     const root = getProjectRootDir();
     const cwd = process.cwd();
-    const candidates = [
-        path_1.default.resolve(root, 'uploads'),
-        path_1.default.resolve(root, 'backend', 'uploads'),
-    ];
+    const candidates = [canonicalRoot];
+    const projectUploads = path_1.default.resolve(root, 'uploads');
+    if (!candidates.includes(projectUploads)) {
+        candidates.push(projectUploads);
+    }
+    const projectBackendUploads = path_1.default.resolve(root, 'backend', 'uploads');
+    if (!candidates.includes(projectBackendUploads)) {
+        candidates.push(projectBackendUploads);
+    }
     const cwdUploads = path_1.default.resolve(cwd, 'uploads');
     if (!candidates.includes(cwdUploads)) {
         candidates.push(cwdUploads);
@@ -115,6 +179,13 @@ function getUploadBaseDirectories() {
     const cwdBackendUploads = path_1.default.resolve(cwd, 'backend', 'uploads');
     if (!candidates.includes(cwdBackendUploads)) {
         candidates.push(cwdBackendUploads);
+    }
+    // Include Hostinger persistent domain roots and sibling version builds
+    const hostingerDirs = getHostingerPersistentCandidateDirs();
+    for (const hDir of hostingerDirs) {
+        if (!candidates.includes(hDir)) {
+            candidates.push(hDir);
+        }
     }
     return candidates;
 }

@@ -88,6 +88,11 @@ function setAdminCookies(res, accessToken, refreshToken) {
     res.cookie('admin_refresh_token', refreshToken, refreshOpts);
     // Also set standard access_token for seamless compatibility with shared API middleware
     res.cookie('access_token', accessToken, accessOpts);
+    // Non-sensitive UI hint cookie for frontend to know an auth session exists
+    res.cookie('wj_session', '1', {
+        ...accessOpts,
+        httpOnly: false,
+    });
 }
 function clearAdminCookies(res) {
     const accessOpts = { ...(0, securityUtils_1.getAccessTokenCookieOptions)(), maxAge: 0 };
@@ -95,6 +100,7 @@ function clearAdminCookies(res) {
     res.clearCookie('admin_access_token', accessOpts);
     res.clearCookie('admin_refresh_token', refreshOpts);
     res.clearCookie('access_token', accessOpts);
+    res.clearCookie('wj_session', { ...accessOpts, httpOnly: false, maxAge: 0 });
 }
 /**
  * Record an entry in the AuditLog collection

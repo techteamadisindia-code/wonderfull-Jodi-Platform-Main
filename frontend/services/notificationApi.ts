@@ -1,4 +1,4 @@
-import apiClient from './api';
+import apiClient, { hasAuthSession } from './api';
 
 export interface UserNotificationItem {
   _id: string;
@@ -34,6 +34,17 @@ export async function fetchUserNotifications(params?: {
   limit?: number;
   unreadOnly?: boolean;
 }): Promise<UserNotificationsResponse> {
+  if (typeof window !== 'undefined' && !hasAuthSession()) {
+    return {
+      notifications: [],
+      total: 0,
+      unreadCount: 0,
+      page: params?.page || 1,
+      limit: params?.limit || 10,
+      totalPages: 0,
+    };
+  }
+
   const query = new URLSearchParams();
   if (params?.page) query.append('page', String(params.page));
   if (params?.limit) query.append('limit', String(params.limit));
@@ -47,12 +58,24 @@ export async function fetchUserNotifications(params?: {
 }
 
 export async function fetchUnreadNotificationCount(): Promise<{ count: number; isCapped?: boolean } & number> {
+  if (typeof window !== 'undefined' && !hasAuthSession()) {
+    const countObj = new Number(0) as any;
+    countObj.count = 0;
+    countObj.isCapped = false;
+    return countObj;
+  }
+
   try {
     const response = await apiClient.get<{ success: boolean; data: { count: number; isCapped?: boolean } }>(
-      '/notifications/unread-count'
+      '/notifications/unread-count',
+      {
+        headers: {
+          'X-Skip-Auth-Refresh': 'true',
+        },
+      }
     );
-    const count = response.data.data?.count ?? 0;
-    const isCapped = Boolean(response.data.data?.isCapped);
+    const count = response.data?.data?.count ?? 0;
+    const isCapped = Boolean(response.data?.data?.isCapped);
     const countObj = new Number(count) as any;
     countObj.count = count;
     countObj.isCapped = isCapped;

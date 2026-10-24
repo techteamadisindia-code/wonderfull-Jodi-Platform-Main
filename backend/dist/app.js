@@ -463,7 +463,27 @@ if (fs_1.default.existsSync(faviconPath)) {
 // Serve precompiled Next.js static chunks directly with immutable cache
 const nextStaticDir = path_1.default.join(resolvedFrontendDir, '.next', 'static');
 if (fs_1.default.existsSync(nextStaticDir)) {
-    app.use('/_next/static', express_1.default.static(nextStaticDir, { maxAge: '365d', immutable: true }));
+    app.use('/_next/static', express_1.default.static(nextStaticDir, { maxAge: '365d', immutable: true, fallthrough: true }));
+}
+// In Hostinger deployments with versioned release paths, also register fallback static chunk paths
+// from sibling version builds so that transition requests from active sessions or edge-cached HTML
+// can resolve previous chunks instead of throwing a 404.
+const hostingerDomainNormalized = resolvedFrontendDir.replace(/\\/g, '/');
+const hbuildsIdx = hostingerDomainNormalized.indexOf('/hbuilds/versions/');
+if (hbuildsIdx !== -1) {
+    const versionsDir = path_1.default.resolve(hostingerDomainNormalized.substring(0, hbuildsIdx), 'hbuilds', 'versions');
+    try {
+        if (fs_1.default.existsSync(versionsDir)) {
+            const versionDirs = fs_1.default.readdirSync(versionsDir);
+            for (const ver of versionDirs) {
+                const sibStatic = path_1.default.resolve(versionsDir, ver, 'nodejs', 'frontend', '.next', 'static');
+                if (fs_1.default.existsSync(sibStatic) && sibStatic !== nextStaticDir) {
+                    app.use('/_next/static', express_1.default.static(sibStatic, { maxAge: '365d', immutable: true, fallthrough: true }));
+                }
+            }
+        }
+    }
+    catch (_) { }
 }
 // Unmatched /api/* routes return 404 JSON directly from Express, never falling through to Next.js
 app.use('/api', (req, res) => {
@@ -479,6 +499,21 @@ app.use((req, res, next) => {
         req.path.startsWith('/socket.io') ||
         req.path === '/health') {
         return next();
+    }
+    // Prevent edge CDN (Hostinger CDN / Cloudflare) and shared proxies from caching dynamic HTML / SSR responses publicly.
+    // Static assets under /_next/static have unique content hashes and are cached for 365d; HTML documents must revalidate
+    // so that new deployment releases are immediately picked up without referencing stale chunks.
+    if (!req.path.startsWith('/_next/static/')) {
+        const isAuth = Boolean(req.cookies?.access_token ||
+            req.cookies?.admin_access_token ||
+            req.headers.authorization);
+        if (isAuth) {
+            res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+        }
+        else {
+            res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+        }
+        res.setHeader('Pragma', 'no-cache');
     }
     if (nextHandler) {
         return nextHandler(req, res);

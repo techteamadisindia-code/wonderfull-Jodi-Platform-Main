@@ -103,6 +103,12 @@ function setAdminCookies(res: Response, accessToken: string, refreshToken: strin
 
   // Also set standard access_token for seamless compatibility with shared API middleware
   res.cookie('access_token', accessToken, accessOpts);
+
+  // Non-sensitive UI hint cookie for frontend to know an auth session exists
+  res.cookie('wj_session', '1', {
+    ...accessOpts,
+    httpOnly: false,
+  });
 }
 
 function clearAdminCookies(res: Response) {
@@ -112,6 +118,7 @@ function clearAdminCookies(res: Response) {
   res.clearCookie('admin_access_token', accessOpts);
   res.clearCookie('admin_refresh_token', refreshOpts);
   res.clearCookie('access_token', accessOpts);
+  res.clearCookie('wj_session', { ...accessOpts, httpOnly: false, maxAge: 0 });
 }
 
 /**

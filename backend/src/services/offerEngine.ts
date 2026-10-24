@@ -388,11 +388,18 @@ export async function evaluateCampaignEligibility(
 
   // Per-member claim limit
   if (member.userId && campaign.perMemberLimit > 0) {
-    const claims = await Payment.countDocuments({
+    const successPayments = await Payment.find({
       user: member.userId,
       status: 'SUCCESS',
-      'metadata.campaignId': String(campaign._id),
     });
+    const targetCampaignId = String(campaign._id);
+    const claims = successPayments.filter((p: any) => {
+      let meta = p?.metadata;
+      if (typeof meta === 'string') {
+        try { meta = JSON.parse(meta); } catch { meta = {}; }
+      }
+      return String(meta?.campaignId) === targetCampaignId;
+    }).length;
     if (claims >= campaign.perMemberLimit) {
       failureReasons.push(`You have already claimed this campaign offer (${claims}/${campaign.perMemberLimit})`);
     }

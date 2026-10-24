@@ -4,6 +4,7 @@ exports.rejectInterest = void 0;
 exports.extractEntityId = extractEntityId;
 exports.createInterest = createInterest;
 exports.checkInterestStatus = checkInterestStatus;
+exports.findNotificationByInterest = findNotificationByInterest;
 exports.acceptInterest = acceptInterest;
 exports.declineInterest = declineInterest;
 exports.withdrawInterest = withdrawInterest;
@@ -336,6 +337,88 @@ async function checkInterestStatus(req, res, next) {
     }
 }
 /**
+ * Validates whether a candidate notification matches a specific interestId and targetUserId in memory.
+ * Requires an existing metadata interest ID and exact string equality before returning a match.
+ * Missing metadata, null values, empty IDs, or unrelated IDs must never count as a match.
+ */
+function isMatchingInterestMeta(n, targetUserId, targetIdStr) {
+    if (!n)
+        return false;
+    const notifUser = String(n.user?._id || n.user?.id || n.user || '').trim();
+    if (notifUser && notifUser !== targetUserId) {
+        return false;
+    }
+    let meta = n?.metadata;
+    if (typeof meta === 'string') {
+        try {
+            meta = JSON.parse(meta);
+        }
+        catch {
+            return false;
+        }
+    }
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+        return false;
+    }
+    const metaInterestId = meta.interestId;
+    if (metaInterestId === null || metaInterestId === undefined) {
+        return false;
+    }
+    const trimmedId = String(metaInterestId).trim();
+    if (trimmedId === '' || trimmedId !== targetIdStr) {
+        return false;
+    }
+    return true;
+}
+/**
+ * Safely locates an existing notification for a given user, type, and interestId.
+ * Queries by indexed scalar columns (user, type) and verifies interestId in metadata
+ * in memory, avoiding Prisma JSON schema filter errors on 'metadata.interestId'.
+ *
+ * Requirements:
+ * - Requires existing metadata interest ID and exact string equality before returning a match.
+ * - Missing metadata, null values, empty IDs, or unrelated IDs must never count as a match.
+ */
+async function findNotificationByInterest(targetUserId, notificationType, interestId) {
+    if (!targetUserId || !String(targetUserId).trim())
+        return null;
+    if (!interestId || !String(interestId).trim())
+        return null;
+    const cleanUserId = String(targetUserId).trim();
+    const targetIdStr = String(interestId).trim();
+    // 1. Try findOne with safe scalar fields (user, type)
+    try {
+        if (typeof Notification_1.Notification.findOne === 'function') {
+            const single = await Notification_1.Notification.findOne({
+                user: cleanUserId,
+                type: notificationType,
+            });
+            if (single && isMatchingInterestMeta(single, cleanUserId, targetIdStr)) {
+                return single;
+            }
+        }
+    }
+    catch (_) { }
+    // 2. Query recent candidate notifications by indexed user + type and inspect metadata
+    try {
+        if (typeof Notification_1.Notification.find === 'function') {
+            const candidates = await Notification_1.Notification.find({
+                user: cleanUserId,
+                type: notificationType,
+            })
+                .sort({ createdAt: 'desc' })
+                .limit(50);
+            if (Array.isArray(candidates) && candidates.length > 0) {
+                const match = candidates.find((n) => isMatchingInterestMeta(n, cleanUserId, targetIdStr));
+                if (match)
+                    return match;
+            }
+        }
+    }
+    catch (_) { }
+    return null;
+}
+/**
  * Accept received interest
  */
 async function acceptInterest(req, res, next) {
@@ -385,11 +468,7 @@ async function acceptInterest(req, res, next) {
                     participants: { $all: [senderUserId, userId], $size: 2 },
                 });
                 // Self-healing idempotency: ensure the sender has received their acceptance notification
-                let existingNotification = await Notification_1.Notification.findOne({
-                    user: senderUserId,
-                    type: 'INTEREST_ACCEPTED',
-                    'metadata.interestId': String(interest._id),
-                });
+                let existingNotification = await findNotificationByInterest(senderUserId, 'INTEREST_ACCEPTED', String(interest._id));
                 if (!existingNotification) {
                     const recipientUser = await User_1.User.findById(userId);
                     const recipientProfile = await Profile_1.Profile.findOne({ user: userId });
@@ -492,11 +571,7 @@ async function acceptInterest(req, res, next) {
                 recipientPhoto = recipientProfile?.primaryPhoto || recipientProfile?.photos?.[0] || '';
                 const recipientProfileId = recipientProfile ? String(recipientProfile._id) : '';
                 // Check for existing notification to guarantee retries/concurrency cannot create duplicate notifications
-                notification = await Notification_1.Notification.findOne({
-                    user: senderUserId,
-                    type: 'INTEREST_ACCEPTED',
-                    'metadata.interestId': String(interest._id),
-                });
+                notification = await findNotificationByInterest(senderUserId, 'INTEREST_ACCEPTED', String(interest._id));
                 if (!notification) {
                     notification = await Notification_1.Notification.create({
                         user: senderUserId,
@@ -759,11 +834,7 @@ async function withdrawInterest(req, res, next) {
             // Idempotency: if already withdrawn / rejected, return safe idempotent success without duplicate notifications
             if (interest.status === 'REJECTED' || interest.status === 'DECLINED') {
                 // Self-healing: ensure partner received withdrawal notification
-                let existingNotification = await Notification_1.Notification.findOne({
-                    user: partnerUserId,
-                    type: 'INTEREST_WITHDRAWN',
-                    'metadata.interestId': String(interest._id),
-                });
+                let existingNotification = await findNotificationByInterest(partnerUserId, 'INTEREST_WITHDRAWN', String(interest._id));
                 if (!existingNotification) {
                     const withdrawingUser = await User_1.User.findById(userId);
                     const withdrawingProfile = await Profile_1.Profile.findOne({ user: userId });
@@ -856,11 +927,7 @@ async function withdrawInterest(req, res, next) {
                     ? candidateWithdrawingName
                     : 'A member';
                 // Prevent duplicate notification on retries/concurrency
-                notification = await Notification_1.Notification.findOne({
-                    user: partnerUserId,
-                    type: 'INTEREST_WITHDRAWN',
-                    'metadata.interestId': String(interest._id),
-                });
+                notification = await findNotificationByInterest(partnerUserId, 'INTEREST_WITHDRAWN', String(interest._id));
                 if (!notification) {
                     notification = await Notification_1.Notification.create({
                         user: partnerUserId,

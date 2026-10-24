@@ -69,6 +69,139 @@ function parseRegexToPrismaFilter(pattern: string): Record<string, string> {
 }
 
 /**
+ * Extracts dot-notation filter predicates (e.g. 'metadata.interestId': 'xyz')
+ * that cannot be represented in a Prisma top-level where clause on MySQL/MariaDB JSON columns.
+ */
+export function extractDotNotationPredicates(filter: any): Record<string, any> {
+  const predicates: Record<string, any> = {};
+  if (!filter || typeof filter !== 'object') return predicates;
+  for (const [k, v] of Object.entries(filter)) {
+    if (k.includes('.')) {
+      predicates[k] = v;
+    }
+  }
+  return predicates;
+}
+
+/**
+ * Validates whether a record satisfies extracted dot-notation predicates in memory.
+ * Accurately parses JSON strings if needed and verifies exact value matches without broadening queries.
+ *
+ * Supported operators:
+ * - Direct scalar equality (string, number, boolean)
+ * - $eq: exact equality
+ * - $ne: not equal
+ * - $in: array membership
+ * - $nin: array non-membership
+ * - $exists: presence / non-null check
+ *
+ * Unsupported operators fail explicitly and throw an error to prevent silent query broadening.
+ */
+export function matchesJsonPredicates(record: any, predicates: Record<string, any>): boolean {
+  if (!predicates || Object.keys(predicates).length === 0) return true;
+  if (!record || typeof record !== 'object') return false;
+
+  for (const [dotPath, expected] of Object.entries(predicates)) {
+    const parts = dotPath.split('.');
+    let cur = record;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (typeof cur === 'string' && i > 0) {
+        try {
+          cur = JSON.parse(cur);
+        } catch {
+          cur = undefined;
+        }
+      }
+      if (cur === null || cur === undefined || typeof cur !== 'object') {
+        cur = undefined;
+        break;
+      }
+      cur = cur[part];
+    }
+
+    // Handle operator objects vs primitive values
+    if (
+      expected !== null &&
+      typeof expected === 'object' &&
+      !Array.isArray(expected) &&
+      !(expected instanceof Date) &&
+      !(expected instanceof RegExp)
+    ) {
+      const opKeys = Object.keys(expected);
+      const hasDollarKey = opKeys.some((k) => k.startsWith('$'));
+
+      if (hasDollarKey) {
+        for (const op of opKeys) {
+          if (!['$eq', '$ne', '$in', '$nin', '$exists'].includes(op)) {
+            throw new Error(
+              `[PrismaBridge] Unsupported JSON predicate operator "${op}" on field "${dotPath}". Queries cannot be broadened.`
+            );
+          }
+        }
+
+        if ('$exists' in expected) {
+          const shouldExist = Boolean(expected.$exists);
+          const doesExist = cur !== undefined && cur !== null;
+          if (shouldExist !== doesExist) return false;
+        }
+
+        if ('$eq' in expected) {
+          if (expected.$eq === null || expected.$eq === undefined) {
+            if (cur !== null && cur !== undefined) return false;
+          } else {
+            if (cur === undefined || cur === null) return false;
+            if (String(cur) !== String(expected.$eq)) return false;
+          }
+        }
+
+        if ('$ne' in expected) {
+          if (expected.$ne === null || expected.$ne === undefined) {
+            if (cur === null || cur === undefined) return false;
+          } else {
+            if (cur !== undefined && cur !== null && String(cur) === String(expected.$ne)) return false;
+          }
+        }
+
+        if ('$in' in expected) {
+          if (!Array.isArray(expected.$in)) {
+            throw new Error(`[PrismaBridge] $in operator requires an array on field "${dotPath}"`);
+          }
+          if (cur === undefined || cur === null) return false;
+          const allowed = expected.$in.map((v: any) => String(v?._id || v?.id || v));
+          if (!allowed.includes(String(cur))) return false;
+        }
+
+        if ('$nin' in expected) {
+          if (!Array.isArray(expected.$nin)) {
+            throw new Error(`[PrismaBridge] $nin operator requires an array on field "${dotPath}"`);
+          }
+          if (cur !== undefined && cur !== null) {
+            const disallowed = expected.$nin.map((v: any) => String(v?._id || v?.id || v));
+            if (disallowed.includes(String(cur))) return false;
+          }
+        }
+        continue;
+      }
+    }
+
+    // Direct primitive or non-operator value comparison
+    if (expected === null || expected === undefined) {
+      if (cur !== null && cur !== undefined) return false;
+      continue;
+    }
+    if (cur === undefined || cur === null) {
+      return false;
+    }
+    const expectedStr = String(expected?._id || expected?.id || expected);
+    if (String(cur) !== expectedStr) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Normalizes MongoDB filter syntax to Prisma `where` clause.
  */
 export function normalizeFilter(filter: any = {}, fieldMap: Record<string, string> = {}): any {
@@ -86,6 +219,13 @@ export function normalizeFilter(filter: any = {}, fieldMap: Record<string, strin
       key = 'id';
     } else if (fieldMap[key]) {
       key = fieldMap[key];
+    }
+
+    // In MySQL / MariaDB, Prisma does not support dot-notation filters on JSON fields (e.g. 'metadata.interestId').
+    // Omit from top-level Prisma where to prevent PrismaClientValidationError;
+    // PrismaQueryBuilder, countDocuments, and mutation methods apply these predicates explicitly in memory.
+    if (key.includes('.') || key.startsWith('metadata.') || key.startsWith('analytics.')) {
+      continue;
     }
 
     // Convert ObjectId instances or objects with _id/id to string
@@ -140,19 +280,23 @@ export function normalizeFilter(filter: any = {}, fieldMap: Record<string, strin
       continue;
     }
 
-    // Logical Operators
-    if (key === '$or') {
-      if (Array.isArray(rawVal)) {
-        where.OR = rawVal.map((sub) => normalizeFilter(sub, fieldMap));
+    // Top-level MongoDB operators
+    if (key.startsWith('$')) {
+      if (key === '$or') {
+        if (Array.isArray(rawVal)) {
+          where.OR = rawVal.map((sub) => normalizeFilter(sub, fieldMap));
+        }
+        continue;
       }
-      continue;
-    }
 
-    if (key === '$and') {
-      if (Array.isArray(rawVal)) {
-        where.AND = rawVal.map((sub) => normalizeFilter(sub, fieldMap));
+      if (key === '$and') {
+        if (Array.isArray(rawVal)) {
+          where.AND = rawVal.map((sub) => normalizeFilter(sub, fieldMap));
+        }
+        continue;
       }
-      continue;
+
+      throw new Error(`[PrismaBridge] Unsupported top-level query operator "${key}". Queries cannot be broadened.`);
     }
 
     // Direct RegExp
@@ -164,63 +308,74 @@ export function normalizeFilter(filter: any = {}, fieldMap: Record<string, strin
     // Operators in nested objects
     if (rawVal && typeof rawVal === 'object' && !(rawVal instanceof Date) && !Array.isArray(rawVal)) {
       const opObj = rawVal as any;
-      const parsedOps: any = {};
-      let hasOp = false;
+      const opKeys = Object.keys(opObj);
+      const hasDollarKeys = opKeys.some((k) => k.startsWith('$'));
 
-      if ('$eq' in opObj) {
-        parsedOps.equals = opObj.$eq;
-        hasOp = true;
-      }
-      if ('$ne' in opObj) {
-        parsedOps.not = opObj.$ne;
-        hasOp = true;
-      }
-      if ('$in' in opObj) {
-        parsedOps.in = (Array.isArray(opObj.$in) ? opObj.$in : [opObj.$in]).map((v: any) =>
-          v && typeof v === 'object' && (v._id || v.id)
-            ? String(v._id || v.id)
-            : v && typeof v.toString === 'function' && v.constructor?.name === 'ObjectId'
-            ? v.toString()
-            : v
-        );
-        hasOp = true;
-      }
-      if ('$nin' in opObj) {
-        parsedOps.notIn = (Array.isArray(opObj.$nin) ? opObj.$nin : [opObj.$nin]).map((v: any) =>
-          v && typeof v === 'object' && (v._id || v.id)
-            ? String(v._id || v.id)
-            : v && typeof v.toString === 'function' && v.constructor?.name === 'ObjectId'
-            ? v.toString()
-            : v
-        );
-        hasOp = true;
-      }
-      if ('$gt' in opObj) {
-        parsedOps.gt = opObj.$gt;
-        hasOp = true;
-      }
-      if ('$gte' in opObj) {
-        parsedOps.gte = opObj.$gte;
-        hasOp = true;
-      }
-      if ('$lt' in opObj) {
-        parsedOps.lt = opObj.$lt;
-        hasOp = true;
-      }
-      if ('$lte' in opObj) {
-        parsedOps.lte = opObj.$lte;
-        hasOp = true;
-      }
-      if ('$regex' in opObj) {
-        const pattern = typeof opObj.$regex === 'string' ? opObj.$regex : opObj.$regex.source;
-        const parsed = parseRegexToPrismaFilter(pattern);
-        Object.assign(parsedOps, parsed);
-        hasOp = true;
-      }
+      if (hasDollarKeys) {
+        for (const op of opKeys) {
+          if (!['$eq', '$ne', '$in', '$nin', '$gt', '$gte', '$lt', '$lte', '$regex'].includes(op)) {
+            throw new Error(`[PrismaBridge] Unsupported operator "${op}" on field "${key}". Queries cannot be broadened.`);
+          }
+        }
 
-      if (hasOp) {
-        where[key] = parsedOps;
-        continue;
+        const parsedOps: any = {};
+        let hasOp = false;
+
+        if ('$eq' in opObj) {
+          parsedOps.equals = opObj.$eq;
+          hasOp = true;
+        }
+        if ('$ne' in opObj) {
+          parsedOps.not = opObj.$ne;
+          hasOp = true;
+        }
+        if ('$in' in opObj) {
+          parsedOps.in = (Array.isArray(opObj.$in) ? opObj.$in : [opObj.$in]).map((v: any) =>
+            v && typeof v === 'object' && (v._id || v.id)
+              ? String(v._id || v.id)
+              : v && typeof v.toString === 'function' && v.constructor?.name === 'ObjectId'
+              ? v.toString()
+              : v
+          );
+          hasOp = true;
+        }
+        if ('$nin' in opObj) {
+          parsedOps.notIn = (Array.isArray(opObj.$nin) ? opObj.$nin : [opObj.$nin]).map((v: any) =>
+            v && typeof v === 'object' && (v._id || v.id)
+              ? String(v._id || v.id)
+              : v && typeof v.toString === 'function' && v.constructor?.name === 'ObjectId'
+              ? v.toString()
+              : v
+          );
+          hasOp = true;
+        }
+        if ('$gt' in opObj) {
+          parsedOps.gt = opObj.$gt;
+          hasOp = true;
+        }
+        if ('$gte' in opObj) {
+          parsedOps.gte = opObj.$gte;
+          hasOp = true;
+        }
+        if ('$lt' in opObj) {
+          parsedOps.lt = opObj.$lt;
+          hasOp = true;
+        }
+        if ('$lte' in opObj) {
+          parsedOps.lte = opObj.$lte;
+          hasOp = true;
+        }
+        if ('$regex' in opObj) {
+          const pattern = typeof opObj.$regex === 'string' ? opObj.$regex : opObj.$regex.source;
+          const parsed = parseRegexToPrismaFilter(pattern);
+          Object.assign(parsedOps, parsed);
+          hasOp = true;
+        }
+
+        if (hasOp) {
+          where[key] = parsedOps;
+          continue;
+        }
       }
     }
 
@@ -1074,11 +1229,215 @@ async function resolveVirtualPopulates(
 }
 
 /**
+ * Safely parses JSON-encoded participants array from MariaDB conversations table.
+ */
+function parseParticipantsJson(raw: any): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item: any) => (typeof item === 'string' ? item : String(item?.$oid || item?.id || item?._id || '')))
+      .filter(Boolean);
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item: any) => (typeof item === 'string' ? item : String(item?.$oid || item?.id || item?._id || '')))
+          .filter(Boolean);
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
+ * Evaluates whether an actual conversation status string matches a status filter
+ * (which may be a direct string or operator object like { $ne: 'ARCHIVED' }, { $in: [...] }, { $nin: [...] }).
+ */
+export function matchesStatusFilter(actualStatus: any, filter: any): boolean {
+  if (filter === undefined) return true;
+  const actualStr = actualStatus !== null && actualStatus !== undefined ? String(actualStatus) : null;
+  if (typeof filter === 'string') {
+    return actualStr === filter;
+  }
+  if (filter && typeof filter === 'object') {
+    if ('$eq' in filter) {
+      const eqVal = filter.$eq !== null && filter.$eq !== undefined ? String(filter.$eq) : null;
+      if (actualStr !== eqVal) return false;
+    }
+    if ('$ne' in filter) {
+      const neVal = filter.$ne !== null && filter.$ne !== undefined ? String(filter.$ne) : null;
+      if (actualStr === neVal) return false;
+    }
+    if ('$in' in filter) {
+      if (!Array.isArray(filter.$in)) {
+        throw new Error(`[PrismaBridge] $in operator requires an array in status filter`);
+      }
+      const allowed = filter.$in.map((v: any) => (v !== null && v !== undefined ? String(v) : null));
+      if (!allowed.includes(actualStr)) return false;
+    }
+    if ('$nin' in filter) {
+      if (!Array.isArray(filter.$nin)) {
+        throw new Error(`[PrismaBridge] $nin operator requires an array in status filter`);
+      }
+      const disallowed = filter.$nin.map((v: any) => (v !== null && v !== undefined ? String(v) : null));
+      if (disallowed.includes(actualStr)) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Extracts participant IDs, size constraint, interest ID, and status criteria from a conversation filter.
+ */
+export function extractConversationCriteria(filter: any = {}): {
+  requiredParticipants: string[];
+  requiredSize?: number;
+  interestId?: string;
+  isOrWithInterest: boolean;
+  status?: string;
+  statusFilter?: any;
+  complianceStatus?: string;
+  id?: string;
+} {
+  const result = {
+    requiredParticipants: [] as string[],
+    requiredSize: undefined as number | undefined,
+    interestId: undefined as string | undefined,
+    isOrWithInterest: false,
+    status: undefined as string | undefined,
+    statusFilter: undefined as any,
+    complianceStatus: undefined as string | undefined,
+    id: undefined as string | undefined,
+  };
+
+  if (!filter || typeof filter !== 'object') return result;
+
+  if (filter._id || filter.id) {
+    result.id = String(filter.id || filter._id);
+  }
+  if (filter.interest || filter.interestId) {
+    result.interestId = String(filter.interest || filter.interestId);
+  }
+  if (filter.status !== undefined) {
+    if (typeof filter.status === 'string') {
+      result.status = filter.status;
+      result.statusFilter = filter.status;
+    } else if (filter.status && typeof filter.status === 'object') {
+      const ops = Object.keys(filter.status);
+      const supportedOps = ['$eq', '$ne', '$in', '$nin'];
+      for (const op of ops) {
+        if (!supportedOps.includes(op)) {
+          throw new Error(
+            `[PrismaBridge] Unsupported operator "${op}" in conversation status filter. Queries cannot be broadened.`
+          );
+        }
+      }
+      result.statusFilter = filter.status;
+      if (typeof filter.status.$eq === 'string') {
+        result.status = filter.status.$eq;
+      }
+    } else {
+      throw new Error(`[PrismaBridge] Invalid status filter type: ${typeof filter.status}`);
+    }
+  }
+  if (filter.complianceStatus && typeof filter.complianceStatus === 'string') {
+    result.complianceStatus = filter.complianceStatus;
+  }
+
+  const parsePartFilter = (p: any) => {
+    if (!p) return;
+    if (typeof p === 'object') {
+      if (Array.isArray(p.$all)) {
+        result.requiredParticipants = p.$all.map((item: any) =>
+          item && typeof item === 'object' ? String(item._id || item.id) : String(item)
+        );
+      } else if (Array.isArray(p.$in)) {
+        result.requiredParticipants = p.$in.map((item: any) =>
+          item && typeof item === 'object' ? String(item._id || item.id) : String(item)
+        );
+      } else if (p.$eq) {
+        result.requiredParticipants = [String(p.$eq._id || p.$eq.id || p.$eq)];
+      }
+      if (p.$size !== undefined) {
+        result.requiredSize = Number(p.$size);
+      }
+    } else if (typeof p === 'string') {
+      result.requiredParticipants = [p];
+    }
+  };
+
+  if (filter.participants) {
+    parsePartFilter(filter.participants);
+  }
+
+  if (Array.isArray(filter.$or)) {
+    for (const sub of filter.$or) {
+      if (sub && typeof sub === 'object') {
+        if (sub.interest || sub.interestId) {
+          result.interestId = String(sub.interest || sub.interestId);
+          result.isOrWithInterest = true;
+        }
+        if (sub.participants) {
+          result.isOrWithInterest = true;
+          parsePartFilter(sub.participants);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Recursively strips relational 'participants' conditions from Prisma where objects
+ * to prevent Prisma from executing joins against the missing conversation_participants table.
+ */
+function stripRelationalParticipants(where: any): any {
+  if (!where || typeof where !== 'object') return where;
+  if (Array.isArray(where)) {
+    return where.map(stripRelationalParticipants).filter((item) => item && Object.keys(item).length > 0);
+  }
+
+  const clean: any = {};
+  for (const [k, v] of Object.entries(where)) {
+    if (k === 'participants') continue;
+    if (k === 'AND' && Array.isArray(v)) {
+      const stripped = v.map(stripRelationalParticipants).filter((item) => item && Object.keys(item).length > 0);
+      if (stripped.length > 0) clean.AND = stripped;
+      continue;
+    }
+    if (k === 'OR' && Array.isArray(v)) {
+      const stripped = v.map(stripRelationalParticipants).filter((item) => item && Object.keys(item).length > 0);
+      if (stripped.length > 0) clean.OR = stripped;
+      continue;
+    }
+    if (k === 'NOT' && Array.isArray(v)) {
+      const stripped = v.map(stripRelationalParticipants).filter((item) => item && Object.keys(item).length > 0);
+      if (stripped.length > 0) clean.NOT = stripped;
+      continue;
+    }
+    if (v && typeof v === 'object' && !(v instanceof Date)) {
+      clean[k] = stripRelationalParticipants(v);
+    } else {
+      clean[k] = v;
+    }
+  }
+  return clean;
+}
+
+/**
  * Chainable query builder simulating Mongoose Query API on top of Prisma.
  */
 export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
   private prismaDelegate: any;
+  private rawFilter: any;
   private where: any;
+  private jsonPredicates: Record<string, any>;
   private fieldMap: Record<string, string>;
   private isFindOne: boolean;
   private delegateName: string;
@@ -1095,6 +1454,8 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
     delegateName = ''
   ) {
     this.prismaDelegate = prismaDelegate;
+    this.rawFilter = filter;
+    this.jsonPredicates = extractDotNotationPredicates(filter);
     this.fieldMap = fieldMap;
     this.where = normalizeFilter(filter, fieldMap);
     this.isFindOne = isFindOne;
@@ -1311,7 +1672,14 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
 
     try {
       if (this.isFindOne) {
-        const record = await this.prismaDelegate.findFirst(args);
+        let record = await this.prismaDelegate.findFirst(args);
+        if (record && Object.keys(this.jsonPredicates).length > 0) {
+          if (!matchesJsonPredicates(record, this.jsonPredicates)) {
+            // First candidate did not match dot-notation JSON filter, fetch candidate batch to find exact matching item
+            const candidates = await this.prismaDelegate.findMany({ ...args, take: 50 });
+            record = candidates.find((c: any) => matchesJsonPredicates(c, this.jsonPredicates)) || null;
+          }
+        }
         if (!record) return null as unknown as T;
         if (this.virtualPopulates.length > 0) {
           await resolveVirtualPopulates([record], this.virtualPopulates, this.delegateName);
@@ -1457,6 +1825,9 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
         } else {
           records = await this.prismaDelegate.findMany(args);
         }
+        if (Object.keys(this.jsonPredicates).length > 0) {
+          records = records.filter((r: any) => matchesJsonPredicates(r, this.jsonPredicates));
+        }
         if (records.length > 0 && this.virtualPopulates.length > 0) {
           await resolveVirtualPopulates(records, this.virtualPopulates, this.delegateName);
         }
@@ -1500,79 +1871,167 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
         console.warn(
           `[PrismaBridge] conversation_participants table missing. Falling back to scalar conversation query and JSON participants.`
         );
-        const fallbackArgs = { ...args };
-        delete fallbackArgs.include;
-        if (fallbackArgs.select && fallbackArgs.select.participants) {
-          delete fallbackArgs.select.participants;
+
+        const criteria = extractConversationCriteria(this.rawFilter);
+        let candidateRows: any[] = [];
+
+        try {
+          // Parameterized SQL query when participant requirements exist
+          if (criteria.requiredParticipants.length > 0) {
+            const p1 = criteria.requiredParticipants[0];
+            const p2 = criteria.requiredParticipants.length > 1 ? criteria.requiredParticipants[1] : undefined;
+            const p1Pattern = `%"${p1}"%`;
+            const p2Pattern = p2 ? `%"${p2}"%` : undefined;
+
+            let statusSql = Prisma.empty;
+            if (criteria.statusFilter !== undefined) {
+              if (typeof criteria.statusFilter === 'string') {
+                statusSql = Prisma.sql`AND \`status\` = ${criteria.statusFilter}`;
+              } else if (criteria.statusFilter && typeof criteria.statusFilter === 'object') {
+                if ('$ne' in criteria.statusFilter) {
+                  statusSql = Prisma.sql`AND (\`status\` != ${criteria.statusFilter.$ne} OR \`status\` IS NULL)`;
+                } else if ('$eq' in criteria.statusFilter) {
+                  statusSql = Prisma.sql`AND \`status\` = ${criteria.statusFilter.$eq}`;
+                } else if ('$in' in criteria.statusFilter && Array.isArray(criteria.statusFilter.$in)) {
+                  statusSql = Prisma.sql`AND \`status\` IN (${Prisma.join(criteria.statusFilter.$in)})`;
+                } else if ('$nin' in criteria.statusFilter && Array.isArray(criteria.statusFilter.$nin)) {
+                  statusSql = Prisma.sql`AND (\`status\` NOT IN (${Prisma.join(criteria.statusFilter.$nin)}) OR \`status\` IS NULL)`;
+                }
+              }
+            }
+
+            if (criteria.isOrWithInterest && criteria.interestId) {
+              if (p2Pattern) {
+                candidateRows = await (prisma as any).$queryRaw(Prisma.sql`
+                  SELECT _id, interest, lastMessage, messageCount, status, complianceStatus, lastActivityAt, createdAt, updatedAt, participants
+                  FROM \`conversations\`
+                  WHERE (\`interest\` = ${criteria.interestId} OR (\`participants\` LIKE ${p1Pattern} AND \`participants\` LIKE ${p2Pattern}))
+                  ${statusSql}
+                  ORDER BY \`lastActivityAt\` DESC
+                  LIMIT 50
+                `);
+              } else {
+                candidateRows = await (prisma as any).$queryRaw(Prisma.sql`
+                  SELECT _id, interest, lastMessage, messageCount, status, complianceStatus, lastActivityAt, createdAt, updatedAt, participants
+                  FROM \`conversations\`
+                  WHERE (\`interest\` = ${criteria.interestId} OR \`participants\` LIKE ${p1Pattern})
+                  ${statusSql}
+                  ORDER BY \`lastActivityAt\` DESC
+                  LIMIT 50
+                `);
+              }
+            } else {
+              if (p2Pattern) {
+                candidateRows = await (prisma as any).$queryRaw(Prisma.sql`
+                  SELECT _id, interest, lastMessage, messageCount, status, complianceStatus, lastActivityAt, createdAt, updatedAt, participants
+                  FROM \`conversations\`
+                  WHERE (\`participants\` LIKE ${p1Pattern} AND \`participants\` LIKE ${p2Pattern})
+                  ${statusSql}
+                  ORDER BY \`lastActivityAt\` DESC
+                  LIMIT 50
+                `);
+              } else {
+                candidateRows = await (prisma as any).$queryRaw(Prisma.sql`
+                  SELECT _id, interest, lastMessage, messageCount, status, complianceStatus, lastActivityAt, createdAt, updatedAt, participants
+                  FROM \`conversations\`
+                  WHERE \`participants\` LIKE ${p1Pattern}
+                  ${statusSql}
+                  ORDER BY \`lastActivityAt\` DESC
+                  LIMIT 100
+                `);
+              }
+            }
+          } else {
+            // No participant filters; query scalar conversation fields safely without relational joins
+            const fallbackArgs = { ...args };
+            delete fallbackArgs.include;
+            if (fallbackArgs.select && fallbackArgs.select.participants) {
+              delete fallbackArgs.select.participants;
+            }
+            fallbackArgs.where = stripRelationalParticipants(fallbackArgs.where);
+
+            const records = this.isFindOne
+              ? await this.prismaDelegate.findFirst(fallbackArgs).then((r: any) => (r ? [r] : []))
+              : await this.prismaDelegate.findMany(fallbackArgs);
+
+            if (records.length > 0) {
+              const idList = records.map((r: any) => String(r.id || r._id)).filter(Boolean);
+              if (idList.length > 0) {
+                const rawRows: any = await (prisma as any).$queryRaw(Prisma.sql`
+                  SELECT _id, interest, lastMessage, messageCount, status, complianceStatus, lastActivityAt, createdAt, updatedAt, participants
+                  FROM \`conversations\`
+                  WHERE \`_id\` IN (${Prisma.join(idList)})
+                `);
+                candidateRows = rawRows || [];
+              }
+            }
+          }
+        } catch (rawSqlErr: any) {
+          console.warn('[PrismaBridge] SQL fallback query on conversations table failed:', rawSqlErr?.message || rawSqlErr);
+          return (this.isFindOne ? null : []) as unknown as T;
+        }
+
+        const matchedRecords: any[] = [];
+        for (const row of candidateRows || []) {
+          const rowPartIds = parseParticipantsJson(row.participants);
+
+          let matches = true;
+          if (criteria.requiredParticipants.length > 0) {
+            const hasAll = criteria.requiredParticipants.every((pid) => rowPartIds.includes(pid));
+            const hasOrInterest =
+              criteria.isOrWithInterest && criteria.interestId && String(row.interest) === String(criteria.interestId);
+            if (!hasAll && !hasOrInterest) {
+              matches = false;
+            }
+            if (
+              matches &&
+              !hasOrInterest &&
+              criteria.requiredSize !== undefined &&
+              rowPartIds.length !== criteria.requiredSize
+            ) {
+              matches = false;
+            }
+          }
+          if (criteria.statusFilter !== undefined && !matchesStatusFilter(row.status, criteria.statusFilter)) {
+            matches = false;
+          }
+          if (criteria.complianceStatus && row.complianceStatus !== criteria.complianceStatus) {
+            matches = false;
+          }
+
+          if (matches) {
+            const rec: any = {
+              id: row._id,
+              _id: row._id,
+              interestId: row.interest,
+              interest: row.interest,
+              lastMessage: row.lastMessage,
+              messageCount: Number(row.messageCount || 0),
+              status: row.status || 'ACTIVE',
+              complianceStatus: row.complianceStatus || 'SAFE',
+              lastActivityAt: row.lastActivityAt ? new Date(row.lastActivityAt) : new Date(),
+              createdAt: row.createdAt ? new Date(row.createdAt) : new Date(),
+              updatedAt: row.updatedAt ? new Date(row.updatedAt) : new Date(),
+              participants: rowPartIds,
+            };
+            matchedRecords.push(rec);
+            if (this.isFindOne) break;
+          }
         }
 
         if (this.isFindOne) {
-          const record = await this.prismaDelegate.findFirst(fallbackArgs);
-          if (!record) return null as unknown as T;
-          const convId = record.id || record._id;
-          try {
-            const rawRow: any = await (prisma as any).$queryRawUnsafe(
-              `SELECT participants FROM \`conversations\` WHERE \`_id\` = '${convId}' LIMIT 1`
-            );
-            if (rawRow && rawRow[0] && rawRow[0].participants) {
-              const parsed = JSON.parse(rawRow[0].participants);
-              record.participants = Array.isArray(parsed)
-                ? parsed
-                    .map((item: any) =>
-                      typeof item === 'string' ? item : item?.$oid || item?.id || item?._id
-                    )
-                    .filter(Boolean)
-                : [];
-            }
-          } catch {
-            record.participants = record.participants || [];
-          }
+          const first = matchedRecords[0] || null;
+          if (!first) return null as unknown as T;
           if (this.virtualPopulates.length > 0) {
-            await resolveVirtualPopulates([record], this.virtualPopulates, this.delegateName);
+            await resolveVirtualPopulates([first], this.virtualPopulates, this.delegateName);
           }
-          const clientRecord = formatRecord(toClient(record));
+          const clientRecord = formatRecord(toClient(first));
           return attachSave(clientRecord, this.prismaDelegate, this.fieldMap, this.delegateName) as unknown as T;
         } else {
-          const records = await this.prismaDelegate.findMany(fallbackArgs);
-          const convIds = records.map((r: any) => r.id || r._id).filter(Boolean);
-          if (convIds.length > 0) {
-            try {
-              const idList = convIds.map((id: string) => `'${id}'`).join(',');
-              const rawRows: any = await (prisma as any).$queryRawUnsafe(
-                `SELECT _id, participants FROM \`conversations\` WHERE \`_id\` IN (${idList})`
-              );
-              const partMap = new Map();
-              for (const row of rawRows || []) {
-                if (row.participants) {
-                  try {
-                    const parsed = JSON.parse(row.participants);
-                    const pIds = Array.isArray(parsed)
-                      ? parsed
-                          .map((item: any) =>
-                            typeof item === 'string' ? item : item?.$oid || item?.id || item?._id
-                          )
-                          .filter(Boolean)
-                      : [];
-                    partMap.set(row._id, pIds);
-                  } catch {
-                    partMap.set(row._id, []);
-                  }
-                }
-              }
-              for (const r of records) {
-                const cid = r.id || r._id;
-                r.participants = partMap.get(cid) || [];
-              }
-            } catch {
-              for (const r of records) {
-                r.participants = r.participants || [];
-              }
-            }
+          if (matchedRecords.length > 0 && this.virtualPopulates.length > 0) {
+            await resolveVirtualPopulates(matchedRecords, this.virtualPopulates, this.delegateName);
           }
-          if (records.length > 0 && this.virtualPopulates.length > 0) {
-            await resolveVirtualPopulates(records, this.virtualPopulates, this.delegateName);
-          }
-          const clientRecords = toClientArray(records).map((r) =>
+          const clientRecords = toClientArray(matchedRecords).map((r) =>
             attachSave(formatRecord(r), this.prismaDelegate, this.fieldMap, this.delegateName)
           );
           return clientRecords as unknown as T;
@@ -2007,21 +2466,40 @@ export function createPrismaModelAdapter<T = any>(
       const cleanData = cleanUnsupportedModelFields(cleanPrismaData({ ...data, id }, fieldMap), String(delegateName));
       delete cleanData.participants;
 
-      const created = await delegate.create({
-        data: {
-          ...cleanData,
-          participants: {
-            create: participantIds.map((uId: string) => ({ userId: uId })),
+      try {
+        const created = await delegate.create({
+          data: {
+            ...cleanData,
+            participants: {
+              create: participantIds.map((uId: string) => ({ userId: uId })),
+            },
           },
-        },
-        include: {
-          participants: true,
-        },
-      });
+          include: {
+            participants: true,
+          },
+        });
 
-      const clientObj = toClient(created);
-      clientObj.participants = participantIds;
-      return attachSave(clientObj, delegate, fieldMap, String(delegateName));
+        const clientObj = toClient(created);
+        clientObj.participants = participantIds;
+        return attachSave(clientObj, delegate, fieldMap, String(delegateName));
+      } catch (createErr: any) {
+        if (createErr?.message && createErr.message.includes('conversation_participants')) {
+          console.warn('[PrismaBridge] conversation_participants table missing on create. Storing participants in JSON column.');
+          const createdScalar = await delegate.create({
+            data: cleanData,
+          });
+          const jsonVal = JSON.stringify(participantIds);
+          await (prisma as any).$executeRaw(
+            Prisma.sql`UPDATE \`conversations\` SET \`participants\` = ${jsonVal} WHERE \`_id\` = ${cleanData.id || id}`
+          ).catch((e: any) => {
+            console.warn('[PrismaBridge] Could not update participants JSON column:', e?.message || e);
+          });
+          const clientObj = toClient(createdScalar);
+          clientObj.participants = participantIds;
+          return attachSave(clientObj, delegate, fieldMap, String(delegateName));
+        }
+        throw createErr;
+      }
     }
 
     const cleanData = cleanPrismaData({ ...data, id }, fieldMap);
@@ -2044,6 +2522,56 @@ export function createPrismaModelAdapter<T = any>(
     const where = normalizeFilter(filter, fieldMap);
     const updateData = cleanUnsupportedModelFields(prepareUpdateData(update, fieldMap), String(delegateName));
 
+    const jsonPreds = extractDotNotationPredicates(filter);
+    if (Object.keys(jsonPreds).length > 0) {
+      const SCAN_LIMIT = 500;
+      const candidates = await delegate.findMany({ where, take: SCAN_LIMIT + 1 });
+      if (options?.multi && candidates.length > SCAN_LIMIT) {
+        throw new Error(
+          `[PrismaBridge] updateMany with JSON predicates matched more than safety scan budget (${SCAN_LIMIT}). Failing closed to prevent partial updates.`
+        );
+      }
+      const matched = candidates.filter((r: any) => matchesJsonPredicates(r, jsonPreds));
+      if (matched.length === 0) {
+        return {
+          acknowledged: true,
+          matchedCount: 0,
+          modifiedCount: 0,
+          upsertedId: null,
+        };
+      }
+      if (!options?.multi) {
+        const target = matched[0];
+        const updated = await (prisma as any).$transaction(async (tx: any) => {
+          const fresh = await tx[delegateName].findUnique({ where: { id: target.id } });
+          if (!fresh || !matchesJsonPredicates(fresh, jsonPreds)) {
+            return null;
+          }
+          return tx[delegateName].update({
+            where: { id: target.id },
+            data: updateData,
+          });
+        });
+        return {
+          acknowledged: true,
+          matchedCount: updated ? 1 : 0,
+          modifiedCount: updated ? 1 : 0,
+          upsertedId: null,
+        };
+      }
+      const targetIds = matched.map((r: any) => r.id);
+      const result = await delegate.updateMany({
+        where: { id: { in: targetIds } },
+        data: updateData,
+      });
+      return {
+        acknowledged: true,
+        matchedCount: result.count,
+        modifiedCount: result.count,
+        upsertedId: null,
+      };
+    }
+
     const result = await delegate.updateMany({
       where,
       data: updateData,
@@ -2058,7 +2586,7 @@ export function createPrismaModelAdapter<T = any>(
   };
 
   ModelConstructor.updateMany = async function (filter: any, update: any, options: any = {}) {
-    return ModelConstructor.updateOne(filter, update, options);
+    return ModelConstructor.updateOne(filter, update, { ...options, multi: true });
   };
 
   ModelConstructor.findByIdAndUpdate = function (id: any, update: any, options: any = {}) {
@@ -2077,17 +2605,29 @@ export function createPrismaModelAdapter<T = any>(
 
         if (delegateName === 'conversation') {
           const populateParticipantsOpt = opts?.populate?.find((p: any) => p.path === 'participants');
-          const pRows = await (prisma as any).conversationParticipant.findMany({
-            where: { conversationId: stringId },
-            include: populateParticipantsOpt ? { user: true } : undefined,
-          });
+          try {
+            const pRows = await (prisma as any).conversationParticipant.findMany({
+              where: { conversationId: stringId },
+              include: populateParticipantsOpt ? { user: true } : undefined,
+            });
 
-          if (populateParticipantsOpt) {
-            clientObj.participants = pRows.map((cp: any) =>
-              toClient(cp.user ? { ...cp.user, _id: cp.user.id } : { _id: cp.userId, id: cp.userId })
-            );
-          } else {
-            clientObj.participants = pRows.map((cp: any) => cp.userId);
+            if (populateParticipantsOpt) {
+              clientObj.participants = pRows.map((cp: any) =>
+                toClient(cp.user ? { ...cp.user, _id: cp.user.id } : { _id: cp.userId, id: cp.userId })
+              );
+            } else {
+              clientObj.participants = pRows.map((cp: any) => cp.userId);
+            }
+          } catch (partErr: any) {
+            if (partErr?.message && partErr.message.includes('conversation_participants')) {
+              const rawRow = await (prisma as any).$queryRaw(
+                Prisma.sql`SELECT \`participants\` FROM \`conversations\` WHERE \`_id\` = ${stringId} LIMIT 1`
+              ).catch(() => null);
+              const pIds = parseParticipantsJson(rawRow && rawRow[0]?.participants);
+              clientObj.participants = pIds;
+            } else {
+              throw partErr;
+            }
           }
         }
 
@@ -2125,8 +2665,16 @@ export function createPrismaModelAdapter<T = any>(
       const delegate = getDelegate();
       const where = normalizeFilter(filter, fieldMap);
       const updateData = cleanUnsupportedModelFields(prepareUpdateData(update, fieldMap), String(delegateName));
+      const jsonPreds = extractDotNotationPredicates(filter);
 
-      const existing = await delegate.findFirst({ where });
+      let existing: any = null;
+      if (Object.keys(jsonPreds).length > 0) {
+        const candidates = await delegate.findMany({ where, take: 50 });
+        existing = candidates.find((c: any) => matchesJsonPredicates(c, jsonPreds)) || null;
+      } else {
+        existing = await delegate.findFirst({ where });
+      }
+
       if (!existing) {
         if (options?.upsert) {
           const id = generateObjectId();
@@ -2147,7 +2695,13 @@ export function createPrismaModelAdapter<T = any>(
           } catch (createErr: any) {
             if (createErr.code === 'P2002') {
               // Concurrency collision: another process created the record with unique constraints
-              const existingRecord = await delegate.findFirst({ where });
+              let existingRecord: any = null;
+              if (Object.keys(jsonPreds).length > 0) {
+                const candidates = await delegate.findMany({ where, take: 50 });
+                existingRecord = candidates.find((c: any) => matchesJsonPredicates(c, jsonPreds)) || null;
+              } else {
+                existingRecord = await delegate.findFirst({ where });
+              }
               if (existingRecord) {
                 const updated = await delegate.update({
                   where: { id: existingRecord.id },
@@ -2166,26 +2720,53 @@ export function createPrismaModelAdapter<T = any>(
         return null;
       }
 
-      const updated = await delegate.update({
-        where: { id: existing.id },
-        data: updateData,
-      });
+      let updated: any = null;
+      if (Object.keys(jsonPreds).length > 0) {
+        updated = await (prisma as any).$transaction(async (tx: any) => {
+          const fresh = await tx[delegateName].findUnique({ where: { id: existing.id } });
+          if (!fresh || !matchesJsonPredicates(fresh, jsonPreds)) {
+            return null;
+          }
+          return tx[delegateName].update({
+            where: { id: existing.id },
+            data: updateData,
+          });
+        });
+        if (!updated) return null;
+      } else {
+        updated = await delegate.update({
+          where: { id: existing.id },
+          data: updateData,
+        });
+      }
 
       const clientObj = normalizeDelegateRecord(toClient(updated), String(delegateName));
 
       if (delegateName === 'conversation') {
         const populateParticipantsOpt = opts?.populate?.find((p: any) => p.path === 'participants');
-        const pRows = await (prisma as any).conversationParticipant.findMany({
-          where: { conversationId: existing.id },
-          include: populateParticipantsOpt ? { user: true } : undefined,
-        });
+        try {
+          const pRows = await (prisma as any).conversationParticipant.findMany({
+            where: { conversationId: existing.id },
+            include: populateParticipantsOpt ? { user: true } : undefined,
+          });
 
-        if (populateParticipantsOpt) {
-          clientObj.participants = pRows.map((cp: any) =>
-            toClient(cp.user ? { ...cp.user, _id: cp.user.id } : { _id: cp.userId, id: cp.userId })
-          );
-        } else {
-          clientObj.participants = pRows.map((cp: any) => cp.userId);
+          if (populateParticipantsOpt) {
+            clientObj.participants = pRows.map((cp: any) =>
+              toClient(cp.user ? { ...cp.user, _id: cp.user.id } : { _id: cp.userId, id: cp.userId })
+            );
+          } else {
+            clientObj.participants = pRows.map((cp: any) => cp.userId);
+          }
+        } catch (partErr: any) {
+          if (partErr?.message && partErr.message.includes('conversation_participants')) {
+            const rawRow = await (prisma as any).$queryRaw(
+              Prisma.sql`SELECT \`participants\` FROM \`conversations\` WHERE \`_id\` = ${existing.id} LIMIT 1`
+            ).catch(() => null);
+            const pIds = parseParticipantsJson(rawRow && rawRow[0]?.participants);
+            clientObj.participants = pIds;
+          } else {
+            throw partErr;
+          }
         }
       }
 
@@ -2200,12 +2781,44 @@ export function createPrismaModelAdapter<T = any>(
   ModelConstructor.deleteOne = async function (filter: any) {
     const delegate = getDelegate();
     const where = normalizeFilter(filter, fieldMap);
+    const jsonPreds = extractDotNotationPredicates(filter);
+    if (Object.keys(jsonPreds).length > 0) {
+      const candidates = await delegate.findMany({ where, take: 100 });
+      const target = candidates.find((r: any) => matchesJsonPredicates(r, jsonPreds));
+      if (!target) return { acknowledged: true, deletedCount: 0 };
+      const deleted = await (prisma as any).$transaction(async (tx: any) => {
+        const fresh = await tx[delegateName].findUnique({ where: { id: target.id } });
+        if (!fresh || !matchesJsonPredicates(fresh, jsonPreds)) {
+          return null;
+        }
+        return tx[delegateName].delete({ where: { id: target.id } });
+      });
+      return { acknowledged: true, deletedCount: deleted ? 1 : 0 };
+    }
     const result = await delegate.deleteMany({ where });
     return { acknowledged: true, deletedCount: result.count };
   };
 
   ModelConstructor.deleteMany = async function (filter: any) {
-    return ModelConstructor.deleteOne(filter);
+    const delegate = getDelegate();
+    const where = normalizeFilter(filter, fieldMap);
+    const jsonPreds = extractDotNotationPredicates(filter);
+    if (Object.keys(jsonPreds).length > 0) {
+      const SCAN_LIMIT = 500;
+      const candidates = await delegate.findMany({ where, take: SCAN_LIMIT + 1 });
+      if (candidates.length > SCAN_LIMIT) {
+        throw new Error(
+          `[PrismaBridge] deleteMany with JSON predicates matched more than safety scan budget (${SCAN_LIMIT}). Failing closed to prevent partial deletes.`
+        );
+      }
+      const targets = candidates.filter((r: any) => matchesJsonPredicates(r, jsonPreds));
+      if (targets.length === 0) return { acknowledged: true, deletedCount: 0 };
+      const targetIds = targets.map((r: any) => r.id);
+      const result = await delegate.deleteMany({ where: { id: { in: targetIds } } });
+      return { acknowledged: true, deletedCount: result.count };
+    }
+    const result = await delegate.deleteMany({ where });
+    return { acknowledged: true, deletedCount: result.count };
   };
 
   ModelConstructor.findByIdAndDelete = async function (id: any) {
@@ -2224,11 +2837,28 @@ export function createPrismaModelAdapter<T = any>(
     const delegate = getDelegate();
     if (!delegate) return null;
     const where = normalizeFilter(filter, fieldMap);
+    const jsonPreds = extractDotNotationPredicates(filter);
     try {
-      const record = await delegate.findFirst({ where });
-      if (!record) return null;
-      await delegate.delete({ where: { id: record.id } });
-      return normalizeDelegateRecord(toClient(record), String(delegateName));
+      let record: any = null;
+      if (Object.keys(jsonPreds).length > 0) {
+        const candidates = await delegate.findMany({ where, take: 50 });
+        record = candidates.find((r: any) => matchesJsonPredicates(r, jsonPreds)) || null;
+        if (!record) return null;
+        const deleted = await (prisma as any).$transaction(async (tx: any) => {
+          const fresh = await tx[delegateName].findUnique({ where: { id: record.id } });
+          if (!fresh || !matchesJsonPredicates(fresh, jsonPreds)) {
+            return null;
+          }
+          return tx[delegateName].delete({ where: { id: record.id } });
+        });
+        if (!deleted) return null;
+        return normalizeDelegateRecord(toClient(deleted), String(delegateName));
+      } else {
+        record = await delegate.findFirst({ where });
+        if (!record) return null;
+        await delegate.delete({ where: { id: record.id } });
+        return normalizeDelegateRecord(toClient(record), String(delegateName));
+      }
     } catch (err: any) {
       if (err.code === 'P2025') return null;
       throw err;
@@ -2240,7 +2870,10 @@ export function createPrismaModelAdapter<T = any>(
       const delegate = getDelegate();
       if (!delegate) return 0;
       const where = normalizeFilter(filter, fieldMap);
-      if (String(delegateName) === 'notification') {
+      const jsonPreds = extractDotNotationPredicates(filter);
+      const hasJsonPreds = Object.keys(jsonPreds).length > 0;
+
+      if (String(delegateName) === 'notification' || hasJsonPreds) {
         const BATCH_SIZE = 250;
         const MAX_COUNT_BUDGET = 5000;
         let count = 0;
@@ -2260,6 +2893,9 @@ export function createPrismaModelAdapter<T = any>(
           for (const r of batch) {
             // Defense-in-depth: If filter specified read status, verify field matches projection
             if (where.read !== undefined && r.read !== undefined && r.read !== where.read) {
+              continue;
+            }
+            if (hasJsonPreds && !matchesJsonPredicates(r, jsonPreds)) {
               continue;
             }
             let meta = r?.metadata;
@@ -2328,6 +2964,54 @@ export function createPrismaModelAdapter<T = any>(
     const delegate = getDelegate();
     const where = normalizeFilter(filter, fieldMap);
     const prismaField = fieldMap[field] || (field === '_id' ? 'id' : field);
+    const jsonPreds = extractDotNotationPredicates(filter);
+    const hasJsonPreds = Object.keys(jsonPreds).length > 0;
+
+    if (hasJsonPreds || String(delegateName) === 'notification') {
+      const BATCH_SIZE = 250;
+      const MAX_SCAN_BUDGET = 5000;
+      let dbOffset = 0;
+      const uniqueValues = new Set<any>();
+
+      while (dbOffset < MAX_SCAN_BUDGET) {
+        const batch = await delegate.findMany({
+          where,
+          skip: dbOffset,
+          take: BATCH_SIZE,
+          select: {
+            id: true,
+            [prismaField]: true,
+            metadata: true,
+          },
+        });
+        if (!batch || batch.length === 0) break;
+
+        for (const r of batch) {
+          if (String(delegateName) === 'notification') {
+            let meta = r?.metadata;
+            if (typeof meta === 'string') {
+              try { meta = JSON.parse(meta); } catch { meta = {}; }
+            }
+            if (meta?.isDeleted || meta?.trashed) {
+              continue;
+            }
+          }
+          if (hasJsonPreds && !matchesJsonPredicates(r, jsonPreds)) {
+            continue;
+          }
+          const val = r[prismaField];
+          if (val !== null && val !== undefined) {
+            uniqueValues.add(val);
+          }
+        }
+
+        dbOffset += batch.length;
+        if (batch.length < BATCH_SIZE) break;
+      }
+
+      return Array.from(uniqueValues);
+    }
+
     const records = await delegate.findMany({
       where,
       select: { [prismaField]: true },

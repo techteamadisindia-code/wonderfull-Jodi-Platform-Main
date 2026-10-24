@@ -624,7 +624,12 @@ async function runSuite() {
 
     Interest.findById = async () => mockAlreadyAccepted;
     Conversation.findOne = async () => ({ _id: '67b0conv1111222233334444' });
-    Notification.findOne = async () => ({ _id: 'notif_existing_1', user: SENDER_USER_ID });
+    Notification.findOne = async () => ({
+      _id: 'notif_existing_1',
+      user: SENDER_USER_ID,
+      type: 'INTEREST_ACCEPTED',
+      metadata: { interestId: VALID_INTEREST_ID },
+    });
 
     let duplicateCreated = false;
     Notification.create = async () => {
@@ -767,6 +772,7 @@ async function runSuite() {
     const origUserFindById = User.findById;
     const origProfileFindOne = Profile.findOne;
     const origNotifFindOne = Notification.findOne;
+    const origNotifFind = Notification.find;
     const origNotifCreate = Notification.create;
     const origConvFindOne = Conversation.findOne;
     const origConvCreate = Conversation.create;
@@ -801,7 +807,22 @@ async function runSuite() {
     });
 
     let notificationsCreated = 0;
-    Notification.findOne = async () => (notificationsCreated > 0 ? { _id: 'notif_1' } : null);
+    Notification.findOne = async () => (notificationsCreated > 0 ? {
+      _id: 'notif_1',
+      user: SENDER_USER_ID,
+      type: 'INTEREST_ACCEPTED',
+      metadata: { interestId: VALID_INTEREST_ID },
+    } : null);
+    Notification.find = () => ({
+      sort: () => ({
+        limit: async () => (notificationsCreated > 0 ? [{
+          _id: 'notif_1',
+          user: SENDER_USER_ID,
+          type: 'INTEREST_ACCEPTED',
+          metadata: { interestId: VALID_INTEREST_ID },
+        }] : []),
+      }),
+    });
     Notification.create = async (doc) => {
       notificationsCreated++;
       return { _id: 'notif_1', ...doc };
@@ -832,6 +853,7 @@ async function runSuite() {
       User.findById = origUserFindById;
       Profile.findOne = origProfileFindOne;
       Notification.findOne = origNotifFindOne;
+      Notification.find = origNotifFind;
       Notification.create = origNotifCreate;
       Conversation.findOne = origConvFindOne;
       Conversation.create = origConvCreate;
@@ -1116,7 +1138,12 @@ async function runSuite() {
     };
 
     Interest.findById = async () => mockAlreadyRejected;
-    Notification.findOne = async () => ({ _id: 'notif_existing_withdrawn', user: SENDER_USER_ID });
+    Notification.findOne = async () => ({
+      _id: 'notif_existing_withdrawn',
+      user: SENDER_USER_ID,
+      type: 'INTEREST_WITHDRAWN',
+      metadata: { interestId: VALID_INTEREST_ID },
+    });
 
     let duplicateNotif = false;
     Notification.create = async () => {

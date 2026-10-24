@@ -201,6 +201,11 @@ async function issueRefreshToken(userId, family, req) {
 function setAuthCookies(res, accessToken, refreshToken) {
     res.cookie('access_token', accessToken, (0, securityUtils_1.getAccessTokenCookieOptions)());
     res.cookie('refresh_token', refreshToken, (0, securityUtils_1.getRefreshTokenCookieOptions)());
+    // Non-sensitive UI hint cookie for frontend to know an auth session exists (without reading HttpOnly tokens)
+    res.cookie('wj_session', '1', {
+        ...(0, securityUtils_1.getAccessTokenCookieOptions)(),
+        httpOnly: false,
+    });
 }
 /**
  * Helper to clear authentication cookies on response
@@ -208,6 +213,7 @@ function setAuthCookies(res, accessToken, refreshToken) {
 function clearAuthCookies(res) {
     res.clearCookie('access_token', { ...(0, securityUtils_1.getAccessTokenCookieOptions)(), maxAge: 0 });
     res.clearCookie('refresh_token', { ...(0, securityUtils_1.getRefreshTokenCookieOptions)(), maxAge: 0 });
+    res.clearCookie('wj_session', { ...(0, securityUtils_1.getAccessTokenCookieOptions)(), httpOnly: false, maxAge: 0 });
 }
 async function registerUser(req, res, next) {
     try {

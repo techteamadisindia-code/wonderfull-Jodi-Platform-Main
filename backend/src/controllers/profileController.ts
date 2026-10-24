@@ -21,6 +21,7 @@ import { validateLocationHierarchy } from './locationController';
 import { validateCommunityHierarchy } from './communityMasterController';
 import { Language } from '../models/CommunityMaster';
 import { getNextCandidateId } from '../models/Counter';
+import { recordProfileView } from '../services/profileViewService';
 
 const profileSchema = z.object({
   displayName: z.string().trim().min(2, 'Display name must be at least 2 characters').max(100),
@@ -682,6 +683,13 @@ export async function getProfile(req: Request, res: Response, next: NextFunction
       if (acceptedReq) {
         isContactUnlocked = true;
       }
+    }
+
+    // Best-effort profile view notification tracking (non-blocking, failure resilient)
+    if (callerUserId && !isSelf && !isCallerAdmin) {
+      recordProfileView(callerUserId, profile, (req as any).user?.role).catch((err) => {
+        console.error('[ProfileController] Error tracking profile view:', err?.message || err);
+      });
     }
 
     res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');

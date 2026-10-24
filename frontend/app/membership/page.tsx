@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Check,
   Crown,
@@ -17,6 +17,8 @@ import {
   CheckCircle2,
   UserCheck,
   RefreshCw,
+  Eye,
+  ArrowLeft,
 } from 'lucide-react';
 import {
   PRIVACY_POINTS,
@@ -53,13 +55,25 @@ interface CalculatedOfferData {
   } | null;
 }
 
-export default function MembershipPage() {
+function MembershipContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isProfileViewersFeature = searchParams?.get('feature') === 'profile-viewers';
 
   // Dynamic Plans State
   const [plans, setPlans] = useState<MembershipPlanData[]>([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [plansError, setPlansError] = useState<string | null>(null);
+
+  // Filtered plans for feature-specific view (exclude free plan)
+  const displayedPlans = isProfileViewersFeature
+    ? plans.filter((p) => {
+        const slug = p.slug?.toLowerCase() || '';
+        const key = p.key?.toUpperCase() || '';
+        const price = p.discountedPrice ?? p.price ?? p.originalPrice ?? 0;
+        return slug !== 'free' && key !== 'FREE' && p.ctaAction !== 'register' && price > 0;
+      })
+    : plans;
 
   // Dynamic Server-Calculated Offers per plan key
   const [planOffers, setPlanOffers] = useState<Record<string, CalculatedOfferData>>({});
@@ -358,46 +372,92 @@ export default function MembershipPage() {
       />
 
       {/* ── 1. Hero Header Section ── */}
-      <section className="relative pt-6 sm:pt-9 pb-5 sm:pb-7 px-4 sm:px-6 lg:px-8 border-b border-[#E8E1DB] bg-gradient-to-b from-[#FFF5F7]/80 via-[#FAF7F4] to-[#FAF7F4]">
-        <div className="max-w-4xl mx-auto text-center">
-          {/* Subtle Trust Badge */}
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 border border-rose-200/80 px-3.5 py-1 text-xs font-bold text-[#9E132D] shadow-2xs">
-            <Crown className="w-3.5 h-3.5 text-[#E51F3E]" />
-            <span>Verified Doctor Matrimonial Plans</span>
-          </div>
+      {isProfileViewersFeature ? (
+        <section className="pt-6 sm:pt-8 pb-3 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+          {/* Back Button */}
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-slate-700 hover:text-[#E51F3E] transition mb-4 cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back</span>
+          </button>
 
-          <h1 className="mt-2.5 font-serif text-2xl sm:text-3xl lg:text-4xl font-extrabold text-[#111827] tracking-tight leading-tight">
-            Choose Your <span className="text-[#E51F3E]">Membership Plan</span>
-          </h1>
+          {/* Promotional Card matching Mockup 4 */}
+          <div className="bg-white rounded-2xl border border-[#E8E1DB] p-5 sm:p-7 shadow-xs">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+              <div className="flex-1 w-full">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-10 h-10 rounded-full bg-rose-50 border border-rose-200 flex items-center justify-center text-[#E51F3E] shrink-0">
+                    <Eye className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h1 className="font-serif text-xl sm:text-2xl md:text-3xl font-extrabold text-[#111827]">
+                      See Who Viewed Your Profile
+                    </h1>
+                  </div>
+                </div>
+                <p className="text-xs sm:text-sm text-slate-600 mb-5 ml-1">
+                  This is a premium feature. Upgrade to a paid membership to discover who is interested in you.
+                </p>
 
-          <p className="mt-2 text-xs sm:text-sm text-slate-600 max-w-2xl mx-auto leading-relaxed">
-            Connect directly with verified doctors, healthcare professionals, and respected families.
-            Enjoy secure contact requests, privacy protection, and personalized matchmaking support.
-          </p>
+                {/* 4-point benefits banner */}
+                <div className="bg-[#FFF0F2] rounded-xl p-4 sm:p-5 border border-rose-100/80">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm text-slate-800 font-medium">
+                    <div className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-[#E51F3E] shrink-0 stroke-[2.5]" />
+                      <span>See the full profiles of members who viewed your profile</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-[#E51F3E] shrink-0 stroke-[2.5]" />
+                      <span>Get more meaningful connections</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-[#E51F3E] shrink-0 stroke-[2.5]" />
+                      <span>Access all premium features</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-[#E51F3E] shrink-0 stroke-[2.5]" />
+                      <span>Safe and secure platform</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-          {/* User's Active Status Banner if Authenticated */}
-          {authenticated && (
-            <div className="mt-3.5 inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl bg-white border border-[#E8E1DB] shadow-2xs text-xs font-semibold text-slate-700">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>
-                  Current Plan:{' '}
-                  <strong className="text-slate-900 uppercase">
-                    {activePlanKey.replace('-', ' ')}
-                  </strong>
-                </span>
-              </span>
-              <span className="text-slate-300">|</span>
-              <span className="text-slate-600">
-                Contact Credits:{' '}
-                <strong className="text-[#E51F3E]">{contactCredits} Available</strong>
-              </span>
+              {/* Avatar cluster illustration with Eye icon */}
+              <div className="relative shrink-0 hidden sm:flex items-center justify-center w-52 h-36">
+                <div className="relative z-10 w-20 h-20 rounded-full overflow-hidden border-2 border-white shadow-md ring-2 ring-[#E51F3E]/20">
+                  <img
+                    src="https://images.unsplash.com/photo-1594824813501-48995a5f7823?w=160&auto=format&fit=crop&q=80"
+                    alt="Doctor profile"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="absolute left-2 w-14 h-14 rounded-full overflow-hidden border-2 border-white shadow-xs filter blur-[2px] opacity-75">
+                  <img
+                    src="https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=120&auto=format&fit=crop&q=80"
+                    alt="Member"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="absolute right-2 w-14 h-14 rounded-full overflow-hidden border-2 border-white shadow-xs filter blur-[2px] opacity-75">
+                  <img
+                    src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+                    alt="Member"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="absolute bottom-2 right-6 z-20 w-8 h-8 rounded-full bg-[#E51F3E] text-white flex items-center justify-center shadow-md ring-2 ring-white">
+                  <Eye className="w-4 h-4" />
+                </div>
+              </div>
             </div>
-          )}
+          </div>
 
           {/* Notification Alerts */}
           {orderSuccess && (
-            <div className="mt-4 max-w-xl mx-auto p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-xs text-left">
+            <div className="mt-4 p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-xs text-left">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
                 <span>{orderSuccess}</span>
@@ -413,7 +473,7 @@ export default function MembershipPage() {
           )}
 
           {orderError && (
-            <div className="mt-4 max-w-xl mx-auto p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-xs text-left">
+            <div className="mt-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-xs text-left">
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4.5 h-4.5 text-rose-600 shrink-0" />
                 <span>{orderError}</span>
@@ -427,198 +487,274 @@ export default function MembershipPage() {
               </button>
             </div>
           )}
-        </div>
-      </section>
+        </section>
+      ) : (
+        <>
+          <section className="relative pt-6 sm:pt-9 pb-5 sm:pb-7 px-4 sm:px-6 lg:px-8 border-b border-[#E8E1DB] bg-gradient-to-b from-[#FFF5F7]/80 via-[#FAF7F4] to-[#FAF7F4]">
+            <div className="max-w-4xl mx-auto text-center">
+              {/* Subtle Trust Badge */}
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 border border-rose-200/80 px-3.5 py-1 text-xs font-bold text-[#9E132D] shadow-2xs">
+                <Crown className="w-3.5 h-3.5 text-[#E51F3E]" />
+                <span>Verified Doctor Matrimonial Plans</span>
+              </div>
 
-      {/* ── 2. Top Quick Comparison Table Section ── */}
-      <section className="py-5 sm:py-7 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
-        <div className="text-center mb-4 sm:mb-5">
-          <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#111827]">
-            Plan Overview & Contact Allowances
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Compare key features and contact request limits across our active membership packages
-          </p>
-        </div>
+              <h1 className="mt-2.5 font-serif text-2xl sm:text-3xl lg:text-4xl font-extrabold text-[#111827] tracking-tight leading-tight">
+                Choose Your <span className="text-[#E51F3E]">Membership Plan</span>
+              </h1>
 
-        <div className="bg-white rounded-xl sm:rounded-2xl border border-[#E8E1DB] shadow-2xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs sm:text-sm">
-              <thead>
-                <tr className="bg-slate-50/90 border-b border-[#E8E1DB] text-slate-700 font-bold">
-                  <th className="py-2.5 sm:py-3 px-3.5 sm:px-5">Package</th>
-                  <th className="py-2.5 sm:py-3 px-3.5 sm:px-5">Price</th>
-                  <th className="py-2.5 sm:py-3 px-3.5 sm:px-5">Profile Viewing</th>
-                  <th className="py-2.5 sm:py-3 px-3.5 sm:px-5">Phone / Contact Views</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {loadingPlans ? (
-                  <tr>
-                    <td colSpan={4} className="py-8 text-center text-slate-400">
-                      Loading plan comparisons...
-                    </td>
-                  </tr>
-                ) : plans.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="py-8 text-center text-slate-400">
-                      No plans available.
-                    </td>
-                  </tr>
-                ) : (
-                  plans.map((plan, idx) => {
-                    const finalPrice =
-                      plan.discountedPrice !== undefined && plan.discountedPrice !== null
-                        ? plan.discountedPrice
-                        : plan.originalPrice ?? 0;
+              <p className="mt-2 text-xs sm:text-sm text-slate-600 max-w-2xl mx-auto leading-relaxed">
+                Connect directly with verified doctors, healthcare professionals, and respected families.
+                Enjoy secure contact requests, privacy protection, and personalized matchmaking support.
+              </p>
 
-                    return (
-                      <tr
-                        key={plan._id || plan.slug}
-                        className={`transition-colors ${
-                          plan.isPopular
-                            ? 'bg-rose-50/50 hover:bg-rose-50/80 font-semibold'
-                            : idx % 2 === 0
-                            ? 'bg-white hover:bg-slate-50/60'
-                            : 'bg-slate-50/30 hover:bg-slate-50/60'
-                        }`}
-                      >
-                        <td className="py-2.5 sm:py-3 px-3.5 sm:px-5 font-bold text-[#111827] flex items-center gap-2">
-                          <span>{plan.name}</span>
-                          {plan.isPopular && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-[#E51F3E] text-white shadow-2xs">
-                              Popular
-                            </span>
-                          )}
-                          {plan.seasonalLabel && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-200">
-                              Offer
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2.5 sm:py-3 px-3.5 sm:px-5 font-bold text-slate-900">
-                          ₹{finalPrice.toLocaleString('en-IN')}{' '}
-                          <span className="text-xs font-normal text-slate-500">
-                            {plan.billingPeriod && plan.billingPeriod !== 'Forever Free'
-                              ? `/ ${plan.billingPeriod}`
-                              : ''}
-                          </span>
-                        </td>
-                        <td className="py-2.5 sm:py-3 px-3.5 sm:px-5">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-                              plan.profileViewLimit === 'unlimited'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'
-                                : 'bg-slate-100 text-slate-600'
-                            }`}
-                          >
-                            {plan.profileViewLimit === 'unlimited' ? 'Unlimited' : 'Limited'}
-                          </span>
-                        </td>
-                        <td className="py-2.5 sm:py-3 px-3.5 sm:px-5 font-bold text-[#111827]">
-                          {plan.contactRequestLimit === -1
-                            ? 'Unlimited / Fair Use'
-                            : plan.contactRequestLimit && plan.contactRequestLimit > 0
-                            ? `${plan.contactRequestLimit} Contacts`
-                            : '0 Contacts'}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
+              {/* User's Active Status Banner if Authenticated */}
+              {authenticated && (
+                <div className="mt-3.5 inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl bg-white border border-[#E8E1DB] shadow-2xs text-xs font-semibold text-slate-700">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>
+                      Current Plan:{' '}
+                      <strong className="text-slate-900 uppercase">
+                        {activePlanKey.replace('-', ' ')}
+                      </strong>
+                    </span>
+                  </span>
+                  <span className="text-slate-300">|</span>
+                  <span className="text-slate-600">
+                    Contact Credits:{' '}
+                    <strong className="text-[#E51F3E]">{contactCredits} Available</strong>
+                  </span>
+                </div>
+              )}
 
-      {/* ── 2.5 Promo / Coupon Code Section ── */}
-      <section className="pt-4 pb-2 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
-        <div className="bg-white rounded-2xl border border-rose-200/80 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3 text-left">
-            <div className="w-10 h-10 rounded-xl bg-rose-50 text-[#E51F3E] flex items-center justify-center shrink-0 border border-rose-100">
-              <Tag className="w-5 h-5" />
+              {/* Notification Alerts */}
+              {orderSuccess && (
+                <div className="mt-4 max-w-xl mx-auto p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-xs text-left">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
+                    <span>{orderSuccess}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOrderSuccess(null)}
+                    className="text-emerald-700 hover:text-emerald-900 font-bold cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {orderError && (
+                <div className="mt-4 max-w-xl mx-auto p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-xs text-left">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4.5 h-4.5 text-rose-600 shrink-0" />
+                    <span>{orderError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOrderError(null)}
+                    className="text-rose-700 hover:text-rose-900 font-bold cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
             </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                <span>Have a Promo or Referral Coupon?</span>
-                <span className="text-[10px] uppercase font-extrabold bg-rose-100 text-[#E51F3E] px-2 py-0.5 rounded-full">
-                  Special Savings
-                </span>
-              </h3>
-              <p className="text-xs text-slate-500">
-                Enter your seasonal coupon or referral reward code to apply discounts instantly.
+          </section>
+
+          {/* ── 2. Top Quick Comparison Table Section ── */}
+          <section className="py-5 sm:py-7 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
+            <div className="text-center mb-4 sm:mb-5">
+              <h2 className="font-serif text-lg sm:text-2xl font-bold text-[#111827]">
+                Plan Overview & Contact Allowances
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                Compare key features and contact request limits across our active membership packages
               </p>
             </div>
-          </div>
 
-          <div className="w-full sm:w-auto">
-            {appliedCoupon ? (
-              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 rounded-xl">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="text-xs font-bold text-emerald-800">
-                  Applied: <span className="tracking-wider">{appliedCoupon}</span>
-                </span>
+            <div className="bg-white rounded-xl sm:rounded-2xl border border-[#E8E1DB] shadow-2xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                  <thead>
+                    <tr className="bg-slate-50/90 border-b border-[#E8E1DB] text-slate-700 font-bold">
+                      <th className="py-2.5 sm:py-3 px-3.5 sm:px-5">Package</th>
+                      <th className="py-2.5 sm:py-3 px-3.5 sm:px-5">Price</th>
+                      <th className="py-2.5 sm:py-3 px-3.5 sm:px-5">Profile Viewing</th>
+                      <th className="py-2.5 sm:py-3 px-3.5 sm:px-5">Phone / Contact Views</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                    {loadingPlans ? (
+                      <tr>
+                        <td colSpan={4} className="py-8 text-center text-slate-400">
+                          Loading plan comparisons...
+                        </td>
+                      </tr>
+                    ) : plans.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="py-8 text-center text-slate-400">
+                          No plans available.
+                        </td>
+                      </tr>
+                    ) : (
+                      plans.map((plan, idx) => {
+                        const finalPrice =
+                          plan.discountedPrice !== undefined && plan.discountedPrice !== null
+                            ? plan.discountedPrice
+                            : plan.originalPrice ?? 0;
+
+                        return (
+                          <tr
+                            key={plan._id || plan.slug}
+                            className={`transition-colors ${
+                              plan.isPopular
+                                ? 'bg-rose-50/50 hover:bg-rose-50/80 font-semibold'
+                                : idx % 2 === 0
+                                ? 'bg-white hover:bg-slate-50/60'
+                                : 'bg-slate-50/30 hover:bg-slate-50/60'
+                            }`}
+                          >
+                            <td className="py-2.5 sm:py-3 px-3.5 sm:px-5 font-bold text-[#111827] flex items-center gap-2">
+                              <span>{plan.name}</span>
+                              {plan.isPopular && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-[#E51F3E] text-white shadow-2xs">
+                                  Popular
+                                </span>
+                              )}
+                              {plan.seasonalLabel && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-200">
+                                  Offer
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 sm:py-3 px-3.5 sm:px-5 font-bold text-slate-900">
+                              ₹{finalPrice.toLocaleString('en-IN')}{' '}
+                              <span className="text-xs font-normal text-slate-500">
+                                {plan.billingPeriod && plan.billingPeriod !== 'Forever Free'
+                                  ? `/ ${plan.billingPeriod}`
+                                  : ''}
+                              </span>
+                            </td>
+                            <td className="py-2.5 sm:py-3 px-3.5 sm:px-5">
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                  plan.profileViewLimit === 'unlimited'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'
+                                    : 'bg-slate-100 text-slate-600'
+                                }`}
+                              >
+                                {plan.profileViewLimit === 'unlimited' ? 'Unlimited' : 'Limited'}
+                              </span>
+                            </td>
+                            <td className="py-2.5 sm:py-3 px-3.5 sm:px-5 font-bold text-[#111827]">
+                              {plan.contactRequestLimit === -1
+                                ? 'Unlimited / Fair Use'
+                                : plan.contactRequestLimit && plan.contactRequestLimit > 0
+                                ? `${plan.contactRequestLimit} Contacts`
+                                : '0 Contacts'}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          {/* ── 2.5 Promo / Coupon Code Section ── */}
+          <section className="pt-4 pb-2 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+            <div className="bg-white rounded-2xl border border-rose-200/80 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3 text-left">
+                <div className="w-10 h-10 rounded-xl bg-rose-50 text-[#E51F3E] flex items-center justify-center shrink-0 border border-rose-100">
+                  <Tag className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                    <span>Have a Promo or Referral Coupon?</span>
+                    <span className="text-[10px] uppercase font-extrabold bg-rose-100 text-[#E51F3E] px-2 py-0.5 rounded-full">
+                      Special Savings
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Enter your seasonal coupon or referral reward code to apply discounts instantly.
+                  </p>
+                </div>
+              </div>
+
+              <div className="w-full sm:w-auto">
+                {appliedCoupon ? (
+                  <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 rounded-xl">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="text-xs font-bold text-emerald-800">
+                      Applied: <span className="tracking-wider">{appliedCoupon}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleRemoveCoupon}
+                      className="ml-2 text-xs text-slate-400 hover:text-rose-600 font-bold cursor-pointer"
+                      title="Remove coupon"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleApplyCoupon} className="flex items-center gap-2 w-full sm:w-72">
+                    <input
+                      type="text"
+                      placeholder="e.g. WJ50OFF / WJREF-XXXX"
+                      value={couponInput}
+                      onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                      className="flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wider rounded-xl border border-[#E8E1DB] focus:outline-none focus:border-[#E51F3E] bg-slate-50 focus:bg-white"
+                    />
+                    <button
+                      type="submit"
+                      disabled={couponApplying || !couponInput.trim()}
+                      className="px-3.5 py-2 rounded-xl bg-[#E51F3E] hover:bg-[#CC1432] disabled:opacity-50 text-white text-xs font-bold transition shadow-xs cursor-pointer shrink-0"
+                    >
+                      {couponApplying ? 'Verifying...' : 'Apply'}
+                    </button>
+                  </form>
+                )}
+              </div>
+            </div>
+
+            {couponAlert && (
+              <div
+                className={`mt-2.5 px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 ${
+                  couponAlert.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                    : 'bg-rose-50 text-rose-800 border border-rose-200'
+                }`}
+              >
+                <span>{couponAlert.text}</span>
                 <button
                   type="button"
-                  onClick={handleRemoveCoupon}
-                  className="ml-2 text-xs text-slate-400 hover:text-rose-600 font-bold cursor-pointer"
-                  title="Remove coupon"
+                  onClick={() => setCouponAlert(null)}
+                  className="text-slate-400 hover:text-slate-700 cursor-pointer"
                 >
                   ✕
                 </button>
               </div>
-            ) : (
-              <form onSubmit={handleApplyCoupon} className="flex items-center gap-2 w-full sm:w-72">
-                <input
-                  type="text"
-                  placeholder="e.g. WJ50OFF / WJREF-XXXX"
-                  value={couponInput}
-                  onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
-                  className="flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wider rounded-xl border border-[#E8E1DB] focus:outline-none focus:border-[#E51F3E] bg-slate-50 focus:bg-white"
-                />
-                <button
-                  type="submit"
-                  disabled={couponApplying || !couponInput.trim()}
-                  className="px-3.5 py-2 rounded-xl bg-[#E51F3E] hover:bg-[#CC1432] disabled:opacity-50 text-white text-xs font-bold transition shadow-xs cursor-pointer shrink-0"
-                >
-                  {couponApplying ? 'Verifying...' : 'Apply'}
-                </button>
-              </form>
             )}
-          </div>
-        </div>
-
-        {couponAlert && (
-          <div
-            className={`mt-2.5 px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 ${
-              couponAlert.type === 'success'
-                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                : 'bg-rose-50 text-rose-800 border border-rose-200'
-            }`}
-          >
-            <span>{couponAlert.text}</span>
-            <button
-              type="button"
-              onClick={() => setCouponAlert(null)}
-              className="text-slate-400 hover:text-slate-700 cursor-pointer"
-            >
-              ✕
-            </button>
-          </div>
-        )}
-      </section>
+          </section>
+        </>
+      )}
 
       {/* ── 3. Dynamic Pricing Cards Section ── */}
       <section className="py-5 sm:py-7 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-        <div className="text-center mb-6 sm:mb-8">
-          <h2 className="font-serif text-xl sm:text-3xl font-extrabold text-[#111827]">
-            Select Your Matrimonial Package
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-xl mx-auto">
-            Transparent pricing designed for healthcare professionals. All contact requests are protected by mutual consent.
-          </p>
-        </div>
+        {!isProfileViewersFeature && (
+          <div className="text-center mb-6 sm:mb-8">
+            <h2 className="font-serif text-xl sm:text-3xl font-extrabold text-[#111827]">
+              Select Your Matrimonial Package
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-xl mx-auto">
+              Transparent pricing designed for healthcare professionals. All contact requests are protected by mutual consent.
+            </p>
+          </div>
+        )}
 
         {/* Loading State */}
         {loadingPlans && (
@@ -654,9 +790,9 @@ export default function MembershipPage() {
         )}
 
         {/* Dynamic Grid of Membership Cards */}
-        {!loadingPlans && !plansError && plans.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 items-stretch">
-            {plans.map((plan) => {
+        {!loadingPlans && !plansError && displayedPlans.length > 0 && (
+          <div className={`grid grid-cols-1 ${isProfileViewersFeature ? 'sm:grid-cols-2 lg:grid-cols-4' : 'md:grid-cols-2 lg:grid-cols-3'} gap-5 sm:gap-6 items-stretch`}>
+            {displayedPlans.map((plan) => {
               const planKey = plan.key || plan.slug;
               const calculatedOffer = planOffers[planKey];
 
@@ -857,7 +993,9 @@ export default function MembershipPage() {
                       disabled={processingOrder}
                       onClick={() => handlePlanAction(plan)}
                       className={`w-full h-11 min-h-[44px] px-4 rounded-xl font-bold text-xs sm:text-sm transition-all duration-200 cursor-pointer shadow-2xs flex items-center justify-center ${
-                        isFree
+                        isProfileViewersFeature
+                          ? 'bg-[#E51F3E] hover:bg-[#CC1432] text-white shadow-rose-900/20 hover:shadow-md'
+                          : isFree
                           ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/20 hover:shadow-md animate-pulse'
                           : plan.isPopular
                           ? 'bg-[#E51F3E] hover:bg-[#CC1432] text-white shadow-rose-900/20 hover:shadow-md'
@@ -868,6 +1006,8 @@ export default function MembershipPage() {
                     >
                       {processingOrder && selectedPlan === plan.name
                         ? 'Processing...'
+                        : isProfileViewersFeature
+                        ? 'Choose Plan'
                         : isFree
                         ? '🎉 Claim 100% Free Offer'
                         : plan.ctaText || 'Select Plan'}
@@ -920,5 +1060,19 @@ export default function MembershipPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+export default function MembershipPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-[400px] flex items-center justify-center text-xs font-semibold text-slate-500">
+          Loading membership plans...
+        </div>
+      }
+    >
+      <MembershipContent />
+    </Suspense>
   );
 }

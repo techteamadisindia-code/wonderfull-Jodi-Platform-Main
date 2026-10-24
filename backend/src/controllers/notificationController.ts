@@ -3,6 +3,10 @@ import { Notification, isNotificationTrashed } from '../models/Notification';
 import { Broadcast } from '../models/Broadcast';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { isValidObjectId } from '../utils/securityUtils';
+import {
+  serializeNotificationsForRecipient,
+  serializeNotificationForRecipient,
+} from '../services/notificationSerializer';
 
 /**
  * Get paginated notifications for the authenticated user (excludes trashed notifications)
@@ -76,10 +80,16 @@ export async function getNotifications(req: AuthRequest, res: Response, next: Ne
       isTotalCapped
     );
 
+    const serializedNotifications = await serializeNotificationsForRecipient(
+      activeNotifications,
+      userId,
+      req.user?.role
+    );
+
     res.json({
       success: true,
       data: {
-        notifications: activeNotifications,
+        notifications: serializedNotifications,
         total,
         unreadCount,
         page: pageNumber,
@@ -167,7 +177,13 @@ export async function markNotificationRead(req: AuthRequest, res: Response, next
       }
     }
 
-    res.json({ success: true, data: notification });
+    const serialized = await serializeNotificationForRecipient(
+      notification,
+      userId,
+      req.user?.role
+    );
+
+    res.json({ success: true, data: serialized });
   } catch (error) {
     next(error);
   }

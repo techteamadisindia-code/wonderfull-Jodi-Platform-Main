@@ -95,70 +95,89 @@ runTest('normalizeHostname rejects malformed, ambiguous, or dangerous hostnames'
   assert.strictEqual(normalizeHostname('srv%zz.hstgr.io'), null);
 });
 
-// 6. Production Hostname Rejections & Edge Cases
-runTest('Strictly rejects production host srv1646.hstgr.io', () => {
-  const r = validateStagingDatabaseUrl('mysql://staging_user:pass@srv1646.hstgr.io:3306/wonderfuljodi_staging', {
-    allowlist: ['srv1646.hstgr.io'], // Even if developer mistakenly puts prod in allowlist!
+// 6. Production Domain Rejections & Server Allowlist Constraints
+runTest('Strictly rejects unapproved host srv1646.hstgr.io when not in allowlist', () => {
+  const r = validateStagingDatabaseUrl('mysql://u625755214_staging_user:pass@srv1646.hstgr.io:3306/u625755214_staging', {
+    allowlist: ['different-host.internal'],
   });
   assert.strictEqual(r.isValid, false);
-  assert.ok(r.error.includes('SECURITY INTERCEPT'));
-  assert.ok(r.error.includes('production host'));
+  assert.ok(r.error.includes('not in the approved staging allowlist'));
 });
 
-runTest('Strictly rejects production host with trailing dot (srv1646.hstgr.io.)', () => {
-  const r = validateStagingDatabaseUrl('mysql://staging_user:pass@srv1646.hstgr.io.:3306/wonderfuljodi_staging', {
-    allowlist: ['srv1646.hstgr.io.'],
-  });
-  assert.strictEqual(r.isValid, false);
-  assert.ok(r.error.includes('SECURITY INTERCEPT'));
-  assert.ok(r.error.includes('production host'));
-});
-
-runTest('Strictly rejects percent-encoded production host (srv%31%36%34%36.hstgr.io)', () => {
-  const r = validateStagingDatabaseUrl('mysql://staging_user:pass@srv%31%36%34%36.hstgr.io:3306/wonderfuljodi_staging', {
+runTest('Strictly rejects production database u625755214_wonderfuljodi even if host is in allowlist', () => {
+  const r = validateStagingDatabaseUrl('mysql://u625755214_staging_user:pass@srv1646.hstgr.io:3306/u625755214_wonderfuljodi', {
     allowlist: ['srv1646.hstgr.io'],
+    expectedDbName: 'u625755214_wonderfuljodi', // Even if attacker configured it as expectedDbName!
   });
   assert.strictEqual(r.isValid, false);
   assert.ok(r.error.includes('SECURITY INTERCEPT'));
-  assert.ok(r.error.includes('production host'));
+  assert.ok(r.error.includes('production database'));
 });
 
-runTest('Strictly rejects Hostinger shared domain (*.hstgr.io)', () => {
-  const r = validateStagingDatabaseUrl('mysql://staging_user:pass@srv999.hstgr.io:3306/wonderfuljodi_staging', {
-    allowlist: ['srv999.hstgr.io'],
+runTest('Strictly rejects production user u625755214_wonderfuljodi even if host is in allowlist', () => {
+  const r = validateStagingDatabaseUrl('mysql://u625755214_wonderfuljodi:pass@srv1646.hstgr.io:3306/u625755214_staging', {
+    allowlist: ['srv1646.hstgr.io'],
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'u625755214_wonderfuljodi', // Even if misconfigured as expected user!
   });
   assert.strictEqual(r.isValid, false);
   assert.ok(r.error.includes('SECURITY INTERCEPT'));
+  assert.ok(r.error.includes('Production user account'));
 });
 
-runTest('Strictly rejects wonderfuljodi.com domains', () => {
-  const r = validateStagingDatabaseUrl('mysql://staging_user:pass@db.wonderfuljodi.com:3306/wonderfuljodi_staging', {
+runTest('Strictly rejects root or admin user accounts in staging', () => {
+  const rRoot = validateStagingDatabaseUrl('mysql://root:secret@127.0.0.1:3306/u625755214_staging', {
+    allowlist: ['127.0.0.1'],
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'root',
+  });
+  assert.strictEqual(rRoot.isValid, false);
+  assert.ok(rRoot.error.includes('SECURITY INTERCEPT'));
+
+  const rAdmin = validateStagingDatabaseUrl('mysql://admin:secret@127.0.0.1:3306/u625755214_staging', {
+    allowlist: ['127.0.0.1'],
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'admin',
+  });
+  assert.strictEqual(rAdmin.isValid, false);
+  assert.ok(rAdmin.error.includes('SECURITY INTERCEPT'));
+});
+
+runTest('Strictly rejects wonderfuljodi.com web domain hosts', () => {
+  const r = validateStagingDatabaseUrl('mysql://staging_user:pass@db.wonderfuljodi.com:3306/u625755214_staging', {
     allowlist: ['db.wonderfuljodi.com'],
   });
   assert.strictEqual(r.isValid, false);
   assert.ok(r.error.includes('SECURITY INTERCEPT'));
+  assert.ok(r.error.includes('production domain host'));
 });
 
-// 7. Production Database / User Signatures
-runTest('Strictly rejects production database name containing u625755214', () => {
-  const r = validateStagingDatabaseUrl('mysql://staging_user:pass@staging.internal:3306/u625755214_wonderfuljodi', {
-    allowlist: ['staging.internal'],
+// 7. Legitimate Isolated Staging on Hostinger Shared Server
+runTest('Accepts legitimate isolated staging database on srv1646.hstgr.io with explicit allowlist', () => {
+  const r = validateStagingDatabaseUrl('mysql://u625755214_staging_user:Pass123!@srv1646.hstgr.io:3306/u625755214_staging', {
+    allowlist: ['srv1646.hstgr.io'],
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'u625755214_staging_user',
   });
-  assert.strictEqual(r.isValid, false);
-  assert.ok(r.error.includes('Production database identifier detected'));
+  assert.strictEqual(r.isValid, true);
+  assert.strictEqual(r.sanitizedDetails.hostname, 'srv1646.hstgr.io');
+  assert.strictEqual(r.sanitizedDetails.database, 'u625755214_staging');
 });
 
-runTest('Strictly rejects production user containing u625755214', () => {
-  const r = validateStagingDatabaseUrl('mysql://u625755214_admin:pass@staging.internal:3306/wonderfuljodi_staging', {
-    allowlist: ['staging.internal'],
+runTest('Accepts legitimate isolated staging database on localhost with explicit allowlist', () => {
+  const r = validateStagingDatabaseUrl('mysql://u625755214_staging_user:Pass123!@localhost:3306/u625755214_staging', {
+    allowlist: ['localhost'],
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'u625755214_staging_user',
   });
-  assert.strictEqual(r.isValid, false);
-  assert.ok(r.error.includes('Production user account detected'));
+  assert.strictEqual(r.isValid, true);
+  assert.strictEqual(r.sanitizedDetails.hostname, 'localhost');
+  assert.strictEqual(r.sanitizedDetails.database, 'u625755214_staging');
 });
 
 // 8. Developer Hostname Allowlist Check (Fail-Closed)
 runTest('Fails closed when STAGING_DB_HOST_ALLOWLIST is empty', () => {
-  const r = validateStagingDatabaseUrl('mysql://wj_staging_user:pass@127.0.0.1:3306/wonderfuljodi_staging', {
+  const r = validateStagingDatabaseUrl('mysql://u625755214_staging_user:pass@127.0.0.1:3306/u625755214_staging', {
     allowlist: [],
   });
   assert.strictEqual(r.isValid, false);
@@ -167,36 +186,40 @@ runTest('Fails closed when STAGING_DB_HOST_ALLOWLIST is empty', () => {
 });
 
 runTest('Rejects host not explicitly present in developer allowlist', () => {
-  const r = validateStagingDatabaseUrl('mysql://wj_staging_user:pass@unapproved-host.net:3306/wonderfuljodi_staging', {
+  const r = validateStagingDatabaseUrl('mysql://u625755214_staging_user:pass@unapproved-host.net:3306/u625755214_staging', {
     allowlist: ['staging-cluster.internal', '10.0.1.50'],
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'u625755214_staging_user',
   });
   assert.strictEqual(r.isValid, false);
   assert.ok(r.error.includes('not in the approved staging allowlist'));
 });
 
 runTest('Rejects substring domain evasion attempts', () => {
-  const r = validateStagingDatabaseUrl('mysql://wj_staging_user:pass@staging-cluster.internal.attacker.com:3306/wonderfuljodi_staging', {
+  const r = validateStagingDatabaseUrl('mysql://u625755214_staging_user:pass@staging-cluster.internal.attacker.com:3306/u625755214_staging', {
     allowlist: ['staging-cluster.internal'],
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'u625755214_staging_user',
   });
   assert.strictEqual(r.isValid, false);
   assert.ok(r.error.includes('not in the approved staging allowlist'));
 });
 
 // 9. Database Name & User Account Verification
-runTest('Rejects unexpected database name (not wonderfuljodi_staging)', () => {
-  const r = validateStagingDatabaseUrl('mysql://wj_staging_user:pass@staging-cluster.internal:3306/wrong_test_db', {
+runTest('Rejects unexpected database name (not matching STAGING_DB_NAME)', () => {
+  const r = validateStagingDatabaseUrl('mysql://u625755214_staging_user:pass@staging-cluster.internal:3306/wrong_test_db', {
     allowlist: ['staging-cluster.internal'],
-    expectedDbName: 'wonderfuljodi_staging',
+    expectedDbName: 'u625755214_staging',
   });
   assert.strictEqual(r.isValid, false);
   assert.ok(r.error.includes('does not match expected staging database'));
 });
 
-runTest('Rejects unapproved user account (e.g. root or unexpected user)', () => {
-  const r = validateStagingDatabaseUrl('mysql://root:secret@staging-cluster.internal:3306/wonderfuljodi_staging', {
+runTest('Rejects unapproved user account (not matching STAGING_DB_USER)', () => {
+  const r = validateStagingDatabaseUrl('mysql://unapproved_user:secret@staging-cluster.internal:3306/u625755214_staging', {
     allowlist: ['staging-cluster.internal'],
-    expectedDbName: 'wonderfuljodi_staging',
-    expectedDbUser: 'wj_staging_user',
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'u625755214_staging_user',
   });
   assert.strictEqual(r.isValid, false);
   assert.ok(r.error.includes('does not match approved staging account'));
@@ -204,59 +227,59 @@ runTest('Rejects unapproved user account (e.g. root or unexpected user)', () => 
 
 // 10. Zero Secret Exposure
 runTest('Sanitized details never expose passwords or secret tokens', () => {
-  const raw = 'mysql://wj_staging_user:SuperSecretP@ssw0rd123!@staging-cluster.internal:3306/wonderfuljodi_staging';
+  const raw = 'mysql://u625755214_staging_user:SuperSecretP@ssw0rd123!@srv1646.hstgr.io:3306/u625755214_staging';
   const r = validateStagingDatabaseUrl(raw, {
-    allowlist: ['staging-cluster.internal'],
-    expectedDbName: 'wonderfuljodi_staging',
-    expectedDbUser: 'wj_staging_user',
+    allowlist: ['srv1646.hstgr.io'],
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'u625755214_staging_user',
   });
   assert.strictEqual(r.isValid, true);
-  assert.strictEqual(r.sanitizedDetails.username, 'wj_***');
+  assert.strictEqual(r.sanitizedDetails.username, 'u62***');
   assert.strictEqual(JSON.stringify(r).includes('SuperSecretP@ssw0rd123!'), false);
 });
 
 // 11. Valid Approved Staging URL (with Trailing Dot or Encoding in Staging Host)
 runTest('Passes cleanly when URL satisfies all strict staging criteria', () => {
-  const r = validateStagingDatabaseUrl('mysql://wj_staging_user:P@ss123@staging-host.internal:3306/wonderfuljodi_staging?connection_limit=5', {
+  const r = validateStagingDatabaseUrl('mysql://u625755214_staging_user:P@ss123@staging-host.internal:3306/u625755214_staging?connection_limit=4', {
     allowlist: ['staging-host.internal'],
-    expectedDbName: 'wonderfuljodi_staging',
-    expectedDbUser: 'wj_staging_user',
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'u625755214_staging_user',
   });
   assert.strictEqual(r.isValid, true);
   assert.strictEqual(r.sanitizedDetails.hostname, 'staging-host.internal');
-  assert.strictEqual(r.sanitizedDetails.database, 'wonderfuljodi_staging');
+  assert.strictEqual(r.sanitizedDetails.database, 'u625755214_staging');
 });
 
 runTest('Passes cleanly with normalized trailing dot on staging host', () => {
-  const r = validateStagingDatabaseUrl('mysql://wj_staging_user:P@ss123@staging-host.internal.:3306/wonderfuljodi_staging', {
+  const r = validateStagingDatabaseUrl('mysql://u625755214_staging_user:P@ss123@staging-host.internal.:3306/u625755214_staging', {
     allowlist: ['staging-host.internal'],
-    expectedDbName: 'wonderfuljodi_staging',
-    expectedDbUser: 'wj_staging_user',
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'u625755214_staging_user',
   });
   assert.strictEqual(r.isValid, true);
   assert.strictEqual(r.sanitizedDetails.hostname, 'staging-host.internal');
 });
 
 // 12. Server Identity Probe Pure Verification Logic
-runTest('verifyServerIdentity accepts valid, isolated staging server response', () => {
+runTest('verifyServerIdentity accepts valid, isolated staging server response on srv1646.hstgr.io', () => {
   const info = {
-    server_host: 'staging-mysql-server-01',
-    db_name: 'wonderfuljodi_staging',
-    db_user: 'wj_staging_user@10.0.1.25',
+    server_host: 'srv1646.hstgr.io',
+    db_name: 'u625755214_staging',
+    db_user: 'u625755214_staging_user@localhost',
     db_version: '10.11.8-MariaDB',
   };
   const res = verifyServerIdentity(info, {
-    expectedDbName: 'wonderfuljodi_staging',
-    expectedDbUser: 'wj_staging_user',
+    expectedDbName: 'u625755214_staging',
+    expectedDbUser: 'u625755214_staging_user',
   });
   assert.strictEqual(res.isValid, true);
 });
 
 runTest('verifyServerIdentity rejects production user account signature', () => {
   const info = {
-    server_host: 'staging-mysql-server-01',
-    db_name: 'wonderfuljodi_staging',
-    db_user: 'u625755214_admin@10.0.1.25',
+    server_host: 'srv1646.hstgr.io',
+    db_name: 'u625755214_staging',
+    db_user: 'u625755214_wonderfuljodi@localhost',
     db_version: '10.11.8-MariaDB',
   };
   const res = verifyServerIdentity(info);
@@ -264,15 +287,15 @@ runTest('verifyServerIdentity rejects production user account signature', () => 
   assert.ok(res.error.includes('matches production account signature'));
 });
 
-runTest('verifyServerIdentity rejects unapproved user account (e.g. root)', () => {
+runTest('verifyServerIdentity rejects unapproved user account', () => {
   const info = {
     server_host: 'staging-mysql-server-01',
-    db_name: 'wonderfuljodi_staging',
-    db_user: 'root@localhost',
+    db_name: 'u625755214_staging',
+    db_user: 'unapproved_user@localhost',
     db_version: '10.11.8-MariaDB',
   };
   const res = verifyServerIdentity(info, {
-    expectedDbUser: 'wj_staging_user',
+    expectedDbUser: 'u625755214_staging_user',
   });
   assert.strictEqual(res.isValid, false);
   assert.ok(res.error.includes('ACCOUNT MISMATCH'));
@@ -280,9 +303,9 @@ runTest('verifyServerIdentity rejects unapproved user account (e.g. root)', () =
 
 runTest('verifyServerIdentity rejects production database name signature', () => {
   const info = {
-    server_host: 'staging-mysql-server-01',
+    server_host: 'srv1646.hstgr.io',
     db_name: 'u625755214_wonderfuljodi',
-    db_user: 'wj_staging_user@localhost',
+    db_user: 'u625755214_staging_user@localhost',
     db_version: '10.11.8-MariaDB',
   };
   const res = verifyServerIdentity(info);
@@ -290,11 +313,11 @@ runTest('verifyServerIdentity rejects production database name signature', () =>
   assert.ok(res.error.includes('matches production database signature'));
 });
 
-runTest('verifyServerIdentity rejects production server host signatures', () => {
+runTest('verifyServerIdentity rejects production web domain host signatures', () => {
   const info = {
-    server_host: 'srv1646.hstgr.io',
-    db_name: 'wonderfuljodi_staging',
-    db_user: 'wj_staging_user@localhost',
+    server_host: 'wonderfuljodi.com',
+    db_name: 'u625755214_staging',
+    db_user: 'u625755214_staging_user@localhost',
     db_version: '10.11.8-MariaDB',
   };
   const res = verifyServerIdentity(info);
@@ -304,19 +327,19 @@ runTest('verifyServerIdentity rejects production server host signatures', () => 
 
 runTest('verifyServerIdentity rejects unexpected database name', () => {
   const info = {
-    server_host: 'staging-mysql-server-01',
+    server_host: 'srv1646.hstgr.io',
     db_name: 'wrong_db_name',
-    db_user: 'wj_staging_user@localhost',
+    db_user: 'u625755214_staging_user@localhost',
     db_version: '10.11.8-MariaDB',
   };
   const res = verifyServerIdentity(info, {
-    expectedDbName: 'wonderfuljodi_staging',
+    expectedDbName: 'u625755214_staging',
   });
   assert.strictEqual(res.isValid, false);
   assert.ok(res.error.includes('IDENTITY MISMATCH'));
 });
 
-// 13. assertStagingIsolation Behavior
+// 13. assertStagingIsolation Behavior & Storage Isolation
 runTest('assertStagingIsolation returns silently when not in staging mode', () => {
   const oldEnv = process.env.NODE_ENV;
   const oldStaging = process.env.STAGING_MODE;
@@ -324,21 +347,21 @@ runTest('assertStagingIsolation returns silently when not in staging mode', () =
     process.env.NODE_ENV = 'development';
     delete process.env.STAGING_MODE;
     // Should return without error even if DATABASE_URL points to prod or is missing
-    assertStagingIsolation({ url: 'mysql://u625755214:pass@srv1646.hstgr.io/db' });
+    assertStagingIsolation({ url: 'mysql://u625755214_wonderfuljodi:pass@srv1646.hstgr.io/u625755214_wonderfuljodi' });
   } finally {
     process.env.NODE_ENV = oldEnv;
     if (oldStaging) process.env.STAGING_MODE = oldStaging;
   }
 });
 
-runTest('assertStagingIsolation throws and intercepts production URL in staging mode', () => {
+runTest('assertStagingIsolation throws and intercepts production database URL in staging mode', () => {
   const oldEnv = process.env.NODE_ENV;
   try {
     process.env.NODE_ENV = 'staging';
     assert.throws(
       () => {
         assertStagingIsolation({
-          url: 'mysql://staging_user:pass@srv1646.hstgr.io/wonderfuljodi_staging',
+          url: 'mysql://u625755214_wonderfuljodi:pass@srv1646.hstgr.io/u625755214_wonderfuljodi',
           exitOnError: false,
         });
       },
@@ -346,6 +369,67 @@ runTest('assertStagingIsolation throws and intercepts production URL in staging 
     );
   } finally {
     process.env.NODE_ENV = oldEnv;
+  }
+});
+
+runTest('assertStagingIsolation throws when upload storage points to production path in staging mode', () => {
+  const oldEnv = process.env.NODE_ENV;
+  const oldAllowlist = process.env.STAGING_DB_HOST_ALLOWLIST;
+  const oldDbName = process.env.STAGING_DB_NAME;
+  const oldDbUser = process.env.STAGING_DB_USER;
+  try {
+    process.env.NODE_ENV = 'staging';
+    process.env.STAGING_DB_HOST_ALLOWLIST = 'srv1646.hstgr.io';
+    process.env.STAGING_DB_NAME = 'u625755214_staging';
+    process.env.STAGING_DB_USER = 'u625755214_staging_user';
+
+    assert.throws(
+      () => {
+        assertStagingIsolation({
+          url: 'mysql://u625755214_staging_user:pass@srv1646.hstgr.io/u625755214_staging',
+          uploadRoot: '/home/u625755214/domains/wonderfuljodi.com/uploads',
+          exitOnError: false,
+        });
+      },
+      /Upload storage points to production path/
+    );
+  } finally {
+    process.env.NODE_ENV = oldEnv;
+    if (oldAllowlist) process.env.STAGING_DB_HOST_ALLOWLIST = oldAllowlist;
+    else delete process.env.STAGING_DB_HOST_ALLOWLIST;
+    if (oldDbName) process.env.STAGING_DB_NAME = oldDbName;
+    else delete process.env.STAGING_DB_NAME;
+    if (oldDbUser) process.env.STAGING_DB_USER = oldDbUser;
+    else delete process.env.STAGING_DB_USER;
+  }
+});
+
+runTest('assertStagingIsolation passes when database and uploads are both isolated in staging mode', () => {
+  const oldEnv = process.env.NODE_ENV;
+  const oldAllowlist = process.env.STAGING_DB_HOST_ALLOWLIST;
+  const oldDbName = process.env.STAGING_DB_NAME;
+  const oldDbUser = process.env.STAGING_DB_USER;
+  try {
+    process.env.NODE_ENV = 'staging';
+    process.env.STAGING_DB_HOST_ALLOWLIST = 'srv1646.hstgr.io';
+    process.env.STAGING_DB_NAME = 'u625755214_staging';
+    process.env.STAGING_DB_USER = 'u625755214_staging_user';
+
+    assert.doesNotThrow(() => {
+      assertStagingIsolation({
+        url: 'mysql://u625755214_staging_user:pass@srv1646.hstgr.io/u625755214_staging',
+        uploadRoot: '/home/u625755214/domains/staging.wonderfuljodi.com/uploads',
+        exitOnError: false,
+      });
+    });
+  } finally {
+    process.env.NODE_ENV = oldEnv;
+    if (oldAllowlist) process.env.STAGING_DB_HOST_ALLOWLIST = oldAllowlist;
+    else delete process.env.STAGING_DB_HOST_ALLOWLIST;
+    if (oldDbName) process.env.STAGING_DB_NAME = oldDbName;
+    else delete process.env.STAGING_DB_NAME;
+    if (oldDbUser) process.env.STAGING_DB_USER = oldDbUser;
+    else delete process.env.STAGING_DB_USER;
   }
 });
 

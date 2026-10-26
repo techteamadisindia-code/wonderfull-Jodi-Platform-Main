@@ -10,11 +10,11 @@
   },
   "dependencies": {
     "autoprefixer": "^10.4.19",
-    "axios": "^1.6.1",
+    "axios": "^1.20.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.490.0",
-    "next": "15.5.27",
-    "postcss": "^8.4.36",
+    "next": "15.5.28",
+    "postcss": "^8.5.31",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-hook-form": "^7.47.3",
@@ -27,5 +27,11 @@
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.4",
     "@types/react-dom": "^18.3.0"
+  },
+  "overrides": {
+    "postcss": "^8.5.31",
+    "postcss-selector-parser": "^6.1.5",
+    "axios": "^1.20.0",
+    "follow-redirects": "^1.16.1"
   }
 }

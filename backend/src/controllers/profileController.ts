@@ -4,7 +4,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { User } from '../models/User';
 import { Subscription } from '../models/Subscription';
 import { ContactRequest } from '../models/ContactRequest';
-import { z } from 'zod';
+import { z, ZodError, ZodIssueCode } from 'zod';
 import {
   isValidObjectId,
   serializePublicProfile,
@@ -164,7 +164,7 @@ const profileSchema = z.object({
   languageDetails: z
     .object({
       motherTongueId: z.string().optional(),
-      otherLanguagesIds: z.array(z.string()).optional(),
+      otherLanguagesIds: z.array(z.string().trim().max(50)).max(30).optional(),
     })
     .optional(),
   horoscope: z
@@ -227,15 +227,15 @@ const profileSchema = z.object({
     .object({
       brothersCount: z.number().min(0).max(20).optional(),
       sistersCount: z.number().min(0).max(20).optional(),
-      brothers: z.array(z.any()).optional(),
-      sisters: z.array(z.any()).optional(),
+      brothers: z.array(z.any()).max(20).optional(),
+      sisters: z.array(z.any()).max(20).optional(),
     })
     .optional(),
   medicalQualifications: z
     .object({
-      undergraduate: z.array(z.any()).optional(),
-      postgraduate: z.array(z.any()).optional(),
-      doctorate: z.array(z.any()).optional(),
+      undergraduate: z.array(z.any()).max(10).optional(),
+      postgraduate: z.array(z.any()).max(10).optional(),
+      doctorate: z.array(z.any()).max(10).optional(),
     })
     .optional(),
   partnerExpectations: z
@@ -264,6 +264,124 @@ const profileSchema = z.object({
     })
     .optional(),
 });
+
+/**
+ * Hardened Pre-Zod Resource-Exhaustion Boundary Guard
+ * Protects against Zod 3 array traversal memory exhaustion (GHSA-mrhx-c7xc-m3w5).
+ * Inspects untrusted incoming request data and aborts BEFORE invoking Zod parsing
+ * if array lengths or object nesting exceed configured safe bounds.
+ */
+export function validateProfilePayloadResourceLimits(data: unknown): void {
+  if (!data || typeof data !== 'object') {
+    return;
+  }
+
+  // 1. Guard against deeply nested objects or arrays (stack exhaustion)
+  function checkNesting(obj: any, currentDepth = 1): void {
+    if (currentDepth > 8) {
+      throw new ZodError([
+        {
+          code: ZodIssueCode.custom,
+          message: 'Payload exceeds maximum permitted nesting depth of 8 levels.',
+          path: [],
+        },
+      ]);
+    }
+
+    if (obj && typeof obj === 'object') {
+      if (Array.isArray(obj)) {
+        if (obj.length > 50) {
+          throw new ZodError([
+            {
+              code: ZodIssueCode.too_big,
+              maximum: 50,
+              type: 'array',
+              inclusive: true,
+              exact: false,
+              message: 'Array exceeds maximum permitted size of 50 items.',
+              path: [],
+            },
+          ]);
+        }
+        for (let i = 0; i < obj.length; i++) {
+          checkNesting(obj[i], currentDepth + 1);
+        }
+      } else {
+        const keys = Object.keys(obj);
+        if (keys.length > 100) {
+          throw new ZodError([
+            {
+              code: ZodIssueCode.custom,
+              message: 'Object exceeds maximum permitted property count of 100 keys.',
+              path: [],
+            },
+          ]);
+        }
+        for (const key of keys) {
+          checkNesting(obj[key], currentDepth + 1);
+        }
+      }
+    }
+  }
+
+  checkNesting(data);
+
+  // 2. Strict per-field maximum array lengths for all profile array schemas
+  const fieldBounds: Array<{ path: string[]; max: number }> = [
+    { path: ['photos'], max: 10 },
+    { path: ['hobbies'], max: 30 },
+    { path: ['languageDetails', 'otherLanguagesIds'], max: 30 },
+    { path: ['lifestyleInterests', 'hobbies'], max: 30 },
+    { path: ['lifestyleInterests', 'travel'], max: 30 },
+    { path: ['lifestyleInterests', 'music'], max: 30 },
+    { path: ['lifestyleInterests', 'reading'], max: 30 },
+    { path: ['lifestyleInterests', 'sports'], max: 30 },
+    { path: ['lifestyleInterests', 'languages'], max: 30 },
+    { path: ['siblingsDetails', 'brothers'], max: 20 },
+    { path: ['siblingsDetails', 'sisters'], max: 20 },
+    { path: ['medicalQualifications', 'undergraduate'], max: 10 },
+    { path: ['medicalQualifications', 'postgraduate'], max: 10 },
+    { path: ['medicalQualifications', 'doctorate'], max: 10 },
+  ];
+
+  for (const { path: fieldPath, max } of fieldBounds) {
+    let current: any = data;
+    for (const segment of fieldPath) {
+      if (current && typeof current === 'object' && segment in current) {
+        current = current[segment];
+      } else {
+        current = undefined;
+        break;
+      }
+    }
+
+    if (Array.isArray(current) && current.length > max) {
+      throw new ZodError([
+        {
+          code: ZodIssueCode.too_big,
+          maximum: max,
+          type: 'array',
+          inclusive: true,
+          exact: false,
+          message: `Array at '${fieldPath.join('.')}' must contain at most ${max} element(s)`,
+          path: fieldPath,
+        },
+      ]);
+    }
+  }
+}
+
+/**
+ * Safely parses profile data with pre-Zod resource-exhaustion boundary enforcement.
+ * Ensures arrays exceeding maximum permitted lengths and deep nested objects are rejected
+ * BEFORE triggering Zod 3 array traversal (GHSA-mrhx-c7xc-m3w5 mitigation).
+ */
+export function safeParseProfile(body: unknown, isPartial: true): ReturnType<typeof profileSchema.partial>['_output'];
+export function safeParseProfile(body: unknown, isPartial?: false): typeof profileSchema['_output'];
+export function safeParseProfile(body: unknown, isPartial = false) {
+  validateProfilePayloadResourceLimits(body);
+  return isPartial ? profileSchema.partial().parse(body) : profileSchema.parse(body);
+}
 
 /**
  * Get authenticated user's own profile (includes private user details)
@@ -320,7 +438,7 @@ export async function updateMyProfile(req: AuthRequest, res: Response, next: Nex
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const data = profileSchema.partial().parse(req.body);
+    const data = safeParseProfile(req.body, true);
 
     // Validate Location Hierarchy if currentLocation provided
     if (data.currentLocation && (data.currentLocation.countryId || data.currentLocation.stateId || data.currentLocation.districtId || data.currentLocation.cityId)) {
@@ -718,7 +836,7 @@ export async function createProfile(req: AuthRequest, res: Response, next: NextF
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const data = profileSchema.parse(req.body);
+    const data = safeParseProfile(req.body, false);
     const existing = await Profile.findOne({ user: userId });
     if (existing) {
       return res.status(400).json({ success: false, message: 'Profile already exists' });
@@ -769,7 +887,7 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
       return res.status(403).json({ success: false, message: 'Forbidden: you cannot edit another user\'s profile' });
     }
 
-    const data = profileSchema.partial().parse(req.body);
+    const data = safeParseProfile(req.body, true);
 
     if (data.currentLocation) {
       profile.currentLocation = {

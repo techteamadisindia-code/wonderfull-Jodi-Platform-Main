@@ -63,6 +63,8 @@ export async function seedInitialData() {
     let usersList: any[] = [];
     let createdUsers: any[] = [];
 
+    const isProduction = process.env.NODE_ENV === 'production';
+
     if (userCount === 0) {
       console.log('Seeding initial demo matrimonial users and profiles...');
       const defaultPassword = await bcrypt.hash('Password123!', 12);
@@ -541,6 +543,9 @@ export async function seedInitialData() {
   const normalUsers = allUsers.filter((u: any) => u.role === 'user');
 
   // Enrich demo Priya Sharma profile with doctor, horoscope, and lifestyle data
+  // SAFETY: Only executed in non-production environments. In production, this block
+  // is intentionally skipped to prevent overwriting real candidate records.
+  if (!isProduction) {
   const priyaUser = allUsers.find((u: any) => u.email === 'priya.sharma@example.com');
   if (priyaUser) {
     await Profile.findOneAndUpdate(
@@ -596,6 +601,7 @@ export async function seedInitialData() {
       }
     );
   }
+  } // end !isProduction block for Priya Sharma enrichment
 
     // 1. Seed Admin Document
     const { Admin } = await import('../models/Admin');

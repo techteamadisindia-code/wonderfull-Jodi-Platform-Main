@@ -290,7 +290,7 @@ const profileSchema = new Schema<IProfile>(
     additionalQualification: { type: String, trim: true },
     currentRole: { type: String, trim: true },
     workType: { type: String, trim: true },
-    currentlyPracticing: { type: Boolean, default: true },
+    currentlyPracticing: { type: Boolean },  // NO default — undefined means 'not recorded'; true/false are explicit states
     familyStatus: { type: String, trim: true },
     familyValues: { type: String, trim: true },
     nativePlace: { type: String, trim: true },
@@ -335,7 +335,7 @@ const profileSchema = new Schema<IProfile>(
       rashi: { type: String, trim: true },
       nakshatra: { type: String, trim: true },
       lagna: { type: String, trim: true },
-      manglik: { type: String, trim: true, default: 'Non-Manglik' },
+      manglik: { type: String, trim: true },  // NO default — admin panel shows 'Not recorded' when absent
       gotra: { type: String, trim: true },
       horoscopeDocument: { type: String, trim: true },
       pada: { type: Number },
@@ -385,12 +385,12 @@ const profileSchema = new Schema<IProfile>(
       additionalExpectations: { type: String, trim: true },
     },
     partnerPreferences: {
-      preferredAgeMin: { type: Number, default: 24 },
-      preferredAgeMax: { type: Number, default: 36 },
-      preferredLocation: { type: String, trim: true, default: 'Anywhere in India' },
-      preferredQualification: { type: String, trim: true, default: 'MBBS / MD / MS / Medical Specialist' },
-      preferredSpecialization: { type: String, trim: true, default: 'Any Medical Specialization' },
-      preferredMaritalStatus: { type: String, trim: true, default: 'Never Married' },
+      preferredAgeMin: { type: Number },  // NO default — avoids inventing partner criteria
+      preferredAgeMax: { type: Number },  // NO default
+      preferredLocation: { type: String, trim: true },  // NO default
+      preferredQualification: { type: String, trim: true },  // NO default
+      preferredSpecialization: { type: String, trim: true },  // NO default
+      preferredMaritalStatus: { type: String, trim: true },  // NO default
       otherPreferences: { type: String, trim: true, default: '' },
     },
     aboutMe: { type: String, trim: true },

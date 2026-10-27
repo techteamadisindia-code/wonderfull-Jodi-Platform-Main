@@ -136,7 +136,7 @@ model Profile {
   additionalQualification   String?   @map("additionalQualification") @db.VarChar(200)
   currentRole               String?   @map("currentRole") @db.VarChar(150)
   workType                  String?   @map("workType") @db.VarChar(100)
-  currentlyPracticing       Boolean?  @default(true) @map("currentlyPracticing")
+  currentlyPracticing       Boolean?  @map("currentlyPracticing")
   familyStatus              String?   @map("familyStatus") @db.VarChar(100)
   familyValues              String?   @map("familyValues") @db.VarChar(100)
   nativePlace               String?   @map("nativePlace") @db.VarChar(150)

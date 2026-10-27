@@ -904,8 +904,8 @@ export default function AdminProfilesPage() {
                         <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
                           Profession
                         </span>
-                        <span className="font-semibold text-slate-900 truncate block">
-                          {selectedProfile.profession || 'Not Specified'}
+                        <span className={`font-semibold truncate block ${selectedProfile.profession ? 'text-slate-900' : 'text-slate-400 italic'}`}>
+                          {selectedProfile.profession || 'Not recorded'}
                         </span>
                         {selectedProfile.company && (
                           <span className="text-[11px] text-slate-500 truncate block">
@@ -922,8 +922,8 @@ export default function AdminProfilesPage() {
                         <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
                           Education & Degree
                         </span>
-                        <span className="font-semibold text-slate-900 truncate block">
-                          {selectedProfile.degree || selectedProfile.education || 'Not Specified'}
+                        <span className={`font-semibold truncate block ${selectedProfile.degree || selectedProfile.education ? 'text-slate-900' : 'text-slate-400 italic'}`}>
+                          {selectedProfile.degree || selectedProfile.education || 'Not recorded'}
                         </span>
                       </div>
                     </div>
@@ -935,12 +935,14 @@ export default function AdminProfilesPage() {
                         <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
                           Location
                         </span>
-                        <span className="font-semibold text-slate-900 truncate block">
-                          {selectedProfile.city || 'City'}
+                        <span className={`font-semibold truncate block ${selectedProfile.city ? 'text-slate-900' : 'text-slate-400 italic'}`}>
+                          {selectedProfile.city || 'Not recorded'}
                         </span>
-                        <span className="text-[11px] text-slate-500 truncate block">
-                          {selectedProfile.state ? `${selectedProfile.state}, ` : ''}{selectedProfile.country || 'India'}
-                        </span>
+                        {(selectedProfile.state || selectedProfile.country) && (
+                          <span className="text-[11px] text-slate-500 truncate block">
+                            {[selectedProfile.state, selectedProfile.country].filter(Boolean).join(', ')}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -951,8 +953,8 @@ export default function AdminProfilesPage() {
                         <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
                           Community & Religion
                         </span>
-                        <span className="font-semibold text-slate-900 truncate block">
-                          {selectedProfile.religion || 'Religion'} {selectedProfile.caste ? `(${selectedProfile.caste})` : ''}
+                        <span className={`font-semibold truncate block ${selectedProfile.religion ? 'text-slate-900' : 'text-slate-400 italic'}`}>
+                          {selectedProfile.religion || 'Not recorded'} {selectedProfile.caste ? `(${selectedProfile.caste})` : ''}
                         </span>
                         {selectedProfile.motherTongue && (
                           <span className="text-[11px] text-slate-500 truncate block">
@@ -969,8 +971,8 @@ export default function AdminProfilesPage() {
                         <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
                           Annual Income
                         </span>
-                        <span className="font-semibold text-slate-900 truncate block">
-                          {selectedProfile.annualIncome || 'Confidential'}
+                        <span className={`font-semibold truncate block ${selectedProfile.annualIncome ? 'text-slate-900' : 'text-slate-400 italic'}`}>
+                          {selectedProfile.annualIncome || 'Not recorded'}
                         </span>
                       </div>
                     </div>
@@ -982,8 +984,8 @@ export default function AdminProfilesPage() {
                         <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
                           Diet & Lifestyle
                         </span>
-                        <span className="font-semibold text-slate-900 truncate block">
-                          {selectedProfile.foodPreference || 'Vegetarian'}
+                        <span className={`font-semibold truncate block ${selectedProfile.foodPreference ? 'text-slate-900' : 'text-slate-400 italic'}`}>
+                          {selectedProfile.foodPreference || 'Not recorded'}
                         </span>
                         {selectedProfile.familyType && (
                           <span className="text-[11px] text-slate-500 truncate block">

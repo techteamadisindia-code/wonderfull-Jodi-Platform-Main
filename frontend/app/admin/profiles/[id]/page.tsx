@@ -985,52 +985,56 @@ function AdminProfileDetailsContent() {
                 <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100">
                   <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Age & Gender</span>
                   <p className="font-bold text-slate-800">
-                    {data.age ? `${data.age} Years` : 'Age Unspecified'} • {data.gender}
+                    {data.age ? `${data.age} Years` : 'Age Unspecified'} • {data.gender || 'Not recorded'}
                   </p>
                 </div>
 
                 <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100">
                   <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Marital Status</span>
-                  <p className="font-bold text-slate-800">{data.maritalStatus || 'Not recorded'}</p>
+                  <p className={`font-bold ${data.maritalStatus ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.maritalStatus || 'Not recorded'}</p>
                 </div>
 
                 <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100">
                   <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Height & Weight</span>
-                  <p className="font-bold text-slate-800">{data.height} • {data.weight ? `${data.weight} kg` : '—'}</p>
+                  <p className="font-bold text-slate-800">{data.height || 'Not recorded'} • {data.weight ? `${data.weight} kg` : 'Not recorded'}</p>
                 </div>
 
                 <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100">
                   <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Profession & Role</span>
-                  <p className="font-bold text-slate-800">{data.profession || 'Doctor'}</p>
-                  <p className="text-[11px] text-slate-500 truncate">{data.currentRole || data.company || '—'}</p>
+                  <p className={`font-bold ${data.profession ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.profession || 'Not recorded'}</p>
+                  <p className="text-[11px] text-slate-500 truncate">{data.currentRole || '—'}</p>
                 </div>
 
                 <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100">
                   <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Education & Degree</span>
-                  <p className="font-bold text-slate-800 truncate">{data.education || data.degree}</p>
-                  <p className="text-[11px] text-slate-500 truncate">{data.degree}</p>
+                  <p className={`font-bold truncate ${data.education || data.degree ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.education || data.degree || 'Not recorded'}</p>
+                  {data.degree && data.degree !== data.education ? <p className="text-[11px] text-slate-500 truncate">{data.degree}</p> : null}
                 </div>
 
                 <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100">
                   <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Annual Income</span>
-                  <p className="font-bold text-slate-800">{data.annualIncome || 'Confidential'}</p>
+                  <p className={`font-bold ${data.annualIncome ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.annualIncome || 'Not recorded'}</p>
                 </div>
 
                 <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100">
                   <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Religion & Community</span>
-                  <p className="font-bold text-slate-800">{data.religion} • {data.caste}</p>
+                  <p className={`font-bold ${data.religion || data.caste ? 'text-slate-800' : 'text-slate-400 italic'}`}>
+                    {data.religion || 'Not recorded'}{data.caste ? ` • ${data.caste}` : ''}
+                  </p>
                   {data.subCaste && <p className="text-[11px] text-slate-500">Sub-caste: {data.subCaste}</p>}
                 </div>
 
                 <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100">
                   <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Mother Tongue</span>
-                  <p className="font-bold text-slate-800">{data.motherTongue}</p>
+                  <p className={`font-bold ${data.motherTongue ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.motherTongue || 'Not recorded'}</p>
                 </div>
 
                 <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100">
                   <span className="text-slate-400 font-semibold uppercase text-[10px] block mb-1">Current Residence</span>
-                  <p className="font-bold text-slate-800 truncate">{data.city}, {data.state}</p>
-                  <p className="text-[11px] text-slate-500">{data.country}</p>
+                  <p className={`font-bold truncate ${data.city || data.state ? 'text-slate-800' : 'text-slate-400 italic'}`}>
+                    {[data.city, data.state].filter(Boolean).join(', ') || 'Not recorded'}
+                  </p>
+                  <p className="text-[11px] text-slate-500">{data.country || 'Not recorded'}</p>
                 </div>
               </div>
 
@@ -1191,9 +1195,9 @@ function AdminProfileDetailsContent() {
                   <p className="font-medium text-slate-200 mt-0.5 leading-snug">
                     {canViewPrivate
                       ? (data.currentLocation?.formattedAddress ||
-                        `${data.city || '—'}, ${data.state || '—'}, ${data.country || 'India'} ${
+                        `${[data.city, data.state, data.country].filter(Boolean).join(', ') || 'Not recorded'} ${
                           data.currentLocation?.pincode ? `(PIN: ${data.currentLocation.pincode})` : ''
-                        }`)
+                        }`.trim())
                       : '[Confidential Address — View Permission Required]'}
                   </p>
                 </div>
@@ -1308,19 +1312,19 @@ function AdminProfileDetailsContent() {
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Gender</span>
-                <span className="font-bold text-slate-800">{data.gender}</span>
+                <span className={`font-bold ${data.gender ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.gender || 'Not recorded'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Marital Status</span>
-                <span className="font-bold text-slate-800">{data.maritalStatus}</span>
+                <span className={`font-bold ${data.maritalStatus ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.maritalStatus || 'Not recorded'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Height</span>
-                <span className="font-bold text-slate-800">{data.height}</span>
+                <span className={`font-bold ${data.height ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.height || 'Not recorded'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Weight</span>
-                <span className="font-bold text-slate-800">{data.weight ? `${data.weight} kg` : 'Not specified'}</span>
+                <span className={`font-bold ${data.weight ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.weight ? `${data.weight} kg` : 'Not recorded'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Body Type / Complexion</span>
@@ -1343,29 +1347,29 @@ function AdminProfileDetailsContent() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
               <div>
                 <span className="text-slate-400 block font-semibold">Religion</span>
-                <span className="font-bold text-slate-800">{data.religion}</span>
+                <span className={`font-bold ${data.religion ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.religion || 'Not recorded'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Caste</span>
-                <span className="font-bold text-slate-800">{data.caste}</span>
+                <span className={`font-bold ${data.caste ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.caste || 'Not recorded'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Sub-Caste</span>
-                <span className="font-bold text-slate-800">
-                  {data.subCaste || data.communityDetails?.subCasteText || (typeof data.communityDetails?.subCasteId === 'object' ? data.communityDetails?.subCasteId?.name : null) || '—'}
+                <span className={`font-bold ${data.subCaste || data.communityDetails?.subCasteText ? 'text-slate-800' : 'text-slate-400 italic'}`}>
+                  {data.subCaste || data.communityDetails?.subCasteText || (typeof data.communityDetails?.subCasteId === 'object' ? data.communityDetails?.subCasteId?.name : null) || 'Not recorded'}
                 </span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Gotra</span>
-                <span className="font-bold text-slate-800">{data.gotra || data.horoscope?.gotra || '—'}</span>
+                <span className={`font-bold ${data.gotra || data.horoscope?.gotra ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.gotra || data.horoscope?.gotra || 'Not recorded'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Mother Tongue</span>
-                <span className="font-bold text-slate-800">{data.motherTongue}</span>
+                <span className={`font-bold ${data.motherTongue ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.motherTongue || 'Not recorded'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block font-semibold">Other Languages</span>
-                <span className="font-bold text-slate-800">
+                <span className={`font-bold ${data.lifestyleInterests?.languages?.length ? 'text-slate-800' : 'text-slate-400 italic'}`}>
                   {data.lifestyleInterests?.languages?.join(', ') || 'Not recorded'}
                 </span>
               </div>
@@ -1559,22 +1563,52 @@ function AdminProfileDetailsContent() {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
               <div>
                 <span className="text-slate-400 block font-semibold">Highest Education</span>
-                <span className="font-bold text-slate-800">{data.education}</span>
+                <span className={`font-bold ${data.education ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.education || data.degree || 'Not recorded'}</span>
               </div>
 
               <div>
                 <span className="text-slate-400 block font-semibold">Degree / Specialization</span>
-                <span className="font-bold text-slate-800">{data.degree}</span>
+                <span className={`font-bold ${data.degree ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.degree || data.education || 'Not recorded'}</span>
               </div>
 
               <div>
                 <span className="text-slate-400 block font-semibold">Additional Qualifications</span>
-                <span className={`font-bold ${data.additionalQualification ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.additionalQualification || 'Not recorded'}</span>
+                {(() => {
+                  const flat = data.additionalQualification;
+                  const nested = (data as any).medicalQualifications?.postgraduate?.[0]?.qualification || (data as any).medicalQualifications?.postgraduate?.[0]?.specialization;
+                  const hasConflict = !!(flat && nested && flat.trim().toLowerCase() !== nested.trim().toLowerCase());
+                  const val = flat || nested;
+                  return (
+                    <div>
+                      <span className={`font-bold ${val ? 'text-slate-800' : 'text-slate-400 italic'}`}>{val || 'Not recorded'}</span>
+                      {hasConflict && (
+                        <span className="block mt-0.5 text-[10px] font-semibold text-amber-700">
+                          ⚠️ Conflict: "{flat}" vs "{nested}" (Review Required)
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div>
                 <span className="text-slate-400 block font-semibold">Medical College</span>
-                <span className={`font-bold ${data.medicalCollege ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.medicalCollege || 'Not recorded'}</span>
+                {(() => {
+                  const flat = data.medicalCollege;
+                  const nested = (data as any).medicalQualifications?.undergraduate?.[0]?.college;
+                  const hasConflict = !!(flat && nested && flat.trim().toLowerCase() !== nested.trim().toLowerCase());
+                  const val = flat || nested;
+                  return (
+                    <div>
+                      <span className={`font-bold ${val ? 'text-slate-800' : 'text-slate-400 italic'}`}>{val || 'Not recorded'}</span>
+                      {hasConflict && (
+                        <span className="block mt-0.5 text-[10px] font-semibold text-amber-700">
+                          ⚠️ Conflict: "{flat}" vs "{nested}" (Review Required)
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div>
@@ -1584,7 +1618,22 @@ function AdminProfileDetailsContent() {
 
               <div>
                 <span className="text-slate-400 block font-semibold">Graduation Year</span>
-                <span className={`font-bold ${data.graduationYear ? 'text-slate-800' : 'text-slate-400 italic'}`}>{data.graduationYear || 'Not recorded'}</span>
+                {(() => {
+                  const flat = data.graduationYear;
+                  const nested = (data as any).medicalQualifications?.undergraduate?.[0]?.passingYear;
+                  const hasConflict = !!(flat && nested && String(flat).trim() !== String(nested).trim());
+                  const val = flat || nested;
+                  return (
+                    <div>
+                      <span className={`font-bold ${val ? 'text-slate-800' : 'text-slate-400 italic'}`}>{val || 'Not recorded'}</span>
+                      {hasConflict && (
+                        <span className="block mt-0.5 text-[10px] font-semibold text-amber-700">
+                          ⚠️ Conflict: "{flat}" vs "{nested}" (Review Required)
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -1637,14 +1686,23 @@ function AdminProfileDetailsContent() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
               <div className="p-3.5 bg-slate-50/70 rounded-xl border border-slate-100">
                 <span className="text-slate-400 block font-semibold text-[10px] uppercase">Father Details</span>
-                {/* Check flat field first, then nested familyBackground */}
                 {(() => {
-                  const val = data.fatherOccupation || data.familyBackground?.fatherProfession;
+                  const flatVal = data.fatherOccupation;
+                  const nestedVal = data.familyBackground?.fatherProfession;
                   const name = data.familyBackground?.fatherName;
+                  const hasConflict = !!(flatVal && nestedVal && flatVal.trim().toLowerCase() !== nestedVal.trim().toLowerCase());
+                  const val = flatVal || nestedVal;
                   return (
-                    <span className={`font-bold block text-sm ${val || name ? 'text-slate-800' : 'text-slate-400 italic'}`}>
-                      {name && val ? `${name} — ${val}` : name || val || 'Not recorded'}
-                    </span>
+                    <div>
+                      <span className={`font-bold block text-sm ${val || name ? 'text-slate-800' : 'text-slate-400 italic'}`}>
+                        {name && val ? `${name} — ${val}` : name || val || 'Not recorded'}
+                      </span>
+                      {hasConflict && (
+                        <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                          ⚠️ Conflict: flat "{flatVal}" vs nested "{nestedVal}" (Review Required)
+                        </span>
+                      )}
+                    </div>
                   );
                 })()}
               </div>
@@ -1652,12 +1710,22 @@ function AdminProfileDetailsContent() {
               <div className="p-3.5 bg-slate-50/70 rounded-xl border border-slate-100">
                 <span className="text-slate-400 block font-semibold text-[10px] uppercase">Mother Details</span>
                 {(() => {
-                  const val = data.motherOccupation || data.familyBackground?.motherProfession;
+                  const flatVal = data.motherOccupation;
+                  const nestedVal = data.familyBackground?.motherProfession;
                   const name = data.familyBackground?.motherName;
+                  const hasConflict = !!(flatVal && nestedVal && flatVal.trim().toLowerCase() !== nestedVal.trim().toLowerCase());
+                  const val = flatVal || nestedVal;
                   return (
-                    <span className={`font-bold block text-sm ${val || name ? 'text-slate-800' : 'text-slate-400 italic'}`}>
-                      {name && val ? `${name} — ${val}` : name || val || 'Not recorded'}
-                    </span>
+                    <div>
+                      <span className={`font-bold block text-sm ${val || name ? 'text-slate-800' : 'text-slate-400 italic'}`}>
+                        {name && val ? `${name} — ${val}` : name || val || 'Not recorded'}
+                      </span>
+                      {hasConflict && (
+                        <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                          ⚠️ Conflict: flat "{flatVal}" vs nested "{nestedVal}" (Review Required)
+                        </span>
+                      )}
+                    </div>
                   );
                 })()}
               </div>
@@ -1672,24 +1740,60 @@ function AdminProfileDetailsContent() {
               <div className="p-3.5 bg-slate-50/70 rounded-xl border border-slate-100">
                 <span className="text-slate-400 block font-semibold text-[10px] uppercase">Family Type</span>
                 {(() => {
-                  const val = data.familyType || data.familyBackground?.familyType;
-                  return <span className={`font-bold block text-sm ${val ? 'text-slate-800' : 'text-slate-400 italic'}`}>{val || 'Not recorded'}</span>;
+                  const flatVal = data.familyType;
+                  const nestedVal = data.familyBackground?.familyType;
+                  const hasConflict = !!(flatVal && nestedVal && flatVal.trim().toLowerCase() !== nestedVal.trim().toLowerCase());
+                  const val = flatVal || nestedVal;
+                  return (
+                    <div>
+                      <span className={`font-bold block text-sm ${val ? 'text-slate-800' : 'text-slate-400 italic'}`}>{val || 'Not recorded'}</span>
+                      {hasConflict && (
+                        <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                          ⚠️ Conflict: "{flatVal}" vs "{nestedVal}"
+                        </span>
+                      )}
+                    </div>
+                  );
                 })()}
               </div>
 
               <div className="p-3.5 bg-slate-50/70 rounded-xl border border-slate-100">
                 <span className="text-slate-400 block font-semibold text-[10px] uppercase">Family Status</span>
                 {(() => {
-                  const val = data.familyStatus || data.familyBackground?.familyStatus;
-                  return <span className={`font-bold block text-sm ${val ? 'text-slate-800' : 'text-slate-400 italic'}`}>{val || 'Not recorded'}</span>;
+                  const flatVal = data.familyStatus;
+                  const nestedVal = data.familyBackground?.familyStatus;
+                  const hasConflict = !!(flatVal && nestedVal && flatVal.trim().toLowerCase() !== nestedVal.trim().toLowerCase());
+                  const val = flatVal || nestedVal;
+                  return (
+                    <div>
+                      <span className={`font-bold block text-sm ${val ? 'text-slate-800' : 'text-slate-400 italic'}`}>{val || 'Not recorded'}</span>
+                      {hasConflict && (
+                        <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                          ⚠️ Conflict: "{flatVal}" vs "{nestedVal}"
+                        </span>
+                      )}
+                    </div>
+                  );
                 })()}
               </div>
 
               <div className="p-3.5 bg-slate-50/70 rounded-xl border border-slate-100">
                 <span className="text-slate-400 block font-semibold text-[10px] uppercase">Family Values</span>
                 {(() => {
-                  const val = data.familyValues || data.familyBackground?.familyValues;
-                  return <span className={`font-bold block text-sm ${val ? 'text-slate-800' : 'text-slate-400 italic'}`}>{val || 'Not recorded'}</span>;
+                  const flatVal = data.familyValues;
+                  const nestedVal = data.familyBackground?.familyValues;
+                  const hasConflict = !!(flatVal && nestedVal && flatVal.trim().toLowerCase() !== nestedVal.trim().toLowerCase());
+                  const val = flatVal || nestedVal;
+                  return (
+                    <div>
+                      <span className={`font-bold block text-sm ${val ? 'text-slate-800' : 'text-slate-400 italic'}`}>{val || 'Not recorded'}</span>
+                      {hasConflict && (
+                        <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                          ⚠️ Conflict: "{flatVal}" vs "{nestedVal}"
+                        </span>
+                      )}
+                    </div>
+                  );
                 })()}
               </div>
 
@@ -1697,8 +1801,20 @@ function AdminProfileDetailsContent() {
                 <span className="text-slate-400 block font-semibold text-[10px] uppercase">Family Location & Residence</span>
                 {/* Must NOT silently fall back to candidate's residential city */}
                 {(() => {
-                  const val = data.familyLocation || data.familyBackground?.familyLocation;
-                  return <span className={`font-bold block text-sm ${val ? 'text-slate-800' : 'text-slate-400 italic'}`}>{val || 'Not recorded'}</span>;
+                  const flatVal = data.familyLocation;
+                  const nestedVal = data.familyBackground?.familyLocation;
+                  const hasConflict = !!(flatVal && nestedVal && flatVal.trim().toLowerCase() !== nestedVal.trim().toLowerCase());
+                  const val = flatVal || nestedVal;
+                  return (
+                    <div>
+                      <span className={`font-bold block text-sm ${val ? 'text-slate-800' : 'text-slate-400 italic'}`}>{val || 'Not recorded'}</span>
+                      {hasConflict && (
+                        <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                          ⚠️ Conflict: "{flatVal}" vs "{nestedVal}"
+                        </span>
+                      )}
+                    </div>
+                  );
                 })()}
               </div>
             </div>

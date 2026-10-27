@@ -60,6 +60,8 @@ export function AdminEditProfileModal({
 
   // Form State
   const [formData, setFormData] = useState<Record<string, any>>({});
+  const [initialValues, setInitialValues] = useState<Record<string, any>>({});
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
   const [isDobValid, setIsDobValid] = useState<boolean>(true);
   const [saveLoading, setSaveLoading] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -70,55 +72,58 @@ export function AdminEditProfileModal({
     if (!profile) return;
     const user = profile.user || profile.profile?.user;
 
-    setFormData({
+    const initial: Record<string, any> = {
       // Protected Identity & Contact Information
-      fullName: user?.fullName || profile.displayName || profile.fullName || '—',
+      fullName: user?.fullName || profile.displayName || profile.fullName || '',
       email: user?.email || profile.email || '',
       mobile: user?.mobile || profile.mobile || '',
       formattedAddress: profile.currentLocation?.formattedAddress || '',
 
-      // Section 2: Personal Details
-      gender: profile.gender || 'Male',
+      // Section 2: Personal Details - NEVER initialize with invented defaults
+      gender: profile.gender || '',
       dob: profile.dob ? new Date(profile.dob).toISOString().split('T')[0] : '',
-      maritalStatus: profile.maritalStatus || 'Never Married',
+      maritalStatus: profile.maritalStatus || '',
       height: profile.height || '',
       weight: profile.weight || '',
-      religion: profile.religion || 'Hindu',
+      religion: profile.religion || '',
       caste: profile.caste || '',
       subCaste: profile.subCaste || '',
       motherTongue: profile.motherTongue || '',
       city: profile.city || '',
       state: profile.state || '',
-      country: profile.country || 'India',
+      country: profile.country || '',
 
       // Section 3: Professional Details
-      education: profile.education || profile.qualification || 'MBBS',
-      profession: profile.profession || 'Doctor',
+      education: profile.education || profile.qualification || '',
+      profession: profile.profession || '',
       specialization: profile.additionalQualification || profile.specialization || '',
       degree: profile.degree || '',
       medicalCollege: profile.medicalCollege || profile.institution || '',
       company: profile.company || profile.workplace || '',
       workLocation: profile.workLocation || '',
-      workType: profile.workType || 'Hospital Practice',
+      workType: profile.workType || '',
       annualIncome: profile.annualIncome || '',
       medicalRegistrationNumber: profile.medicalRegistrationNumber || '',
       medicalCouncil: profile.medicalCouncil || '',
 
       // Section 4: Profile Details & Bio
       about: profile.about || profile.bio || '',
-      foodPreference: profile.foodPreference || profile.lifestyleInterests?.diet || 'Vegetarian',
-      smoking: profile.smoking || profile.lifestyleInterests?.smoking || 'No',
-      drinking: profile.drinking || profile.lifestyleInterests?.alcohol || 'No',
-      preferredAgeMin: profile.partnerPreferences?.preferredAgeMin || '',
-      preferredAgeMax: profile.partnerPreferences?.preferredAgeMax || '',
+      foodPreference: profile.foodPreference || profile.lifestyleInterests?.diet || '',
+      smoking: profile.smoking || profile.lifestyleInterests?.smoking || '',
+      drinking: profile.drinking || profile.lifestyleInterests?.alcohol || '',
+      preferredAgeMin: profile.partnerPreferences?.preferredAgeMin !== undefined ? String(profile.partnerPreferences.preferredAgeMin) : '',
+      preferredAgeMax: profile.partnerPreferences?.preferredAgeMax !== undefined ? String(profile.partnerPreferences.preferredAgeMax) : '',
       preferredLocation: profile.partnerPreferences?.preferredLocation || '',
 
       // Section 5: Admin Controls
       status: profile.status || 'Active',
       verificationStatus: profile.verificationStatus || 'UNVERIFIED',
       accountStatus: user?.status || 'Active',
-    });
+    };
 
+    setFormData(initial);
+    setInitialValues(initial);
+    setTouchedFields(new Set());
     setIsDobValid(true);
     setFormError(null);
     setSuccessToast(null);
@@ -131,32 +136,48 @@ export function AdminEditProfileModal({
 
   const handleFieldChange = (field: string, value: any) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+    setTouchedFields((prev) => {
+      const next = new Set(prev);
+      next.add(field);
+      return next;
+    });
     if (formError) setFormError(null);
   };
 
   const handleDobChange = (isoDate: string, isValid: boolean) => {
     setFormData((prev) => ({ ...prev, dob: isoDate }));
+    setTouchedFields((prev) => {
+      const next = new Set(prev);
+      next.add('dob');
+      return next;
+    });
     setIsDobValid(isValid);
   };
 
-  // Form Validation & Save
+  // Form Validation & Safe Save
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profileId) return;
 
-    // 1. Validation checks
-    if (!formData.gender) {
-      setFormError('Please select a gender.');
-      return;
-    }
-
-    if (formData.dob && !isDobValid) {
+    // Validate only modified / touched fields
+    if (touchedFields.has('dob') && formData.dob && !isDobValid) {
       setFormError('Please enter a valid date of birth before saving.');
       return;
     }
 
-    if (!formData.city || !formData.city.trim()) {
-      setFormError('City is required.');
+    if (touchedFields.has('city') && !formData.city?.trim()) {
+      setFormError('City cannot be cleared to empty.');
+      return;
+    }
+
+    // Determine which fields were actually changed from initial values
+    const changedKeys = Array.from(touchedFields).filter(
+      (k) => formData[k] !== initialValues[k]
+    );
+
+    if (changedKeys.length === 0) {
+      setSuccessToast('No changes detected.');
+      setTimeout(() => onClose(), 600);
       return;
     }
 
@@ -164,58 +185,87 @@ export function AdminEditProfileModal({
     setFormError(null);
 
     try {
-      // 2. Build whitelist payload - explicitly EXCLUDE protected fields
-      const payload: Record<string, any> = {
-        gender: formData.gender,
-        dob: formData.dob || undefined,
-        maritalStatus: formData.maritalStatus,
-        height: formData.height,
-        religion: formData.religion,
-        caste: formData.caste,
-        subCaste: formData.subCaste,
-        motherTongue: formData.motherTongue,
-        city: formData.city.trim(),
-        state: formData.state ? formData.state.trim() : undefined,
-        country: formData.country ? formData.country.trim() : 'India',
+      // Build safe update payload containing ONLY touched & modified fields
+      const payload: Record<string, any> = {};
 
-        education: formData.education,
-        qualification: formData.education,
-        degree: formData.degree,
-        profession: formData.profession,
-        specialization: formData.specialization,
-        additionalQualification: formData.specialization,
-        company: formData.company,
-        workplace: formData.company,
-        medicalCollege: formData.medicalCollege,
-        institution: formData.medicalCollege,
-        workLocation: formData.workLocation,
-        workType: formData.workType,
-        annualIncome: formData.annualIncome,
-        medicalRegistrationNumber: formData.medicalRegistrationNumber,
-        medicalCouncil: formData.medicalCouncil,
+      const isChanged = (field: string) => touchedFields.has(field) && formData[field] !== initialValues[field];
 
-        about: formData.about,
-        bio: formData.about,
-        foodPreference: formData.foodPreference,
-        smoking: formData.smoking,
-        drinking: formData.drinking,
-        lifestyleInterests: {
-          diet: formData.foodPreference,
-          smoking: formData.smoking,
-          alcohol: formData.drinking,
-        },
-        partnerPreferences: {
-          preferredAgeMin: formData.preferredAgeMin ? Number(formData.preferredAgeMin) : undefined,
-          preferredAgeMax: formData.preferredAgeMax ? Number(formData.preferredAgeMax) : undefined,
-          preferredLocation: formData.preferredLocation,
-        },
+      if (isChanged('gender')) payload.gender = formData.gender;
+      if (isChanged('dob')) payload.dob = formData.dob || undefined;
+      if (isChanged('maritalStatus')) payload.maritalStatus = formData.maritalStatus;
+      if (isChanged('height')) payload.height = formData.height;
+      if (isChanged('weight')) payload.weight = formData.weight;
+      if (isChanged('religion')) payload.religion = formData.religion;
+      if (isChanged('caste')) payload.caste = formData.caste;
+      if (isChanged('subCaste')) payload.subCaste = formData.subCaste;
+      if (isChanged('motherTongue')) payload.motherTongue = formData.motherTongue;
+      if (isChanged('city')) payload.city = formData.city.trim();
+      if (isChanged('state')) payload.state = formData.state ? formData.state.trim() : '';
+      if (isChanged('country')) payload.country = formData.country ? formData.country.trim() : '';
 
-        status: formData.status,
-        profileStatus: formData.status,
-        verificationStatus: formData.verificationStatus,
-        kycStatus: formData.verificationStatus,
-        accountStatus: formData.accountStatus,
-      };
+      if (isChanged('education')) {
+        payload.education = formData.education;
+        payload.qualification = formData.education;
+      }
+      if (isChanged('degree')) payload.degree = formData.degree;
+      if (isChanged('profession')) payload.profession = formData.profession;
+      if (isChanged('specialization')) {
+        payload.specialization = formData.specialization;
+        payload.additionalQualification = formData.specialization;
+      }
+      if (isChanged('company')) {
+        payload.company = formData.company;
+        payload.workplace = formData.company;
+      }
+      if (isChanged('medicalCollege')) {
+        payload.medicalCollege = formData.medicalCollege;
+        payload.institution = formData.medicalCollege;
+      }
+      if (isChanged('workLocation')) payload.workLocation = formData.workLocation;
+      if (isChanged('workType')) payload.workType = formData.workType;
+      if (isChanged('annualIncome')) payload.annualIncome = formData.annualIncome;
+      if (isChanged('medicalRegistrationNumber')) payload.medicalRegistrationNumber = formData.medicalRegistrationNumber;
+      if (isChanged('medicalCouncil')) payload.medicalCouncil = formData.medicalCouncil;
+
+      if (isChanged('about')) {
+        payload.about = formData.about;
+        payload.bio = formData.about;
+      }
+      if (isChanged('foodPreference')) payload.foodPreference = formData.foodPreference;
+      if (isChanged('smoking')) payload.smoking = formData.smoking;
+      if (isChanged('drinking')) payload.drinking = formData.drinking;
+
+      // Safe deep merge for lifestyle: only touch specified fields, preserve existing hobbies/languages
+      if (isChanged('foodPreference') || isChanged('smoking') || isChanged('drinking')) {
+        payload.lifestyleInterests = {
+          ...(profile.lifestyleInterests || {}),
+          ...(isChanged('foodPreference') ? { diet: formData.foodPreference } : {}),
+          ...(isChanged('smoking') ? { smoking: formData.smoking } : {}),
+          ...(isChanged('drinking') ? { alcohol: formData.drinking } : {}),
+        };
+      }
+
+      // Safe deep merge for partner preferences
+      if (isChanged('preferredAgeMin') || isChanged('preferredAgeMax') || isChanged('preferredLocation')) {
+        payload.partnerPreferences = {
+          ...(profile.partnerPreferences || {}),
+          ...(isChanged('preferredAgeMin') ? { preferredAgeMin: formData.preferredAgeMin ? Number(formData.preferredAgeMin) : undefined } : {}),
+          ...(isChanged('preferredAgeMax') ? { preferredAgeMax: formData.preferredAgeMax ? Number(formData.preferredAgeMax) : undefined } : {}),
+          ...(isChanged('preferredLocation') ? { preferredLocation: formData.preferredLocation } : {}),
+        };
+      }
+
+      if (isChanged('status')) {
+        payload.status = formData.status;
+        payload.profileStatus = formData.status;
+      }
+      if (isChanged('verificationStatus')) {
+        payload.verificationStatus = formData.verificationStatus;
+        payload.kycStatus = formData.verificationStatus;
+      }
+      if (isChanged('accountStatus')) {
+        payload.accountStatus = formData.accountStatus;
+      }
 
       if (!canEditPrivate) {
         // Security guarantee: completely remove any protected fields
@@ -229,14 +279,14 @@ export function AdminEditProfileModal({
         delete payload.mobile;
         delete payload.mobileNumber;
       } else {
-        // Authorized with privateInfo.edit: submit contact fields
-        if (formData.email && formData.email.trim()) {
+        // Authorized with privateInfo.edit: submit contact fields only if modified
+        if (isChanged('email') && formData.email && formData.email.trim()) {
           payload.email = formData.email.trim();
         }
-        if (formData.mobile && formData.mobile.trim()) {
+        if (isChanged('mobile') && formData.mobile && formData.mobile.trim()) {
           payload.mobile = formData.mobile.trim();
         }
-        if (formData.formattedAddress !== undefined) {
+        if (isChanged('formattedAddress') && formData.formattedAddress !== undefined) {
           payload.currentLocation = {
             ...(profile.currentLocation || {}),
             formattedAddress: formData.formattedAddress.trim(),
@@ -460,13 +510,13 @@ export function AdminEditProfileModal({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {/* Gender */}
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1.5">Gender *</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Gender</label>
                 <select
-                  value={formData.gender || 'Male'}
+                  value={formData.gender || ''}
                   onChange={(e) => handleFieldChange('gender', e.target.value)}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
-                  required
                 >
+                  <option value="">Select Gender (Not recorded)</option>
                   <option value="Male">Male</option>
                   <option value="Female">Female</option>
                   <option value="Other">Other</option>
@@ -488,10 +538,11 @@ export function AdminEditProfileModal({
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">Marital Status</label>
                 <select
-                  value={formData.maritalStatus || 'Never Married'}
+                  value={formData.maritalStatus || ''}
                   onChange={(e) => handleFieldChange('maritalStatus', e.target.value)}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
                 >
+                  <option value="">Select Marital Status (Not recorded)</option>
                   <option value="Never Married">Never Married</option>
                   <option value="Divorced">Divorced</option>
                   <option value="Widowed">Widowed</option>
@@ -521,10 +572,11 @@ export function AdminEditProfileModal({
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">Religion</label>
                 <select
-                  value={formData.religion || 'Hindu'}
+                  value={formData.religion || ''}
                   onChange={(e) => handleFieldChange('religion', e.target.value)}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
                 >
+                  <option value="">Select Religion (Not recorded)</option>
                   <option value="Hindu">Hindu</option>
                   <option value="Muslim">Muslim</option>
                   <option value="Christian">Christian</option>
@@ -584,7 +636,7 @@ export function AdminEditProfileModal({
                 <input
                   type="text"
                   placeholder="e.g. India"
-                  value={formData.country || 'India'}
+                  value={formData.country || ''}
                   onChange={(e) => handleFieldChange('country', e.target.value)}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
                 />
@@ -609,14 +661,13 @@ export function AdminEditProfileModal({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {/* Medical Qualification */}
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1.5">Medical Qualification *</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Medical Qualification</label>
                 <select
                   value={formData.education || ''}
                   onChange={(e) => handleFieldChange('education', e.target.value)}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
-                  required
                 >
-                  <option value="" disabled>Select medical qualification</option>
+                  <option value="">Select medical qualification (Not recorded)</option>
                   {DOCTOR_QUALIFICATIONS.map((q) => (
                     <option key={q} value={q}>
                       {q}
@@ -627,14 +678,13 @@ export function AdminEditProfileModal({
 
               {/* Medical Specialization */}
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1.5">Medical Specialization *</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Medical Specialization</label>
                 <select
                   value={formData.profession || ''}
                   onChange={(e) => handleFieldChange('profession', e.target.value)}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
-                  required
                 >
-                  <option value="" disabled>Select medical specialization</option>
+                  <option value="">Select medical specialization (Not recorded)</option>
                   {DOCTOR_SPECIALIZATIONS.map((p) => (
                     <option key={p} value={p}>
                       {p}
@@ -732,10 +782,11 @@ export function AdminEditProfileModal({
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">Diet Preference</label>
                 <select
-                  value={formData.foodPreference || 'Vegetarian'}
+                  value={formData.foodPreference || ''}
                   onChange={(e) => handleFieldChange('foodPreference', e.target.value)}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
                 >
+                  <option value="">Select Diet (Not recorded)</option>
                   <option value="Vegetarian">Vegetarian</option>
                   <option value="Non-Vegetarian">Non-Vegetarian</option>
                   <option value="Eggetarian">Eggetarian</option>
@@ -748,10 +799,11 @@ export function AdminEditProfileModal({
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">Smoking</label>
                 <select
-                  value={formData.smoking || 'No'}
+                  value={formData.smoking || ''}
                   onChange={(e) => handleFieldChange('smoking', e.target.value)}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
                 >
+                  <option value="">Select Smoking (Not recorded)</option>
                   <option value="No">No</option>
                   <option value="Yes">Yes</option>
                   <option value="Occasionally">Occasionally</option>
@@ -762,10 +814,11 @@ export function AdminEditProfileModal({
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">Drinking</label>
                 <select
-                  value={formData.drinking || 'No'}
+                  value={formData.drinking || ''}
                   onChange={(e) => handleFieldChange('drinking', e.target.value)}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/20 focus:border-[#E51F3E]"
                 >
+                  <option value="">Select Drinking (Not recorded)</option>
                   <option value="No">No</option>
                   <option value="Yes">Yes</option>
                   <option value="Socially">Socially</option>

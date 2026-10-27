@@ -17,6 +17,7 @@ import {
   recordSecurityEvent,
 } from '../utils/securityUtils';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { evaluatePasswordResetTokenDoc } from './authController';
 
 // Dummy hash to perform constant-time verification when user or admin does not exist
 // This prevents timing-based email enumeration attacks.
@@ -507,17 +508,11 @@ export async function adminResetPassword(req: Request, res: Response, next: Next
 
     const tokenDoc = await PasswordResetToken.findOne({ tokenHash });
 
-    if (!tokenDoc || tokenDoc.isUsed || tokenDoc.usedAt) {
+    const evaluation = evaluatePasswordResetTokenDoc(tokenDoc);
+    if (!tokenDoc || !evaluation.isValid) {
       return res.status(400).json({
         success: false,
-        message: 'This reset link is invalid or has already been used.',
-      });
-    }
-
-    if (new Date() > tokenDoc.expiresAt) {
-      return res.status(400).json({
-        success: false,
-        message: 'This reset link has expired. Please request a new one.',
+        message: evaluation.message,
       });
     }
 

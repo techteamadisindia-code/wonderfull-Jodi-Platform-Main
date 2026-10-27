@@ -21,6 +21,142 @@ export interface ImportReport {
 }
 
 /**
+ * Helper to verify whether a resolved or recovered country document genuinely represents India,
+ * preventing collision with unrelated entities (e.g. Indiana, Indonesia) or conflicting ISO codes.
+ */
+export function isGenuinelyIndia(doc: any): boolean {
+  if (!doc) return false;
+  const code = typeof doc.code === 'string' ? doc.code.trim().toUpperCase() : '';
+  const name = typeof doc.name === 'string' ? doc.name.trim().toLowerCase() : '';
+
+  const isCodeIn = code === 'IN';
+  const isNameIndia = name === 'india' || name === 'republic of india';
+
+  // 1. A valid India record must have either code 'IN' or name 'India'
+  if (!isCodeIn && !isNameIndia) return false;
+
+  // 2. If code is 'IN', the name must NOT be a conflicting distinct nation/entity (e.g., Indonesia, Indiana)
+  if (isCodeIn && name && !isNameIndia) return false;
+
+  // 3. If name is 'India', the code must NOT be a conflicting foreign ISO code (e.g., ID, US, GB)
+  if (isNameIndia && code && !isCodeIn) return false;
+
+  return true;
+}
+
+/**
+ * Resolves India country record using canonical code, case-insensitive code matching,
+ * or name matching. If missing, safely recovers India from SEED_COUNTRIES definition
+ * without overwriting any existing country metadata, suffering race-condition failures,
+ * or returning demonstrably incorrect country records as India.
+ */
+export async function resolveOrRecoverIndiaCountry(): Promise<any> {
+  // 1. Canonical lookup: uppercase code 'IN'
+  let india = await Country.findOne({ code: 'IN' });
+  if (india) {
+    if (isGenuinelyIndia(india)) {
+      return india;
+    }
+    // A conflicting record occupies code 'IN' (e.g. { code: 'IN', name: 'Indonesia' }).
+    // Conflicting records must never be overwritten, returned as India, or trigger unsafe recovery.
+    console.warn(`[MasterData] Conflicting record occupies code 'IN' (name: "${india.name}"). Rejecting and skipping unsafe recovery.`);
+    return null;
+  }
+
+  // 2. Genuinely case-insensitive code matching fallback (e.g. 'in', 'In')
+  india = await Country.findOne({ code: { $regex: '^IN$', $options: 'i' } });
+  if (india) {
+    if (isGenuinelyIndia(india)) {
+      return india;
+    }
+    console.warn(`[MasterData] Conflicting record matches case-insensitive code 'IN' (name: "${india.name}"). Rejecting and skipping unsafe recovery.`);
+    return null;
+  }
+
+  // 3. Name fallback: 'India' (case-insensitive)
+  india = await Country.findOne({ name: { $regex: '^India$', $options: 'i' } });
+  if (india) {
+    if (isGenuinelyIndia(india)) {
+      return india;
+    }
+    console.warn(`[MasterData] Conflicting record matches name 'India' with foreign code "${india.code}". Rejecting and skipping unsafe recovery.`);
+    return null;
+  }
+
+  // 4. Safe recovery: If India is missing from pre-existing country collection,
+  // safely recover from SEED_COUNTRIES without violating unique constraints, overwriting metadata,
+  // or returning demonstrably incorrect country records as India.
+  const canonicalSeedIndia = SEED_COUNTRIES.find((c) => c.code === 'IN' || c.name === 'India');
+  if (canonicalSeedIndia) {
+    try {
+      // Check if a conflicting record already occupies the unique 'code' or 'name' constraint
+      const existingConflict = await Country.findOne({
+        $or: [
+          { code: canonicalSeedIndia.code },
+          { code: { $regex: '^IN$', $options: 'i' } },
+          { name: canonicalSeedIndia.name },
+          { name: { $regex: '^India$', $options: 'i' } },
+        ],
+      });
+
+      if (existingConflict) {
+        if (isGenuinelyIndia(existingConflict)) {
+          // Genuinely India: preserve existing record without updating or overwriting its metadata
+          return existingConflict;
+        } else {
+          // A conflicting, demonstrably different country record occupies the code or name constraint.
+          // Never overwrite existing metadata or return an incorrect record as India.
+          console.warn('[MasterData] Conflicting non-India country record occupies code/name constraint. Skipping recovery to avoid returning invalid data.');
+          return null;
+        }
+      }
+
+      console.log('[MasterData] Recovering missing India country record from canonical seed definition...');
+      india = await Country.create({
+        name: canonicalSeedIndia.name,
+        code: canonicalSeedIndia.code,
+        isoCode: canonicalSeedIndia.isoCode,
+        phoneCode: canonicalSeedIndia.phoneCode,
+        sortOrder: canonicalSeedIndia.sortOrder,
+        sourceType: 'GOVERNMENT',
+        source: 'ISO-3166 / Census India',
+        isActive: true,
+      });
+      return india;
+    } catch (recoverErr: any) {
+      // Handle potential race condition where another process concurrently created the record.
+      // Recover ONLY for a confirmed duplicate-key error condition (code 11000, DuplicateKey, or E11000).
+      // Do NOT treat error.name === 'MongoServerError' alone as evidence of duplicate key.
+      const isConfirmedDuplicateKey =
+        recoverErr?.code === 11000 ||
+        recoverErr?.codeName === 'DuplicateKey' ||
+        (typeof recoverErr?.message === 'string' && recoverErr.message.includes('E11000'));
+
+      if (isConfirmedDuplicateKey) {
+        try {
+          const concurrentDoc = await Country.findOne({
+            $or: [
+              { code: 'IN' },
+              { code: { $regex: '^IN$', $options: 'i' } },
+              { name: 'India' },
+              { name: { $regex: '^India$', $options: 'i' } },
+            ],
+          });
+          if (concurrentDoc && isGenuinelyIndia(concurrentDoc)) {
+            return concurrentDoc;
+          }
+        } catch {
+          // Fall through to warning
+        }
+      }
+      console.warn('[MasterData] Unable to recover India country record:', recoverErr);
+    }
+  }
+
+  return null;
+}
+
+/**
  * Initializes and seeds master data if collections are empty
  */
 export async function seedMasterDataIfEmpty(): Promise<void> {
@@ -42,12 +178,8 @@ export async function seedMasterDataIfEmpty(): Promise<void> {
       );
     }
 
-    const india = await Country.findOne({ code: 'IN' });
-    if (!india) {
-      console.warn('Country India not found for state seeding.');
-      return;
-    }
-
+    const india = await resolveOrRecoverIndiaCountry();
+    if (india && india._id) {
     // 2. States / UTs
     const stateCount = await State.countDocuments();
     if (stateCount === 0) {
@@ -205,6 +337,9 @@ export async function seedMasterDataIfEmpty(): Promise<void> {
         }
       }
     }
+    } else {
+      console.warn('[MasterData] Country India not found or resolvable. Skipping dependent geographical seeding (states, districts, sub-districts, cities, villages).');
+    }
 
     // 7. Languages
     const languageCount = await Language.countDocuments();
@@ -300,9 +435,9 @@ export async function seedMasterDataIfEmpty(): Promise<void> {
 export async function bulkImportLocations(items: any[]): Promise<ImportReport> {
   const report: ImportReport = { total: items.length, imported: 0, updated: 0, skipped: 0, errors: [] };
 
-  const india = await Country.findOne({ code: 'IN' });
+  const india = await resolveOrRecoverIndiaCountry();
   if (!india) {
-    report.errors.push('Base country India not found.');
+    report.errors.push('Base country India not found or resolvable.');
     return report;
   }
 

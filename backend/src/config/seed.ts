@@ -129,10 +129,36 @@ export async function ensurePlatformSettingsExist(): Promise<void> {
   }
 }
 
+/**
+ * Explicit, independently reviewed master-data and membership plan initialization.
+ * Dedicated for explicit administrative / deployment execution.
+ * NEVER executed implicitly through the demo-seeding path in production.
+ */
+export async function initializeMasterDataExplicitly(): Promise<void> {
+  console.log('[MasterData] Explicit master-data initialization initiated...');
+  await seedMasterDataIfEmpty();
+  await seedMembershipPlansIfEmpty();
+}
+
 export async function seedInitialData() {
   try {
     const isProduction = process.env.NODE_ENV === 'production';
 
+    // STRICT PRODUCTION GUARD:
+    // In production mode, demo seeding is NEVER permitted under any circumstances.
+    // Even if ALLOW_DEMO_SEED is set to 'true', it is strictly ignored and blocked (fail-closed).
+    // The demo-seeding entry point must check the environment before executing operations
+    // that it is not authorized to perform in production. Master-data seeding is separated
+    // and must never be implicitly triggered through the demo-seeding path.
+    if (isProduction) {
+      console.log('🔒 Production mode: Demo users, demo profiles, sample transactions, and implicit master-data seeding are strictly disabled (fail-closed, no override permitted).');
+      // In production, ensure essential operational baselines (admin & non-destructive settings) are safe:
+      await ensureAdminUserExists();
+      await ensurePlatformSettingsExist();
+      return;
+    }
+
+    // NON-PRODUCTION DEMO INITIALIZATION:
     // Ensure all location & community master data is seeded and up to date
     await seedMasterDataIfEmpty();
 
@@ -144,14 +170,6 @@ export async function seedInitialData() {
 
     // Ensure default settings exist without resetting existing operational values
     await ensurePlatformSettingsExist();
-
-    // STRICT PRODUCTION GUARD:
-    // In production mode, demo seeding is NEVER permitted under any circumstances.
-    // Even if ALLOW_DEMO_SEED is set to 'true', it is strictly ignored and blocked (fail-closed).
-    if (isProduction) {
-      console.log('🔒 Production mode: Demo users, demo profiles, and sample transactions are strictly disabled (fail-closed, no override permitted).');
-      return;
-    }
 
     const userCount = await User.countDocuments();
     let usersList: any[] = [];

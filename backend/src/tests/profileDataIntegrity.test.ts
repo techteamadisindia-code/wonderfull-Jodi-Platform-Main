@@ -31,8 +31,11 @@ import { User } from '../models/User';
 import { Admin } from '../models/Admin';
 import { Setting } from '../models/Setting';
 import { MembershipPlan } from '../models/MembershipPlan';
-import { Country } from '../models/Location';
-import { ensureAdminUserExists, ensurePlatformSettingsExist, seedInitialData } from '../config/seed';
+import { Country, State, District, SubDistrict, City, Village } from '../models/Location';
+import { Language, Religion, Caste, SubCaste } from '../models/CommunityMaster';
+import { Registration } from '../models/Registration';
+import { isGenuinelyIndia, resolveOrRecoverIndiaCountry, seedMasterDataIfEmpty } from '../services/masterDataImporter';
+import { ensureAdminUserExists, ensurePlatformSettingsExist, seedInitialData, initializeMasterDataExplicitly } from '../config/seed';
 
 interface AssertionResult {
   suite: string;
@@ -404,8 +407,12 @@ async function runDataIntegrityTestSuite() {
   const origAdminFindOneForSeed = (Admin as any).findOne;
 
   // Setup baseline mocks for master data & admin so seed doesn't hit live db
+  const mockSuite5India = { _id: 'mock_india_suite5', code: 'IN', name: 'India' };
   (Country as any).countDocuments = async () => 1;
-  (Country as any).findOne = async () => null;
+  (Country as any).findOne = async (f: any) => {
+    if (f?.code === 'IN' || f?.name === 'India') return mockSuite5India;
+    return null;
+  };
   (MembershipPlan as any).countDocuments = async () => 1;
   (MembershipPlan as any).find = async () => [];
   (Admin as any).findOne = async () => ({ user: 'mockAdminId', permissions: ['all'] });
@@ -815,6 +822,455 @@ async function runDataIntegrityTestSuite() {
     auditRunThrew = true;
   }
   assert('runProfileIntegrityAudit fails closed and rejects when explicit audit URL cannot be applied', auditRunThrew === true);
+
+  // ─── 8. MASTER-DATA SEEDING RESILIENCE & INDEPENDENT DATASET GUARANTEES ───
+  setSuite('Suite 8: Master-Data Seeding Resilience & Independent Dataset Guarantees');
+
+  // Stash original models methods for Suite 8
+  const origSuite8CountryCount = (Country as any).countDocuments;
+  const origSuite8CountryFindOne = (Country as any).findOne;
+  const origSuite8CountryCreate = (Country as any).create;
+  const origSuite8CountryInsertMany = (Country as any).insertMany;
+  const origSuite8StateCount = (State as any).countDocuments;
+  const origSuite8StateFindOneAndUpdate = (State as any).findOneAndUpdate;
+  const origSuite8StateFind = (State as any).find;
+  const origSuite8DistrictCount = (District as any).countDocuments;
+  const origSuite8DistrictFindOneAndUpdate = (District as any).findOneAndUpdate;
+  const origSuite8SubDistrictCount = (SubDistrict as any).countDocuments;
+  const origSuite8CityCount = (City as any).countDocuments;
+  const origSuite8VillageCount = (Village as any).countDocuments;
+  const origSuite8LanguageCount = (Language as any).countDocuments;
+  const origSuite8LanguageInsertMany = (Language as any).insertMany;
+  const origSuite8ReligionCount = (Religion as any).countDocuments;
+  const origSuite8ReligionInsertMany = (Religion as any).insertMany;
+  const origSuite8ReligionFind = (Religion as any).find;
+  const origSuite8CasteCount = (Caste as any).countDocuments;
+  const origSuite8CasteFindOneAndUpdate = (Caste as any).findOneAndUpdate;
+  const origSuite8SubCasteFindOneAndUpdate = (SubCaste as any).findOneAndUpdate;
+  const origSuite8UserCreate = (User as any).create;
+  const origSuite8UserCount = (User as any).countDocuments;
+  const origSuite8ProfileCreate = (Profile as any).create;
+  const origSuite8RegistrationInsertMany = (Registration as any).insertMany;
+  const origSuite8SettingFindOne = (Setting as any).findOne;
+  const origSuite8SettingCreate = (Setting as any).create;
+  const origSuite8SettingFindOneAndUpdate = (Setting as any).findOneAndUpdate;
+  const origSuite8Env = process.env.NODE_ENV;
+  const origSuite8AllowDemo = process.env.ALLOW_DEMO_SEED;
+
+  try {
+    // ── Test 8a: India present and geographic seeding proceeding ──
+    const mockIndia8a = { _id: 'mock_india_8a', code: 'IN', name: 'India' };
+    const tracker8a = {
+      stateSeeded: false,
+      districtSeeded: false,
+    };
+
+    (Country as any).countDocuments = async () => 27;
+    (Country as any).findOne = async (f: any) => {
+      if (f?.code === 'IN' || f?.name === 'India') return mockIndia8a;
+      return null;
+    };
+    (State as any).countDocuments = async () => 0; // Trigger states seeding
+    (State as any).findOneAndUpdate = async () => {
+      tracker8a.stateSeeded = true;
+      return { _id: 'state_mh', code: 'MH', countryId: mockIndia8a._id };
+    };
+    (District as any).countDocuments = async () => 0; // Trigger district seeding
+    (State as any).find = async () => [{ _id: 'state_mh', code: 'MH', countryId: mockIndia8a._id }];
+    (District as any).findOneAndUpdate = async () => {
+      tracker8a.districtSeeded = true;
+      return { _id: 'dist_pune' };
+    };
+    (SubDistrict as any).countDocuments = async () => 1;
+    (City as any).countDocuments = async () => 1;
+    (Village as any).countDocuments = async () => 1;
+    (Language as any).countDocuments = async () => 1;
+    (Religion as any).countDocuments = async () => 1;
+    (Caste as any).countDocuments = async () => 1;
+
+    await seedMasterDataIfEmpty();
+
+    assert('Geographic seeding: States are seeded when India country record is present', tracker8a.stateSeeded === true);
+    assert('Geographic seeding: Districts are seeded when India country record is present', tracker8a.districtSeeded === true);
+
+    // ── Test 8b: India absent: skips geographic seeding while independent datasets continue ──
+    const tracker8b = {
+      stateSeededWhenIndiaAbsent: false,
+      languageSeededWhenIndiaAbsent: false,
+      religionSeededWhenIndiaAbsent: false,
+      casteSeededWhenIndiaAbsent: false,
+    };
+
+    (Country as any).countDocuments = async () => 5; // Countries exist, none is India
+    (Country as any).findOne = async () => null; // Cannot be found by code, regex, or name
+    (Country as any).create = async () => { throw new Error('Recovery disabled for test 8b'); };
+
+    (State as any).countDocuments = async () => 0;
+    (State as any).findOneAndUpdate = async () => {
+      tracker8b.stateSeededWhenIndiaAbsent = true;
+      return {};
+    };
+
+    (Language as any).countDocuments = async () => 0;
+    (Language as any).insertMany = async (items: any[]) => {
+      tracker8b.languageSeededWhenIndiaAbsent = items.length > 0;
+      return items;
+    };
+
+    (Religion as any).countDocuments = async () => 0;
+    (Religion as any).insertMany = async (items: any[]) => {
+      tracker8b.religionSeededWhenIndiaAbsent = items.length > 0;
+      return items;
+    };
+
+    (Religion as any).find = async () => [{ _id: 'rel_hindu_8b', name: 'Hindu' }];
+    (Caste as any).countDocuments = async () => 0;
+    (Caste as any).findOneAndUpdate = async () => {
+      tracker8b.casteSeededWhenIndiaAbsent = true;
+      return { _id: 'caste_doc_8b' };
+    };
+    (SubCaste as any).findOneAndUpdate = async () => ({});
+
+    await seedMasterDataIfEmpty();
+
+    assert('India absent: Geographical state seeding is strictly skipped when India cannot be resolved', tracker8b.stateSeededWhenIndiaAbsent === false);
+    assert('India absent: Independent Language dataset continues and seeds successfully', tracker8b.languageSeededWhenIndiaAbsent === true);
+    assert('India absent: Independent Religion dataset continues and seeds successfully', tracker8b.religionSeededWhenIndiaAbsent === true);
+    assert('India absent: Independent Caste dataset continues and seeds successfully', tracker8b.casteSeededWhenIndiaAbsent === true);
+
+    // ── Test 8c: Existing country records being preserved ──
+    const existingCustomCountry = {
+      _id: 'country_custom_001',
+      name: 'India',
+      code: 'IN',
+      isoCode: 'IND',
+      phoneCode: '+91',
+      customAttribute: 'OPERATIONAL_PRESERVED_VALUE',
+      updatedAt: new Date('2025-01-01'),
+    };
+
+    const tracker8c = {
+      countryUpdated: false,
+      countryInserted: false,
+    };
+
+    (Country as any).countDocuments = async () => 1;
+    (Country as any).findOne = async () => existingCustomCountry;
+    (Country as any).findOneAndUpdate = async () => { tracker8c.countryUpdated = true; return existingCustomCountry; };
+    (Country as any).updateOne = async () => { tracker8c.countryUpdated = true; return existingCustomCountry; };
+    (Country as any).insertMany = async () => { tracker8c.countryInserted = true; return []; };
+
+    const resolved = await resolveOrRecoverIndiaCountry();
+
+    assert('Existing country: resolveOrRecoverIndiaCountry returns existing record', resolved?._id === 'country_custom_001');
+    assert('Existing country: Custom country attributes are preserved untouched', resolved?.customAttribute === 'OPERATIONAL_PRESERVED_VALUE');
+    assert('Existing country: Existing records are never updated or overwritten during lookup', tracker8c.countryUpdated === false);
+    assert('Existing country: No duplicate country insertion attempted when record exists', tracker8c.countryInserted === false);
+
+    // ── Test 8d: Missing-India recovery from SEED_COUNTRIES ──
+    let recoveredDocCreated: any = null;
+
+    (Country as any).findOne = async () => null; // Not found by code or name
+    (Country as any).create = async (doc: any) => {
+      recoveredDocCreated = doc;
+      return { _id: 'rec_in_created_8d', ...doc };
+    };
+
+    const recoveredIndia = await resolveOrRecoverIndiaCountry();
+
+    assert('Missing-India recovery: Successfully recovers India from canonical seed definitions', recoveredIndia !== null && recoveredIndia._id === 'rec_in_created_8d');
+    assert('Missing-India recovery: Recovered record has canonical uppercase code IN', recoveredDocCreated?.code === 'IN');
+    assert('Missing-India recovery: Recovered record has canonical name India', recoveredDocCreated?.name === 'India');
+    assert('Missing-India recovery: Recovered record has canonical phone code +91', recoveredDocCreated?.phoneCode === '+91');
+    assert('Missing-India recovery: Recovered record has GOVERNMENT sourceType', recoveredDocCreated?.sourceType === 'GOVERNMENT');
+
+    // ── Test 8e: Production seed execution performing no prohibited writes ──
+    process.env.NODE_ENV = 'production';
+    process.env.ALLOW_DEMO_SEED = 'true'; // Attempt override
+
+    const tracker8e = {
+      prohibitedUserWrite: false,
+      prohibitedProfileWrite: false,
+      prohibitedRegistrationWrite: false,
+      prohibitedMasterDataWrite: false,
+    };
+
+    (User as any).create = async () => { tracker8e.prohibitedUserWrite = true; return {}; };
+    (User as any).countDocuments = async () => 0; // If demo seed were to execute, count === 0 triggers users
+    (Profile as any).create = async () => { tracker8e.prohibitedProfileWrite = true; return {}; };
+    (Profile as any).findOneAndUpdate = async () => { tracker8e.prohibitedProfileWrite = true; return {}; };
+    (Registration as any).insertMany = async () => { tracker8e.prohibitedRegistrationWrite = true; return []; };
+    (Country as any).insertMany = async () => { tracker8e.prohibitedMasterDataWrite = true; return []; };
+
+    await seedInitialData();
+
+    assert('Production protection: seedInitialData in production performs 0 demo user writes', tracker8e.prohibitedUserWrite === false);
+    assert('Production protection: seedInitialData in production performs 0 demo profile writes', tracker8e.prohibitedProfileWrite === false);
+    assert('Production protection: seedInitialData in production performs 0 sample transaction writes', tracker8e.prohibitedRegistrationWrite === false);
+    assert('Production protection: seedInitialData in production performs 0 implicit master-data writes', tracker8e.prohibitedMasterDataWrite === false);
+
+    // ── Test 8f: Existing platform settings remaining unchanged ──
+    const liveProductionSettings: any = {
+      _id: 'sett_prod_live_8f',
+      siteName: 'Live Matrimonial Production',
+      maintenanceMode: true,
+      allowNewRegistrations: false,
+      requireEmailVerification: true,
+      requireManualProfileApproval: true,
+      razorpayLiveMode: true,
+      allowAdminAccess: true,
+      supportEmail: 'ops@wonderfuljodi.com',
+      supportPhone: '+91 99999 88888',
+      tollFreeNumber: '+91 1800 000 000',
+      officeAddress: 'Corporate Tower 4, Cyber City, Gurugram',
+      currency: 'INR',
+      minAgeMale: 21,
+      minAgeFemale: 18,
+      maxPhotoUploadLimit: 10,
+      saveCalls: 0,
+      save: async function () { this.saveCalls++; return this; },
+    };
+
+    (Setting as any).findOne = async () => liveProductionSettings;
+    (Setting as any).create = async () => { throw new Error('Setting.create should not be called'); };
+    (Setting as any).findOneAndUpdate = async () => { throw new Error('Setting.findOneAndUpdate should not be called'); };
+
+    await ensurePlatformSettingsExist();
+
+    assert('Settings protection: Operational maintenanceMode is preserved as true', liveProductionSettings.maintenanceMode === true);
+    assert('Settings protection: Operational allowNewRegistrations is preserved as false', liveProductionSettings.allowNewRegistrations === false);
+    assert('Settings protection: Operational razorpayLiveMode is preserved as true', liveProductionSettings.razorpayLiveMode === true);
+    assert('Settings protection: Operational requireEmailVerification is preserved as true', liveProductionSettings.requireEmailVerification === true);
+    assert('Settings protection: Operational requireManualProfileApproval is preserved as true', liveProductionSettings.requireManualProfileApproval === true);
+    assert('Settings protection: Operational settings were not saved or modified when no fields missing', liveProductionSettings.saveCalls === 0);
+
+    // ── Test 8g: Repeated seeding remaining idempotent ──
+    const tracker8g = {
+      idempotentInsertAttempts: 0,
+      idempotentCreateAttempts: 0,
+    };
+
+    (Country as any).countDocuments = async () => 27;
+    (Country as any).findOne = async () => ({ _id: 'ind_id_idem', code: 'IN', name: 'India' });
+    (State as any).countDocuments = async () => 36;
+    (District as any).countDocuments = async () => 700;
+    (SubDistrict as any).countDocuments = async () => 5000;
+    (City as any).countDocuments = async () => 1200;
+    (Village as any).countDocuments = async () => 100;
+    (Language as any).countDocuments = async () => 22;
+    (Religion as any).countDocuments = async () => 7;
+    (Caste as any).countDocuments = async () => 300;
+
+    (Country as any).insertMany = async () => { tracker8g.idempotentInsertAttempts++; return []; };
+    (State as any).findOneAndUpdate = async () => { tracker8g.idempotentCreateAttempts++; return {}; };
+    (Language as any).insertMany = async () => { tracker8g.idempotentInsertAttempts++; return []; };
+    (Religion as any).insertMany = async () => { tracker8g.idempotentInsertAttempts++; return []; };
+
+    // Run 3 consecutive seeding runs
+    await seedMasterDataIfEmpty();
+    await seedMasterDataIfEmpty();
+    await seedMasterDataIfEmpty();
+
+    assert('Idempotency: Repeated master data seed runs perform 0 duplicate insertMany calls', tracker8g.idempotentInsertAttempts === 0);
+    assert('Idempotency: Repeated master data seed runs perform 0 duplicate entity upserts', tracker8g.idempotentCreateAttempts === 0);
+
+    // ── Test 8h: Genuinely case-insensitive country-code matching ('in') ──
+    const lowercaseIndiaDoc = {
+      _id: 'country_in_lower_8h',
+      code: 'in',
+      name: 'India',
+      isoCode: 'IND',
+      phoneCode: '+91',
+    };
+    const tracker8h = {
+      exactCodeLookupCalled: false,
+      regexCodeLookupCalled: false,
+      recoveryCalled: false,
+    };
+
+    (Country as any).countDocuments = async () => 1;
+    (Country as any).findOne = async (filter: any) => {
+      // 1. Exact match { code: 'IN' } will not match lowercase 'in' in case-sensitive environments
+      if (filter?.code === 'IN') {
+        tracker8h.exactCodeLookupCalled = true;
+        return null;
+      }
+      // 2. Case-insensitive regex match { code: { $regex: '^IN$', $options: 'i' } } matches 'in'
+      if (filter?.code?.$regex) {
+        tracker8h.regexCodeLookupCalled = true;
+        const reg = new RegExp(filter.code.$regex, filter.code.$options || '');
+        if (reg.test(lowercaseIndiaDoc.code)) {
+          return lowercaseIndiaDoc;
+        }
+      }
+      return null;
+    };
+    (Country as any).create = async () => {
+      tracker8h.recoveryCalled = true;
+      return lowercaseIndiaDoc;
+    };
+
+    const resolvedLower = await resolveOrRecoverIndiaCountry();
+
+    assert('Case-insensitive code: Exact code lookup attempted first', tracker8h.exactCodeLookupCalled === true);
+    assert('Case-insensitive code: Case-insensitive regex fallback is invoked with $options "i"', tracker8h.regexCodeLookupCalled === true);
+    assert('Case-insensitive code: Resolves lowercase "in" to valid India country record', resolvedLower?._id === 'country_in_lower_8h');
+    assert('Case-insensitive code: Preserves existing lowercase code and attributes without duplicate creation', tracker8h.recoveryCalled === false);
+
+    // ── Test 8i: Conflicting non-India country records (e.g. Indonesia/Indiana) are never returned as India ──
+    const validIndiaCanonical = { code: 'IN', name: 'India' };
+    const validIndiaLower = { code: 'in', name: 'India' };
+    const conflictingIndonesiaDoc = {
+      _id: 'country_conflict_id_8i',
+      code: 'IN',
+      name: 'Indonesia',
+      isoCode: 'IDN',
+    };
+    const tracker8i = {
+      recoveryAttempted: false,
+    };
+
+    (Country as any).countDocuments = async () => 1;
+    (Country as any).findOne = async () => conflictingIndonesiaDoc;
+    (Country as any).create = async () => {
+      tracker8i.recoveryAttempted = true;
+      return conflictingIndonesiaDoc;
+    };
+
+    const resolvedConflict = await resolveOrRecoverIndiaCountry();
+
+    assert('Lookup validation: { code: "IN", name: "India" } is accepted', isGenuinelyIndia(validIndiaCanonical) === true);
+    assert('Lookup validation: { code: "in", name: "India" } is accepted when lowercase codes are supported', isGenuinelyIndia(validIndiaLower) === true);
+    assert('Conflict protection: { code: "IN", name: "Indonesia" } is rejected', isGenuinelyIndia(conflictingIndonesiaDoc) === false);
+    assert('Conflict protection: Conflicting country record is NEVER returned as India', resolvedConflict === null);
+    assert('Conflict protection: Conflicting records are not overwritten via Country.create', tracker8i.recoveryAttempted === false);
+    assert('Conflict protection: A rejected record does not trigger unsafe recovery or duplicate creation', tracker8i.recoveryAttempted === false);
+
+    // ── Test 8j: Name match with unrelated country code is rejected without recovery ──
+    const foreignCodeIndiaNameDoc = {
+      _id: 'country_conflict_us_8j',
+      code: 'US',
+      name: 'India',
+      isoCode: 'USA',
+    };
+    const tracker8j = {
+      recoveryAttempted: false,
+    };
+
+    (Country as any).countDocuments = async () => 1;
+    (Country as any).findOne = async (filter: any) => {
+      if (filter?.code === 'IN' || filter?.code?.$regex) return null;
+      if (filter?.name?.$regex) return foreignCodeIndiaNameDoc;
+      return null;
+    };
+    (Country as any).create = async () => {
+      tracker8j.recoveryAttempted = true;
+      return foreignCodeIndiaNameDoc;
+    };
+
+    const resolvedForeign = await resolveOrRecoverIndiaCountry();
+
+    assert('Conflict protection: isGenuinelyIndia rejects name "India" paired with unrelated code "US"', isGenuinelyIndia(foreignCodeIndiaNameDoc) === false);
+    assert('Conflict protection: Record with foreign code and name "India" is rejected as India', resolvedForeign === null);
+    assert('Conflict protection: Rejected foreign code record does not trigger unsafe recovery or create', tracker8j.recoveryAttempted === false);
+
+    // ── Test 8k: Duplicate-key race recovery during concurrent Country.create() ──
+    const concurrentIndiaDoc = {
+      _id: 'country_concurrent_raced_8k',
+      code: 'IN',
+      name: 'India',
+      isoCode: 'IND',
+      phoneCode: '+91',
+    };
+    const tracker8k = {
+      createAttempted: false,
+      requeryAttempted: false,
+    };
+
+    let findOneCallCount = 0;
+    (Country as any).findOne = async (filter: any) => {
+      findOneCallCount++;
+      // Initial checks (steps 1, 2, 3, 4 initial conflict check) return null
+      if (findOneCallCount <= 4) {
+        return null;
+      }
+      // Re-query after duplicate-key race condition returns the concurrently created India doc
+      tracker8k.requeryAttempted = true;
+      return concurrentIndiaDoc;
+    };
+
+    (Country as any).create = async () => {
+      tracker8k.createAttempted = true;
+      // Simulate MongoDB duplicate key error (code 11000)
+      const dupError: any = new Error('E11000 duplicate key error collection: countries index: code_1 dup key');
+      dupError.code = 11000;
+      dupError.name = 'MongoServerError';
+      throw dupError;
+    };
+
+    const resolvedRaced = await resolveOrRecoverIndiaCountry();
+
+    assert('Race protection: Concurrent create throws confirmed duplicate-key error (code 11000)', tracker8k.createAttempted === true);
+    assert('Race protection: Gracefully catches confirmed duplicate key race and re-queries database', tracker8k.requeryAttempted === true);
+    assert('Race protection: Returns verified concurrently-created India record', resolvedRaced?._id === 'country_concurrent_raced_8k');
+    assert('Race protection: Verified concurrently-created record satisfies isGenuinelyIndia', isGenuinelyIndia(resolvedRaced) === true);
+
+    // ── Test 8l: Unrelated MongoDB errors are distinguished from duplicate-key race conditions ──
+    const tracker8l = {
+      createAttempted: false,
+    };
+
+    (Country as any).countDocuments = async () => 0;
+    (Country as any).findOne = async () => null;
+    (Country as any).create = async () => {
+      tracker8l.createAttempted = true;
+      // Simulate unrelated MongoDB server error (e.g. execution timeout or auth error, code 50)
+      const unrelatedMongoError: any = new Error('operation exceeded time limit');
+      unrelatedMongoError.name = 'MongoServerError';
+      unrelatedMongoError.code = 50;
+      throw unrelatedMongoError;
+    };
+
+    const resolvedUnrelated = await resolveOrRecoverIndiaCountry();
+
+    assert('Error discrimination: Unrelated MongoServerError (code 50) triggers create attempt', tracker8l.createAttempted === true);
+    assert('Error discrimination: Unrelated MongoServerError is NOT treated as duplicate-key condition', resolvedUnrelated === null);
+  } finally {
+    // Restore all Suite 8 mocks
+    (Country as any).countDocuments = origSuite8CountryCount;
+    (Country as any).findOne = origSuite8CountryFindOne;
+    (Country as any).create = origSuite8CountryCreate;
+    (Country as any).insertMany = origSuite8CountryInsertMany;
+    (State as any).countDocuments = origSuite8StateCount;
+    (State as any).findOneAndUpdate = origSuite8StateFindOneAndUpdate;
+    (State as any).find = origSuite8StateFind;
+    (District as any).countDocuments = origSuite8DistrictCount;
+    (District as any).findOneAndUpdate = origSuite8DistrictFindOneAndUpdate;
+    (SubDistrict as any).countDocuments = origSuite8SubDistrictCount;
+    (City as any).countDocuments = origSuite8CityCount;
+    (Village as any).countDocuments = origSuite8VillageCount;
+    (Language as any).countDocuments = origSuite8LanguageCount;
+    (Language as any).insertMany = origSuite8LanguageInsertMany;
+    (Religion as any).countDocuments = origSuite8ReligionCount;
+    (Religion as any).insertMany = origSuite8ReligionInsertMany;
+    (Religion as any).find = origSuite8ReligionFind;
+    (Caste as any).countDocuments = origSuite8CasteCount;
+    (Caste as any).findOneAndUpdate = origSuite8CasteFindOneAndUpdate;
+    (SubCaste as any).findOneAndUpdate = origSuite8SubCasteFindOneAndUpdate;
+    (User as any).create = origSuite8UserCreate;
+    (User as any).countDocuments = origSuite8UserCount;
+    (Profile as any).create = origSuite8ProfileCreate;
+    (Registration as any).insertMany = origSuite8RegistrationInsertMany;
+    (Setting as any).findOne = origSuite8SettingFindOne;
+    (Setting as any).create = origSuite8SettingCreate;
+    (Setting as any).findOneAndUpdate = origSuite8SettingFindOneAndUpdate;
+    process.env.NODE_ENV = origSuite8Env;
+    if (origSuite8AllowDemo !== undefined) {
+      process.env.ALLOW_DEMO_SEED = origSuite8AllowDemo;
+    } else {
+      delete process.env.ALLOW_DEMO_SEED;
+    }
+  }
 
   // ─── SUMMARY ───
   console.log('\n===============================================================');

@@ -1375,6 +1375,17 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
     if (req.body.institution !== undefined) updateData.medicalCollege = req.body.institution;
     if (req.body.college !== undefined) updateData.medicalCollege = req.body.college;
     if (req.body.currentHospital !== undefined) updateData.currentHospital = req.body.currentHospital;
+    if (req.body.graduationYear !== undefined) updateData.graduationYear = req.body.graduationYear;
+    if (req.body.medicalUniversity !== undefined) updateData.medicalUniversity = req.body.medicalUniversity;
+    if (req.body.stateMedicalCouncil !== undefined) updateData.stateMedicalCouncil = req.body.stateMedicalCouncil;
+    if (req.body.registrationYear !== undefined) updateData.registrationYear = req.body.registrationYear;
+    if (req.body.currentlyPracticing !== undefined) updateData.currentlyPracticing = req.body.currentlyPracticing;
+    if (req.body.medicalQualifications && typeof req.body.medicalQualifications === 'object') {
+      updateData.medicalQualifications = {
+        ...(profile.medicalQualifications || {}),
+        ...req.body.medicalQualifications,
+      };
+    }
 
     // Family Details
     if (req.body.familyType !== undefined) updateData.familyType = req.body.familyType;
@@ -1385,6 +1396,25 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
     if (req.body.siblings !== undefined) updateData.siblings = req.body.siblings;
     if (req.body.nativePlace !== undefined) updateData.nativePlace = req.body.nativePlace;
     if (req.body.familyLocation !== undefined) updateData.familyLocation = req.body.familyLocation;
+    if (req.body.familyBackground && typeof req.body.familyBackground === 'object') {
+      updateData.familyBackground = {
+        ...(profile.familyBackground || {}),
+        ...req.body.familyBackground,
+      };
+    }
+
+    // Horoscope Details
+    if (req.body.horoscope && typeof req.body.horoscope === 'object') {
+      updateData.horoscope = {
+        ...(profile.horoscope || {}),
+        ...req.body.horoscope,
+      };
+    } else if (req.body.manglik !== undefined) {
+      updateData.horoscope = {
+        ...(profile.horoscope || {}),
+        manglik: req.body.manglik,
+      };
+    }
 
     // Profile Details & Bio
     if (req.body.about !== undefined) updateData.about = req.body.about;
@@ -1474,6 +1504,24 @@ export async function updateProfile(req: AuthRequest, res: Response, next: NextF
       updateData.lifestyleInterests = {
         ...(profile.lifestyleInterests || {}),
         ...updateData.lifestyleInterests,
+      };
+    }
+    if (updateData.horoscope && typeof updateData.horoscope === 'object') {
+      updateData.horoscope = {
+        ...(profile.horoscope || {}),
+        ...updateData.horoscope,
+      };
+    }
+    if (updateData.familyBackground && typeof updateData.familyBackground === 'object') {
+      updateData.familyBackground = {
+        ...(profile.familyBackground || {}),
+        ...updateData.familyBackground,
+      };
+    }
+    if (updateData.medicalQualifications && typeof updateData.medicalQualifications === 'object') {
+      updateData.medicalQualifications = {
+        ...(profile.medicalQualifications || {}),
+        ...updateData.medicalQualifications,
       };
     }
 

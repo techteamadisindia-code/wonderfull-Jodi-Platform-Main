@@ -42,31 +42,66 @@ export interface ProfileCard {
     formattedAddress?: string;
     [key: string]: any;
   };
+  familyBackground?: {
+    familyType?: string;
+    familyStatus?: string;
+    familyValues?: string;
+    fatherName?: string;
+    fatherProfession?: string;
+    fatherOccupation?: string;
+    motherName?: string;
+    motherProfession?: string;
+    motherOccupation?: string;
+    familyLocation?: string;
+    aboutFamily?: string;
+    siblings?: string | number;
+    siblingsDetails?: string;
+    [key: string]: any;
+  };
   medicalQualifications?: {
     undergraduate?: Array<{
-      qualification: string;
+      qualification?: string;
+      degree?: string;
       specialization?: string;
       college?: string;
+      university?: string;
       institution?: string;
       completionYear?: string;
+      passingYear?: number | string;
       status?: string;
+      [key: string]: any;
     }>;
     postgraduate?: Array<{
-      qualification: string;
+      qualification?: string;
+      degree?: string;
       specialization?: string;
       college?: string;
+      university?: string;
       institution?: string;
       completionYear?: string;
+      passingYear?: number | string;
       status?: string;
+      [key: string]: any;
     }>;
     doctorate?: Array<{
-      qualification: string;
+      qualification?: string;
+      degree?: string;
       specialization?: string;
       college?: string;
+      university?: string;
       institution?: string;
       completionYear?: string;
+      passingYear?: number | string;
       status?: string;
+      [key: string]: any;
     }>;
+    superSpecialization?: Array<any>;
+    fellowship?: Array<any>;
+    experienceDetails?: Array<any>;
+    registrationNumber?: string;
+    stateMedicalCouncil?: string;
+    registrationYear?: number | string;
+    [key: string]: any;
   };
 }
 

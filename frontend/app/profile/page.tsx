@@ -652,7 +652,7 @@ export default function MyProfilePage() {
       workLocation: profile.workLocation || '',
       medicalExperience: profile.medicalExperience || '',
       workType: profile.workType || '',
-      currentlyPracticing: profile.currentlyPracticing ?? true,
+      currentlyPracticing: profile.currentlyPracticing !== undefined ? profile.currentlyPracticing : undefined,
       // Medical Registration
       medicalRegistrationNumber: profile.medicalRegistrationNumber || '',
       medicalCouncil: profile.medicalCouncil || '',

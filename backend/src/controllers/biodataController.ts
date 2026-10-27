@@ -11,16 +11,17 @@ import { getPrimaryUploadDir, getUploadDirectories, findUploadedFile, isValidUpl
 // Ensure uploads/biodatas directory exists via shared upload-path utility
 const BIODATA_UPLOADS_DIR = getPrimaryUploadDir('biodatas');
 
-function calculateAge(dob: Date | string): number {
+function calculateAge(dob: Date | string): number | undefined {
+  if (!dob) return undefined;
   const birth = new Date(dob);
-  if (isNaN(birth.getTime())) return 26;
+  if (isNaN(birth.getTime())) return undefined;
   const today = new Date();
   let age = today.getFullYear() - birth.getFullYear();
   const m = today.getMonth() - birth.getMonth();
   if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
     age--;
   }
-  return Math.max(18, age);
+  return age >= 0 ? age : undefined;
 }
 
 function formatDate(dob: Date | string): string {
@@ -71,28 +72,76 @@ export async function getProfileForBiodata(req: Request, res: Response, next: Ne
 
     const currentCity = (profile.currentLocation?.cityId as any)?.name || profile.city || '';
     const currentState = (profile.currentLocation?.stateId as any)?.name || profile.state || '';
-    const currentCountry = (profile.currentLocation?.countryId as any)?.name || profile.country || 'India';
-    const religion = (profile.communityDetails?.religionId as any)?.name || profile.religion || 'Hindu';
+    const currentCountry = (profile.currentLocation?.countryId as any)?.name || profile.country || '';
+    const religion = (profile.communityDetails?.religionId as any)?.name || profile.religion || '';
     const caste = (profile.communityDetails?.casteId as any)?.name || profile.caste || '';
     const subCaste = (profile.communityDetails?.subCasteId as any)?.name || profile.subCaste || '';
-    const motherTongue = (profile.languageDetails?.motherTongueId as any)?.name || profile.motherTongue || 'Marathi';
+    const motherTongue = (profile.languageDetails?.motherTongueId as any)?.name || profile.motherTongue || '';
 
     const nativeState = (profile.nativePlaceDetails?.stateId as any)?.name || '';
     const nativeDistrict = (profile.nativePlaceDetails?.districtId as any)?.name || '';
     const nativePlaceStr = profile.nativePlaceDetails?.description || profile.nativePlace || [nativeDistrict, nativeState].filter(Boolean).join(', ');
 
     const formattedDob = profile.dob ? formatDate(profile.dob) : '';
-    const age = profile.dob ? calculateAge(profile.dob) : 26;
+    const age = profile.dob ? calculateAge(profile.dob) : undefined;
+
+    // Resolve medical qualifications & career from legacy or structured medicalQualifications
+    const medQuals = profile.medicalQualifications;
+    const ugDegree = profile.education || medQuals?.undergraduate?.[0]?.degree || '';
+    const ugCollege = profile.medicalCollege || medQuals?.undergraduate?.[0]?.college || '';
+    const ugUniversity = profile.medicalUniversity || medQuals?.undergraduate?.[0]?.university || '';
+    const ugYear = profile.graduationYear ? String(profile.graduationYear) : (medQuals?.undergraduate?.[0]?.passingYear ? String(medQuals.undergraduate[0].passingYear) : '');
+    const pgDegree = (profile.degree && profile.degree !== ugDegree) ? profile.degree : (medQuals?.postgraduate?.[0]?.degree || '');
+    const pgCollege = medQuals?.postgraduate?.[0]?.college || '';
+    const pgYear = medQuals?.postgraduate?.[0]?.passingYear ? String(medQuals.postgraduate[0].passingYear) : '';
+    const addlQual = profile.additionalQualification || medQuals?.superSpecialization?.[0]?.degree || '';
+
+    // Hospital and work location must never silently fall back to company and city
+    const currentHospital = profile.currentHospital || medQuals?.experienceDetails?.[0]?.hospital || '';
+    const workLocation = profile.workLocation || '';
+    const regNo = profile.medicalRegistrationNumber || medQuals?.registrationNumber || '';
+    const medCouncil = profile.medicalCouncil || profile.stateMedicalCouncil || medQuals?.stateMedicalCouncil || '';
+
+    // Family details: check flat & nested familyBackground
+    const famBg = profile.familyBackground;
+    const fatherName = famBg?.fatherName || '';
+    const fatherOccupation = profile.fatherOccupation || famBg?.fatherProfession || famBg?.fatherOccupation || '';
+    const motherName = famBg?.motherName || '';
+    const motherOccupation = profile.motherOccupation || famBg?.motherProfession || famBg?.motherOccupation || '';
+    const siblings = profile.siblings || famBg?.siblingsDetails || (famBg?.siblings ? String(famBg.siblings) : '');
+    const familyType = profile.familyType || famBg?.familyType || '';
+    const familyValues = profile.familyValues || famBg?.familyValues || '';
+    const familyStatus = profile.familyStatus || famBg?.familyStatus || '';
+    const familyLocation = profile.familyLocation || famBg?.familyLocation || '';
+
+    // Lifestyle & Diet: preserve true data without synthetic defaults
+    const diet = profile.lifestyleInterests?.diet || profile.foodPreference || '';
+    const smoking = profile.lifestyleInterests?.smoking || profile.smoking || '';
+    const drinking = profile.lifestyleInterests?.drinking || profile.drinking || '';
+    const hobbies = profile.lifestyleInterests?.hobbies || profile.hobbies || [];
+    const languagesKnown = profile.lifestyleInterests?.languages || (profile.languagesKnown?.length ? profile.languagesKnown : (motherTongue ? [motherTongue] : []));
+
+    // Horoscope: never default to Non-Manglik
+    const manglik = profile.horoscope?.manglik || '';
+
+    // Partner preferences: never invent ranges
+    const prefMinAge = profile.partnerPreferences?.preferredAgeMin || profile.partnerPreferences?.ageMin;
+    const prefMaxAge = profile.partnerPreferences?.preferredAgeMax || profile.partnerPreferences?.ageMax;
+    const preferredAge = (prefMinAge && prefMaxAge) ? `${prefMinAge} - ${prefMaxAge} Years` : '';
+
+    const prefMinH = profile.partnerPreferences?.preferredHeightMin || profile.partnerPreferences?.heightMin;
+    const prefMaxH = profile.partnerPreferences?.preferredHeightMax || profile.partnerPreferences?.heightMax;
+    const preferredHeight = (prefMinH || prefMaxH) ? [prefMinH, prefMaxH].filter(Boolean).join(' - ') : '';
 
     const populatedData = {
       profileId: profile._id,
       personalDetails: {
         fullName: profile.displayName || '',
-        gender: profile.gender || 'Male',
+        gender: profile.gender || '',
         dob: formattedDob,
         age: age,
-        height: profile.height || `5' 8"`,
-        maritalStatus: profile.maritalStatus || 'Never Married',
+        height: profile.height || '',
+        maritalStatus: profile.maritalStatus || '',
         religion: religion,
         caste: caste,
         subCaste: subCaste,
@@ -106,45 +155,45 @@ export async function getProfileForBiodata(req: Request, res: Response, next: Ne
         formattedLocation: [currentCity, currentState].filter(Boolean).join(', '),
       },
       education: {
-        primaryQualification: profile.education || 'MBBS',
-        college: profile.medicalCollege || '',
-        university: profile.medicalUniversity || '',
-        graduationYear: profile.graduationYear || '',
-        postgraduateQualification: profile.degree && profile.degree !== profile.education ? profile.degree : '',
-        pgCollege: '',
-        pgYear: '',
-        additionalQualification: profile.additionalQualification || '',
+        primaryQualification: ugDegree,
+        college: ugCollege,
+        university: ugUniversity,
+        graduationYear: ugYear,
+        postgraduateQualification: pgDegree,
+        pgCollege: pgCollege,
+        pgYear: pgYear,
+        additionalQualification: addlQual,
       },
       medicalCareer: {
-        occupation: 'Doctor',
-        specialization: profile.profession || 'General Physician',
-        designation: profile.currentRole || 'Consultant Specialist',
-        currentHospital: profile.currentHospital || profile.company || '',
-        workLocation: profile.workLocation || currentCity,
+        occupation: profile.occupation || profile.profession || '',
+        specialization: profile.profession || profile.specialization || '',
+        designation: profile.currentRole || profile.designation || '',
+        currentHospital: currentHospital,
+        workLocation: workLocation,
         experience: profile.medicalExperience || '',
-        practiceType: profile.workType || 'Hospital Consultant',
+        practiceType: profile.workType || '',
         annualIncome: profile.annualIncome || '',
-        medicalRegistrationNumber: profile.medicalRegistrationNumber || '',
-        medicalCouncil: profile.medicalCouncil || '',
+        medicalRegistrationNumber: regNo,
+        medicalCouncil: medCouncil,
       },
       family: {
-        fatherName: '',
-        fatherOccupation: profile.fatherOccupation || '',
-        motherName: '',
-        motherOccupation: profile.motherOccupation || '',
-        siblings: profile.siblings || '',
-        familyType: profile.familyType || 'Nuclear Family',
-        familyValues: profile.familyValues || 'Moderate',
-        familyStatus: profile.familyStatus || 'Upper Middle Class',
+        fatherName: fatherName,
+        fatherOccupation: fatherOccupation,
+        motherName: motherName,
+        motherOccupation: motherOccupation,
+        siblings: siblings,
+        familyType: familyType,
+        familyValues: familyValues,
+        familyStatus: familyStatus,
         nativePlace: nativePlaceStr,
-        familyLocation: profile.familyLocation || currentState,
+        familyLocation: familyLocation,
       },
       lifestyle: {
-        diet: profile.lifestyleInterests?.diet || profile.foodPreference || 'Vegetarian',
-        smoking: profile.lifestyleInterests?.smoking || profile.smoking || 'Non-Smoker',
-        drinking: profile.lifestyleInterests?.drinking || profile.drinking || 'Non-Drinker',
-        hobbies: profile.lifestyleInterests?.hobbies || profile.hobbies || [],
-        languagesKnown: profile.lifestyleInterests?.languages || [motherTongue, 'English'],
+        diet: diet,
+        smoking: smoking,
+        drinking: drinking,
+        hobbies: hobbies,
+        languagesKnown: languagesKnown,
       },
       horoscope: {
         dob: formattedDob,
@@ -153,26 +202,23 @@ export async function getProfileForBiodata(req: Request, res: Response, next: Ne
         rashi: profile.horoscope?.rashi || '',
         nakshatra: profile.horoscope?.nakshatra || '',
         lagna: profile.horoscope?.lagna || '',
-        manglik: profile.horoscope?.manglik || 'Non-Manglik',
+        manglik: manglik,
         gotra: profile.horoscope?.gotra || '',
         pada: profile.horoscope?.pada || '',
-        gana: '',
-        nadi: '',
+        gana: profile.horoscope?.gana || '',
+        nadi: profile.horoscope?.nadi || '',
       },
       partnerPreferences: {
-        preferredAge:
-          profile.partnerPreferences?.preferredAgeMin && profile.partnerPreferences?.preferredAgeMax
-            ? `${profile.partnerPreferences.preferredAgeMin} - ${profile.partnerPreferences.preferredAgeMax} Years`
-            : '24 - 32 Years',
-        preferredHeight: `5' 2" - 5' 9"`,
-        preferredLocation: profile.partnerPreferences?.preferredLocation || 'Anywhere in India',
-        preferredEducation: profile.partnerPreferences?.preferredQualification || 'MBBS / MD / MS / Medical Specialist',
-        preferredSpecialization: profile.partnerPreferences?.preferredSpecialization || 'Any Medical Specialization',
-        preferredMaritalStatus: profile.partnerPreferences?.preferredMaritalStatus || 'Never Married',
-        otherExpectations: profile.partnerPreferences?.otherPreferences || '',
+        preferredAge: preferredAge,
+        preferredHeight: preferredHeight,
+        preferredLocation: profile.partnerPreferences?.preferredLocation || '',
+        preferredEducation: profile.partnerPreferences?.preferredQualification || '',
+        preferredSpecialization: profile.partnerPreferences?.preferredSpecialization || '',
+        preferredMaritalStatus: profile.partnerPreferences?.preferredMaritalStatus || '',
+        otherExpectations: profile.partnerPreferences?.otherPreferences || profile.partnerPreferences?.otherExpectations || '',
       },
       contactDetails: {
-        contactPerson: 'Parents / Candidate',
+        contactPerson: '',
         phone: '',
         email: '',
         address: [currentCity, currentState].filter(Boolean).join(', '),

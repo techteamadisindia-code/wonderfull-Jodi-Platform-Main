@@ -28,13 +28,18 @@ if (isStagingMode) {
     }
   }
 } else {
-  // Load environment variables if backend/.env is present (for local testing / production)
-  const backendEnvPath = path.join(__dirname, 'backend', '.env');
-  if (fs.existsSync(backendEnvPath)) {
-    try {
-      require('dotenv').config({ path: backendEnvPath });
-    } catch (e) {
-      // dotenv optional
+  // Load environment variables if backend/.env or root .env is present (for local testing / Hostinger production)
+  const envCandidates = [
+    path.join(__dirname, 'backend', '.env'),
+    path.join(__dirname, '.env'),
+  ];
+  for (const envPath of envCandidates) {
+    if (fs.existsSync(envPath)) {
+      try {
+        require('dotenv').config({ path: envPath, override: false });
+      } catch (e) {
+        // dotenv optional
+      }
     }
   }
 }

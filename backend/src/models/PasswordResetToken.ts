@@ -1,7 +1,7 @@
-import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
+import mongoose, { createPrismaModelAdapter, Document, Schema } from '../db/prismaBridge';
 
 export interface IPasswordResetToken extends Document {
-  user: Types.ObjectId;
+  user: mongoose.Types.ObjectId;
   tokenHash: string;
   expiresAt: Date;
   isUsed: boolean;

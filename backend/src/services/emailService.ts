@@ -8,30 +8,150 @@ interface EmailOptions {
   from?: string;
 }
 
-export function getEmailConfig() {
+export type SenderSource = 'EXPLICIT_CONFIG' | 'INHERITED_FROM_USER' | 'DEFAULT_FALLBACK';
+
+export interface EmailConfig {
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+  from: string;
+  senderSource: SenderSource;
+  secure: boolean;
+}
+
+export interface EmailConfigDiagnostics {
+  isConfigured: boolean;
+  missingVariables: string[];
+  hostPresent: boolean;
+  port: number;
+  userPresent: boolean;
+  passPresent: boolean;
+  fromPresent: boolean;
+  senderSource: SenderSource;
+  senderStatus: string;
+  resolvedFrom: string;
+  secure: boolean;
+}
+
+export function formatSenderStatus(senderSource: SenderSource): string {
+  switch (senderSource) {
+    case 'EXPLICIT_CONFIG':
+      return '[CONFIGURED]';
+    case 'INHERITED_FROM_USER':
+      return '[INHERITED FROM EMAIL_USER]';
+    case 'DEFAULT_FALLBACK':
+    default:
+      return '[DEFAULT: no-reply@wonderfuljodi.com]';
+  }
+}
+
+export function getEmailConfig(): EmailConfig {
+  const host = (process.env.EMAIL_HOST || process.env.SMTP_HOST || process.env.MAIL_HOST || '').trim();
+  const port = Number(process.env.EMAIL_PORT || process.env.SMTP_PORT || process.env.MAIL_PORT) || 587;
+  const user = (process.env.EMAIL_USER || process.env.SMTP_USER || process.env.MAIL_USERNAME || '').trim();
+  const pass = (process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.MAIL_PASSWORD || '').trim();
+
+  const explicitFrom = (
+    process.env.EMAIL_FROM ||
+    process.env.SMTP_FROM ||
+    process.env.MAIL_FROM ||
+    ''
+  ).trim();
+
+  let from: string;
+  let senderSource: SenderSource;
+
+  if (explicitFrom) {
+    from = explicitFrom;
+    senderSource = 'EXPLICIT_CONFIG';
+  } else if (user) {
+    from = user;
+    senderSource = 'INHERITED_FROM_USER';
+  } else {
+    from = 'no-reply@wonderfuljodi.com';
+    senderSource = 'DEFAULT_FALLBACK';
+  }
+
+  const rawSecure = process.env.EMAIL_SECURE || process.env.SMTP_SECURE;
+  const isExplicitSecure = rawSecure !== undefined ? rawSecure.trim().toLowerCase() : undefined;
+  const secure = isExplicitSecure !== undefined
+    ? (isExplicitSecure === 'true' || isExplicitSecure === '1' || isExplicitSecure === 'yes')
+    : (port === 465);
+
   return {
-    host: process.env.EMAIL_HOST || process.env.SMTP_HOST || process.env.MAIL_HOST || '',
-    port: Number(process.env.EMAIL_PORT || process.env.SMTP_PORT || process.env.MAIL_PORT) || 587,
-    user: process.env.EMAIL_USER || process.env.SMTP_USER || process.env.MAIL_USERNAME || '',
-    pass: process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.MAIL_PASSWORD || '',
-    from:
-      process.env.EMAIL_FROM ||
-      process.env.SMTP_FROM ||
-      process.env.MAIL_FROM ||
-      process.env.EMAIL_USER ||
-      process.env.SMTP_USER ||
-      process.env.MAIL_USERNAME ||
-      'no-reply@wonderfuljodi.com',
+    host,
+    port,
+    user,
+    pass,
+    from,
+    senderSource,
+    secure,
   };
 }
 
-export async function verifyEmailTransporter(): Promise<{ success: boolean; message: string; code?: string }> {
+export function formatSenderAddress(rawFrom: string, defaultDisplayName: string = 'Wonderful Jodi Matrimony'): string {
+  if (!rawFrom || typeof rawFrom !== 'string') {
+    return `"${defaultDisplayName}" <no-reply@wonderfuljodi.com>`;
+  }
+
+  const trimmed = rawFrom.trim();
+  if (!trimmed) {
+    return `"${defaultDisplayName}" <no-reply@wonderfuljodi.com>`;
+  }
+
+  // If already contains angle brackets '<email@domain.com>'
+  const angleMatch = trimmed.match(/^(.*)<([^>]+)>$/);
+  if (angleMatch) {
+    const rawDisplayName = angleMatch[1].trim().replace(/^["']+|["']+$/g, '').trim();
+    const emailAddress = angleMatch[2].trim().replace(/^["']+|["']+$/g, '').trim();
+    const effectiveDisplayName = rawDisplayName || defaultDisplayName;
+    return `"${effectiveDisplayName}" <${emailAddress}>`;
+  }
+
+  // Plain email address (strip any accidental surrounding quotes)
+  const cleanEmail = trimmed.replace(/^["']+|["']+$/g, '').trim();
+  return `"${defaultDisplayName}" <${cleanEmail}>`;
+}
+
+export function getEmailConfigDiagnostics(): EmailConfigDiagnostics {
   const config = getEmailConfig();
-  if (!config.host || !config.user || !config.pass) {
+  const missing: string[] = [];
+
+  if (!config.host) missing.push('EMAIL_HOST');
+  if (!config.user) missing.push('EMAIL_USER');
+  if (!config.pass) missing.push('EMAIL_PASS');
+
+  return {
+    isConfigured: missing.length === 0,
+    missingVariables: missing,
+    hostPresent: Boolean(config.host),
+    port: config.port,
+    userPresent: Boolean(config.user),
+    passPresent: Boolean(config.pass),
+    fromPresent: config.senderSource === 'EXPLICIT_CONFIG',
+    senderSource: config.senderSource,
+    senderStatus: formatSenderStatus(config.senderSource),
+    resolvedFrom: formatSenderAddress(config.from),
+    secure: config.secure,
+  };
+}
+
+export async function verifyEmailTransporter(): Promise<{
+  success: boolean;
+  message: string;
+  code?: string;
+  diagnostics: EmailConfigDiagnostics;
+}> {
+  const diagnostics = getEmailConfigDiagnostics();
+  const config = getEmailConfig();
+
+  if (!diagnostics.isConfigured) {
     return {
       success: false,
-      message: 'SMTP credentials (EMAIL_HOST, EMAIL_USER, EMAIL_PASS) are not configured in backend/.env.',
+      message: `SMTP credentials missing in environment: ${diagnostics.missingVariables.join(', ')}`,
       code: 'ENV_CONFIG_MISSING',
+      diagnostics,
     };
   }
 
@@ -39,7 +159,8 @@ export async function verifyEmailTransporter(): Promise<{ success: boolean; mess
     const transporter = nodemailer.createTransport({
       host: config.host,
       port: config.port,
-      secure: config.port === 465,
+      secure: config.secure,
+      requireTLS: !config.secure && (config.port === 587 || process.env.EMAIL_REQUIRE_TLS === 'true'),
       auth: {
         user: config.user,
         pass: config.pass,
@@ -50,13 +171,17 @@ export async function verifyEmailTransporter(): Promise<{ success: boolean; mess
     await transporter.verify();
     return {
       success: true,
-      message: `SMTP connection and authentication verified successfully with ${config.host}:${config.port}`,
+      message: `SMTP connection and authentication verified successfully with ${config.host}:${config.port} (secure: ${config.secure})`,
+      diagnostics,
     };
   } catch (err: any) {
+    const rawMsg = err?.message || 'SMTP verification failed';
+    const sanitizedMsg = config.pass ? rawMsg.split(config.pass).join('[REDACTED]') : rawMsg;
     return {
       success: false,
-      message: `SMTP verification failed: ${err.message}`,
+      message: `SMTP verification failed: ${sanitizedMsg}`,
       code: err.code || 'ECONNECTION',
+      diagnostics,
     };
   }
 }
@@ -70,11 +195,12 @@ export interface SendMailResult {
 }
 
 export async function sendMail(emailOptions: EmailOptions): Promise<SendMailResult> {
+  const diagnostics = getEmailConfigDiagnostics();
   const config = getEmailConfig();
 
-  if (!config.host || !config.user || !config.pass) {
+  if (!diagnostics.isConfigured) {
     console.warn('\n--- EMAIL DISPATCH STATUS ---');
-    console.warn('Email provider: NOT_CONFIGURED (EMAIL_HOST, EMAIL_USER, or EMAIL_PASS is empty in backend/.env)');
+    console.warn(`Email provider: NOT_CONFIGURED (Missing: ${diagnostics.missingVariables.join(', ')})`);
     console.warn('SMTP: not connected');
     console.warn('Email send result: FAILED (not delivered)');
     console.warn(`Recipient: ${emailOptions.to}`);
@@ -83,7 +209,7 @@ export async function sendMail(emailOptions: EmailOptions): Promise<SendMailResu
     return {
       success: false,
       delivered: false,
-      error: 'SMTP credentials (EMAIL_HOST, EMAIL_USER, EMAIL_PASS) are not configured in backend/.env',
+      error: `SMTP credentials are not configured in environment (missing: ${diagnostics.missingVariables.join(', ')})`,
       code: 'SMTP_NOT_CONFIGURED',
     };
   }
@@ -92,7 +218,8 @@ export async function sendMail(emailOptions: EmailOptions): Promise<SendMailResu
     const transporter = nodemailer.createTransport({
       host: config.host,
       port: config.port,
-      secure: config.port === 465,
+      secure: config.secure,
+      requireTLS: !config.secure && (config.port === 587 || process.env.EMAIL_REQUIRE_TLS === 'true'),
       auth: {
         user: config.user,
         pass: config.pass,
@@ -100,8 +227,12 @@ export async function sendMail(emailOptions: EmailOptions): Promise<SendMailResu
       connectionTimeout: 15000,
     });
 
+    const resolvedFrom = emailOptions.from
+      ? formatSenderAddress(emailOptions.from)
+      : formatSenderAddress(config.from);
+
     const info = await transporter.sendMail({
-      from: emailOptions.from || `"Wonderful Jodi Matrimony" <${config.from}>`,
+      from: resolvedFrom,
       to: emailOptions.to,
       subject: emailOptions.subject,
       text: emailOptions.text,
@@ -122,15 +253,18 @@ export async function sendMail(emailOptions: EmailOptions): Promise<SendMailResu
       messageId: info.messageId,
     };
   } catch (err: any) {
+    const rawMsg = err?.message || 'Failed to send email';
+    const sanitizedMsg = config.pass ? rawMsg.split(config.pass).join('[REDACTED]') : rawMsg;
+
     console.error('\n--- EMAIL DISPATCH ERROR ---');
     console.error(`Email provider: SMTP (${config.host}:${config.port})`);
     console.error(`SMTP error code: ${err.code || 'UNKNOWN'}`);
-    console.error(`SMTP error message: ${err.message}`);
+    console.error(`SMTP error message: ${sanitizedMsg}`);
     console.error('----------------------------\n');
     return {
       success: false,
       delivered: false,
-      error: err.message || 'Failed to send email',
+      error: sanitizedMsg,
       code: err.code || 'SMTP_SEND_FAILED',
     };
   }

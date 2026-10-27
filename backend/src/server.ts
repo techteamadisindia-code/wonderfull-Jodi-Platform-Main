@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from './db/client';
-import { verifyEmailTransporter } from './services/emailService';
+import { verifyEmailTransporter, getEmailConfigDiagnostics } from './services/emailService';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -222,24 +222,26 @@ async function startServer() {
       `  http://localhost:${PORT}/api/health`
     );
 
-    console.log('Email / SMTP:');
+    console.log('Email / SMTP Diagnostics:');
 
     try {
-      const smtpStatus =
-        await verifyEmailTransporter();
+      const diag = getEmailConfigDiagnostics();
+      console.log(`  EMAIL_HOST:    ${diag.hostPresent ? '[CONFIGURED]' : '[MISSING]'}`);
+      console.log(`  EMAIL_PORT:    ${diag.port} (secure: ${diag.secure})`);
+      console.log(`  EMAIL_USER:    ${diag.userPresent ? '[CONFIGURED]' : '[MISSING]'}`);
+      console.log(`  EMAIL_PASS:    ${diag.passPresent ? '[CONFIGURED]' : '[MISSING]'}`);
+      console.log(`  EMAIL_FROM:    ${diag.senderStatus}`);
+
+      const smtpStatus = await verifyEmailTransporter();
 
       if (smtpStatus.success) {
-        console.log(
-          `  Status: ACTIVE (${smtpStatus.message})`
-        );
+        console.log(`  Status:        ACTIVE (${smtpStatus.message})`);
       } else {
-        console.log(
-          `  Status: NOT CONFIGURED (${smtpStatus.message})`
-        );
+        console.log(`  Status:        NOT CONFIGURED / FAILED (${smtpStatus.message})`);
       }
     } catch (error: any) {
       console.log(
-        `  Status: NOT CONFIGURED (${error?.message || 'SMTP unavailable'})`
+        `  Status:        ERROR (${error?.message || 'SMTP unavailable'})`
       );
     }
 

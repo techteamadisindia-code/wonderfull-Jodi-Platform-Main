@@ -777,6 +777,45 @@ export async function getActiveSessions(req: AuthRequest, res: Response, next: N
   }
 }
 
+export const PASSWORD_RESET_EXPIRY_MINUTES = 30;
+export const PASSWORD_RESET_EXPIRY_MS = PASSWORD_RESET_EXPIRY_MINUTES * 60 * 1000;
+
+export function calculatePasswordResetExpiry(now: Date = new Date()): Date {
+  return new Date(now.getTime() + PASSWORD_RESET_EXPIRY_MS);
+}
+
+export interface PasswordResetTokenVerification {
+  isValid: boolean;
+  errorReason?: 'NOT_FOUND_OR_USED' | 'EXPIRED';
+  message: string;
+}
+
+export function evaluatePasswordResetTokenDoc(
+  tokenDoc: { isUsed?: boolean; usedAt?: Date | null; expiresAt?: Date | null } | null | undefined,
+  now: Date = new Date()
+): PasswordResetTokenVerification {
+  if (!tokenDoc || tokenDoc.isUsed || Boolean(tokenDoc.usedAt)) {
+    return {
+      isValid: false,
+      errorReason: 'NOT_FOUND_OR_USED',
+      message: 'This reset link is invalid or has already been used.',
+    };
+  }
+
+  if (!tokenDoc.expiresAt || now >= tokenDoc.expiresAt) {
+    return {
+      isValid: false,
+      errorReason: 'EXPIRED',
+      message: 'This reset link has expired. Please request a new one.',
+    };
+  }
+
+  return {
+    isValid: true,
+    message: 'Token is valid.',
+  };
+}
+
 export async function forgotPassword(req: Request, res: Response, next: NextFunction) {
   try {
     const data = forgotPasswordSchema.parse(req.body);
@@ -794,7 +833,7 @@ export async function forgotPassword(req: Request, res: Response, next: NextFunc
       // Generate cryptographically secure random 32-byte token
       const rawToken = generateRandomToken(32);
       const tokenHash = hashToken(rawToken);
-      const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+      const expiresAt = calculatePasswordResetExpiry(); // 30 minutes
 
       await PasswordResetToken.create({
         user: user._id,
@@ -845,20 +884,15 @@ export async function validateResetToken(req: Request, res: Response, next: Next
 
     const tokenHash = hashToken(rawToken.trim());
     const tokenDoc = await PasswordResetToken.findOne({ tokenHash });
+    const evaluation = evaluatePasswordResetTokenDoc(tokenDoc);
 
-    if (!tokenDoc || tokenDoc.isUsed || tokenDoc.usedAt) {
-      return res.status(400).json({ success: false, message: 'This reset link is invalid or has already been used.' });
-    }
-
-    if (new Date() > tokenDoc.expiresAt) {
-      return res
-        .status(400)
-        .json({ success: false, message: 'This reset link has expired. Please request a new one.' });
+    if (!evaluation.isValid) {
+      return res.status(400).json({ success: false, message: evaluation.message });
     }
 
     return res.json({
       success: true,
-      message: 'Token is valid.',
+      message: evaluation.message,
     });
   } catch (error) {
     next(error);
@@ -872,15 +906,10 @@ export async function resetPassword(req: Request, res: Response, next: NextFunct
     const tokenHash = hashToken(rawToken);
 
     const tokenDoc = await PasswordResetToken.findOne({ tokenHash });
+    const evaluation = evaluatePasswordResetTokenDoc(tokenDoc);
 
-    if (!tokenDoc || tokenDoc.isUsed || tokenDoc.usedAt) {
-      return res.status(400).json({ success: false, message: 'This reset link is invalid or has already been used.' });
-    }
-
-    if (new Date() > tokenDoc.expiresAt) {
-      return res
-        .status(400)
-        .json({ success: false, message: 'This reset link has expired. Please request a new one.' });
+    if (!tokenDoc || !evaluation.isValid) {
+      return res.status(400).json({ success: false, message: evaluation.message });
     }
 
     const user = await User.findById(tokenDoc.user);

@@ -17,6 +17,21 @@ let isEnvInitialized = false;
  *    - Normal production / development environment files (`.env`) are loaded.
  * 3. Idempotent: can be safely imported/invoked multiple times.
  */
+/**
+ * Resolves deterministic environment file paths based on the module directory.
+ * When running from either `backend/src/config` (ts-node) or `backend/dist/config` (compiled JS):
+ * - Backend environment file:      path.resolve(configDir, '../../.env')   -> <project_root>/backend/.env
+ * - Project-root environment file: path.resolve(configDir, '../../../.env') -> <project_root>/.env
+ */
+export function getDeterministicEnvPaths(configDir: string = __dirname): {
+  backendEnvPath: string;
+  projectRootEnvPath: string;
+} {
+  const backendEnvPath = path.resolve(configDir, '../../.env');
+  const projectRootEnvPath = path.resolve(configDir, '../../../.env');
+  return { backendEnvPath, projectRootEnvPath };
+}
+
 export function initEnvironment(): void {
   if (isEnvInitialized) {
     return;
@@ -31,11 +46,10 @@ export function initEnvironment(): void {
     process.env.NODE_ENV = 'staging';
 
     const stagingCandidates = [
+      path.resolve(__dirname, '../../.env.staging'),
+      path.resolve(__dirname, '../../../.env.staging'),
       path.resolve(process.cwd(), 'backend', '.env.staging'),
       path.resolve(process.cwd(), '.env.staging'),
-      path.resolve(__dirname, '..', '.env.staging'),
-      path.resolve(__dirname, '..', '..', '.env.staging'),
-      path.resolve(__dirname, '..', '..', 'backend', '.env.staging'),
     ];
 
     let foundStagingPath: string | null = null;
@@ -67,17 +81,24 @@ export function initEnvironment(): void {
     process.env.NODE_ENV = 'development';
   }
 
-  dotenv.config();
-  const envCandidates = [
-    path.resolve(process.cwd(), 'backend', '.env'),
-    path.resolve(__dirname, '..', '.env'),
-    path.resolve(__dirname, '..', '..', '.env'),
-    path.resolve(__dirname, '..', '..', 'backend', '.env'),
-  ];
-  for (const envPath of envCandidates) {
-    if (fs.existsSync(envPath)) {
-      dotenv.config({ path: envPath });
-    }
+  // Precedence order:
+  // 1. Existing process.env variables (e.g. from Hostinger runtime) take highest precedence.
+  // 2. backend/.env takes precedence over root .env.
+  // 3. Root .env provides fallback values only (override: false).
+  // Note: Bare dotenv.config() is intentionally omitted so root .env is never loaded before backend/.env.
+  // Deterministic paths based on module directory:
+  // - Backend environment file:      path.resolve(__dirname, '../../.env')   (backend/.env)
+  // - Project-root environment file: path.resolve(__dirname, '../../../.env') (root .env)
+  const { backendEnvPath, projectRootEnvPath } = getDeterministicEnvPaths(__dirname);
+
+  // 1. Load canonical backend/.env first (if present)
+  if (fs.existsSync(backendEnvPath)) {
+    dotenv.config({ path: backendEnvPath, override: false });
+  }
+
+  // 2. Load canonical project-root .env second as fallback (if present and distinct)
+  if (fs.existsSync(projectRootEnvPath) && projectRootEnvPath !== backendEnvPath) {
+    dotenv.config({ path: projectRootEnvPath, override: false });
   }
 }
 

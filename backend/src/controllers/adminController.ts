@@ -34,6 +34,11 @@ import { validateDateOfBirth, validateMedicalQualification } from '../utils/doct
 import { getFormattedVisitDate } from '../services/visitTrackingService';
 import { detectCompliance } from '../services/complianceDetector';
 import { findCanonicalProfile } from './profileController';
+import { prisma } from '../db/client';
+import {
+  withAdminLifecycleGuard,
+  AdminLifecycleLockError,
+} from '../utils/adminLifecycleGuard';
 
 // Helper for audit logging
 async function logAdminAction(
@@ -493,7 +498,7 @@ export async function getDashboardRevenue(req: AuthRequest, res: Response, next:
 // 2. User Management
 export async function getUsers(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const { search, role, status, page = 1, limit = 25 } = req.query;
+    const { search, role, status, gender, registrationStatus, page = 1, limit = 25 } = req.query;
     const query: any = {};
 
     if (role && role !== 'all') {
@@ -503,6 +508,83 @@ export async function getUsers(req: AuthRequest, res: Response, next: NextFuncti
       query.isActive = true;
     } else if (status === 'inactive') {
       query.isActive = false;
+    }
+
+    // Gender filter support (across Profile and User records)
+    let genderUserIds: string[] | null = null;
+    let genderUserIdsNin: string[] | null = null;
+    if (gender && gender !== 'all') {
+      if (gender === 'not_recorded' || gender === 'Not recorded') {
+        const [profilesWithGender, usersWithGender] = await Promise.all([
+          Profile.find({ gender: { $exists: true, $ne: null } }).select('user').lean(),
+          User.find({ gender: { $exists: true, $ne: null } }).select('_id').lean(),
+        ]);
+        const recordedSet = new Set([
+          ...profilesWithGender.map((p: any) => String(p.user)),
+          ...usersWithGender.map((u: any) => String(u._id)),
+        ]);
+        genderUserIdsNin = Array.from(recordedSet);
+      } else {
+        const safeGenderRegex = new RegExp(`^${escapeRegex(String(gender))}$`, 'i');
+        const [profilesWithGender, usersWithGender] = await Promise.all([
+          Profile.find({ gender: safeGenderRegex }).select('user').lean(),
+          User.find({ gender: safeGenderRegex }).select('_id').lean(),
+        ]);
+        const genderSet = new Set([
+          ...profilesWithGender.map((p: any) => String(p.user)),
+          ...usersWithGender.map((u: any) => String(u._id)),
+        ]);
+        genderUserIds = Array.from(genderSet);
+      }
+    }
+
+    // Registration status filter support
+    let regStatusUserIdsIn: string[] | null = null;
+    let regStatusUserIdsNin: string[] | null = null;
+    if (registrationStatus && registrationStatus !== 'all') {
+      const [completedProfiles, completedRegs] = await Promise.all([
+        Profile.distinct('user'),
+        Registration.distinct('user', { status: 'COMPLETED', isDeleted: false }),
+      ]);
+      const completedUserSet = new Set([
+        ...completedProfiles.map((id: any) => String(id)),
+        ...completedRegs.filter(Boolean).map((id: any) => String(id)),
+      ]);
+
+      if (registrationStatus === 'complete') {
+        regStatusUserIdsIn = Array.from(completedUserSet);
+      } else if (registrationStatus === 'incomplete') {
+        const activeDrafts = await Registration.distinct('user', {
+          status: { $in: ['STARTED', 'IN_PROGRESS', 'ABANDONED'] },
+          isDeleted: false,
+        });
+        regStatusUserIdsIn = activeDrafts.filter((id) => !completedUserSet.has(String(id))).map(String);
+      } else if (registrationStatus === 'pending') {
+        const allRegisteredOrDrafted = await Promise.all([
+          Profile.distinct('user'),
+          Registration.distinct('user', { isDeleted: false }),
+        ]);
+        const anyActivitySet = new Set([
+          ...allRegisteredOrDrafted[0].map(String),
+          ...allRegisteredOrDrafted[1].filter(Boolean).map(String),
+        ]);
+        regStatusUserIdsNin = Array.from(anyActivitySet);
+      }
+    }
+
+    // Combine ID-based filters
+    const idFilters: any[] = [];
+    if (genderUserIds !== null) {
+      idFilters.push({ _id: { $in: genderUserIds } });
+    }
+    if (genderUserIdsNin !== null) {
+      idFilters.push({ _id: { $nin: genderUserIdsNin } });
+    }
+    if (regStatusUserIdsIn !== null) {
+      idFilters.push({ _id: { $in: regStatusUserIdsIn } });
+    }
+    if (regStatusUserIdsNin !== null) {
+      idFilters.push({ _id: { $nin: regStatusUserIdsNin } });
     }
 
     if (search) {
@@ -517,6 +599,14 @@ export async function getUsers(req: AuthRequest, res: Response, next: NextFuncti
         orConditions.push({ _id: searchStr });
       }
       query.$or = orConditions;
+    }
+
+    if (idFilters.length > 0) {
+      if (query.$and) {
+        query.$and.push(...idFilters);
+      } else {
+        query.$and = idFilters;
+      }
     }
 
     const pageSize = Math.min(100, Math.max(1, Number(limit) || 25));
@@ -535,18 +625,22 @@ export async function getUsers(req: AuthRequest, res: Response, next: NextFuncti
 
     const userIds = rawUsers.map((u: any) => u._id);
 
-    // Batch fetch associated profiles and active memberships to enrich user rows efficiently
-    const [profiles, subscriptions] = await Promise.all([
+    // Batch fetch associated profiles, active memberships, and registrations
+    const [profiles, subscriptions, registrations] = await Promise.all([
       Profile.find({ user: { $in: userIds } })
-        .select('_id user displayName primaryPhoto photos verificationStatus lastActiveAt')
+        .select('_id user candidateId displayName gender primaryPhoto photos verificationStatus lastActiveAt')
         .lean(),
       Subscription.find({ user: { $in: userIds }, status: 'ACTIVE' })
         .select('user plan')
+        .lean(),
+      Registration.find({ user: { $in: userIds }, isDeleted: false })
+        .select('user registrationId status currentStep completionPercentage')
         .lean(),
     ]);
 
     const profileMap = new Map(profiles.map((p: any) => [String(p.user), p]));
     const subscriptionMap = new Map(subscriptions.map((s: any) => [String(s.user), s]));
+    const registrationMap = new Map(registrations.map((r: any) => [String(r.user), r]));
 
     const callerId = req.user?.userId || req.user?._id || req.user?.id;
     const callerAdmin = await Admin.findOne({ user: callerId });
@@ -557,8 +651,24 @@ export async function getUsers(req: AuthRequest, res: Response, next: NextFuncti
     const users = rawUsers.map((u: any) => {
       const p = profileMap.get(String(u._id));
       const s = subscriptionMap.get(String(u._id));
+      const r = registrationMap.get(String(u._id));
+
+      // Determine real registration status
+      let regStatus: 'Complete' | 'Incomplete' | 'Pending' = 'Pending';
+      if (p || r?.status === 'COMPLETED') {
+        regStatus = 'Complete';
+      } else if (r?.status === 'STARTED' || r?.status === 'IN_PROGRESS' || r?.status === 'ABANDONED') {
+        regStatus = 'Incomplete';
+      } else {
+        regStatus = 'Pending';
+      }
+
       const userObj = {
         ...u,
+        gender: p?.gender || u.gender || null,
+        registrationStatus: regStatus,
+        registrationId: r?.registrationId || null,
+        candidateId: p?.candidateId || null,
         profileId: p?._id ? String(p._id) : undefined,
         profilePhoto: p?.primaryPhoto || p?.photos?.[0] || '',
         displayName: p?.displayName || u.fullName,
@@ -656,28 +766,185 @@ export async function updateUserStatus(req: AuthRequest, res: Response, next: Ne
 
     const { isActive, status, reason } = req.body;
     const activeValue = typeof isActive === 'boolean' ? isActive : status === 'active';
-    const user = await User.findByIdAndUpdate(
-      id,
-      { isActive: activeValue },
-      { new: true }
-    ).select('-password');
 
-    if (!user) {
+    const callerId = String(req.user?.userId || req.user?._id || req.user?.id || '');
+
+    const existingUser = await User.findById(id).select('-password');
+    if (!existingUser) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // When deactivating, immediately revoke active refresh tokens/sessions
+    // Safeguards when deactivating an account
+    if (!activeValue && existingUser.isActive) {
+      // 1. Cannot deactivate currently logged-in administrator
+      if (String(existingUser._id) === callerId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot deactivate currently logged-in administrator',
+        });
+      }
+
+      // 2. Protect Super Admin accounts from deactivation
+      const adminRecord = await Admin.findOne({ user: existingUser._id });
+      if (adminRecord?.permissions?.includes('all')) {
+        return res.status(400).json({
+          success: false,
+          message: 'Super Admin accounts are protected and cannot be deactivated',
+        });
+      }
+
+      // 3. Protect last active administrator under concurrency guard
+      if (existingUser.role === 'admin') {
+        try {
+          await withAdminLifecycleGuard(async (tx?: any) => {
+            let freshActiveAdminCount: number;
+            if (tx && typeof tx.user?.count === 'function') {
+              freshActiveAdminCount = await tx.user.count({
+                where: {
+                  role: 'admin',
+                  isActive: true,
+                  isDeleted: false,
+                },
+              });
+            } else {
+              freshActiveAdminCount = await User.countDocuments({
+                role: 'admin',
+                isActive: true,
+                isDeleted: { $ne: true },
+              });
+            }
+
+            if (freshActiveAdminCount <= 1) {
+              throw new Error('LAST_ACTIVE_ADMIN');
+            }
+
+            if (tx && typeof tx.user?.update === 'function') {
+              await tx.user.update({
+                where: { id: String(existingUser._id) },
+                data: {
+                  isActive: false,
+                  status: 'Suspended',
+                },
+              });
+              if (tx.refreshToken?.updateMany) {
+                await tx.refreshToken.updateMany({
+                  where: { userId: String(existingUser._id) },
+                  data: { isRevoked: true, isUsed: true },
+                });
+              }
+              existingUser.isActive = false;
+              existingUser.status = 'Suspended';
+            } else {
+              existingUser.isActive = false;
+              existingUser.status = 'Suspended';
+              existingUser.suspensionReason = reason ? String(reason).slice(0, 200) : 'Administrative deactivation';
+              existingUser.suspendedAt = new Date();
+              existingUser.suspendedBy = callerId;
+              await existingUser.save();
+
+              await RefreshToken.updateMany(
+                { user: existingUser._id },
+                { $set: { isRevoked: true, isUsed: true } }
+              );
+            }
+          });
+        } catch (guardErr: any) {
+          if (guardErr?.message === 'LAST_ACTIVE_ADMIN') {
+            return res.status(400).json({
+              success: false,
+              message: 'Cannot deactivate the last active administrator account',
+            });
+          }
+          if (guardErr instanceof AdminLifecycleLockError || guardErr?.code === 'LOCK_TIMEOUT') {
+            return res.status(409).json({
+              success: false,
+              message: 'Administrator status update locked due to concurrent modifications. Please retry.',
+            });
+          }
+          throw guardErr;
+        }
+
+        const adminEmail = (req as any).user?.email || 'admin@wonderfuljodi.com';
+        const reasonText = reason ? ' (Reason: ' + String(reason).slice(0, 200) + ')' : '';
+        await logAdminAction(
+          adminEmail,
+          'ACCOUNT_DEACTIVATED',
+          'Updated user ' + existingUser.email + ' status to INACTIVE' + reasonText,
+          'User',
+          String(existingUser._id)
+        );
+
+        await SecurityLog.create({
+          user: existingUser._id,
+          identifier: existingUser.email,
+          eventType: 'ADMIN_ACTION',
+          status: 'SUCCESS',
+          details: {
+            action: 'ACCOUNT_DEACTIVATED',
+            adminId: callerId,
+            reason: reason || undefined,
+          },
+        });
+
+        return res.json({
+          success: true,
+          data: existingUser,
+          message: 'Account deactivated successfully',
+        });
+      }
+    }
+
+    // Standard activation or non-admin deactivation path
+    const updatePayload: any = { isActive: activeValue };
     if (!activeValue) {
-      await RefreshToken.updateMany({ user: user._id }, { isRevoked: true, isUsed: true });
+      updatePayload.status = 'Suspended';
+      updatePayload.suspensionReason = reason ? String(reason).slice(0, 200) : 'Administrative deactivation';
+      updatePayload.suspendedAt = new Date();
+      updatePayload.suspendedBy = callerId;
+    } else {
+      updatePayload.status = 'Active';
+    }
+
+    let user: any;
+    if (prisma && typeof prisma.$transaction === 'function') {
+      user = await prisma.$transaction(async (userTx: any) => {
+        if (userTx.user?.update) {
+          await userTx.user.update({
+            where: { id },
+            data: {
+              isActive: activeValue,
+              status: activeValue ? 'Active' : 'Suspended',
+            },
+          });
+          if (!activeValue && userTx.refreshToken?.updateMany) {
+            await userTx.refreshToken.updateMany({
+              where: { userId: id },
+              data: { isRevoked: true, isUsed: true },
+            });
+          }
+          return await User.findById(id).select('-password');
+        } else {
+          const u = await User.findByIdAndUpdate(id, updatePayload, { new: true }).select('-password');
+          if (u && !activeValue) {
+            await RefreshToken.updateMany({ user: u._id }, { isRevoked: true, isUsed: true });
+          }
+          return u;
+        }
+      });
+    } else {
+      user = await User.findByIdAndUpdate(id, updatePayload, { new: true }).select('-password');
+      if (user && !activeValue) {
+        await RefreshToken.updateMany({ user: user._id }, { isRevoked: true, isUsed: true });
+      }
     }
 
     const adminEmail = (req as any).user?.email || 'admin@wonderfuljodi.com';
-    const reasonText = reason ? ` (Reason: ${String(reason).slice(0, 200)})` : '';
+    const reasonText = reason ? ' (Reason: ' + String(reason).slice(0, 200) + ')' : '';
 
     await logAdminAction(
       adminEmail,
       activeValue ? 'ACCOUNT_REACTIVATED' : 'ACCOUNT_DEACTIVATED',
-      `Updated user ${user.email} status to ${activeValue ? 'ACTIVE' : 'INACTIVE'}${reasonText}`,
+      'Updated user ' + user.email + ' status to ' + (activeValue ? 'ACTIVE' : 'INACTIVE') + reasonText,
       'User',
       String(user._id)
     );
@@ -697,7 +964,411 @@ export async function updateUserStatus(req: AuthRequest, res: Response, next: Ne
     res.json({
       success: true,
       data: user,
-      message: `Account ${activeValue ? 'reactivated' : 'deactivated'} successfully`,
+      message: 'Account ' + (activeValue ? 'reactivated' : 'deactivated') + ' successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Bulk User Account Activation / Deactivation
+ * Enforces Super Admin, self-deactivation, and last active admin protection
+ */
+export async function bulkUpdateUserStatus(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { userIds, status, isActive, reason } = req.body;
+
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'A non-empty array of userIds is required for bulk status management.',
+      });
+    }
+
+    if (userIds.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: 'Bulk status update batch size cannot exceed 500 accounts per operation.',
+      });
+    }
+
+    // Require an explicit, valid target state
+    if (isActive === undefined && status === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Target state is required. Provide either "isActive" (boolean) or "status" ("active" | "deactivated").',
+      });
+    }
+
+    let activeFromFlag: boolean | undefined = undefined;
+    if (isActive !== undefined) {
+      if (typeof isActive !== 'boolean') {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid isActive value. Must be a boolean (true or false).',
+        });
+      }
+      activeFromFlag = isActive;
+    }
+
+    let activeFromStatus: boolean | undefined = undefined;
+    let canonicalStatusName: string | undefined = undefined;
+    if (status !== undefined) {
+      if (typeof status !== 'string') {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid status value. Must be a string ("active" or "deactivated").',
+        });
+      }
+
+      const normalizedStatus = status.trim().toLowerCase();
+      if (normalizedStatus === 'active') {
+        activeFromStatus = true;
+        canonicalStatusName = 'Active';
+      } else if (
+        normalizedStatus === 'deactivated' ||
+        normalizedStatus === 'inactive' ||
+        normalizedStatus === 'suspended'
+      ) {
+        activeFromStatus = false;
+        canonicalStatusName = 'Suspended';
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status "${status}". Supported values are "active" and "deactivated" (or "suspended" / "inactive").`,
+        });
+      }
+    }
+
+    // Reject ambiguous or contradictory combinations of isActive and status
+    if (activeFromFlag !== undefined && activeFromStatus !== undefined) {
+      if (activeFromFlag !== activeFromStatus) {
+        return res.status(400).json({
+          success: false,
+          message: `Contradictory state: isActive is ${activeFromFlag} but status is "${status}".`,
+        });
+      }
+    }
+
+    const targetActive: boolean = activeFromFlag !== undefined ? activeFromFlag : (activeFromStatus as boolean);
+    const targetStatus: string = canonicalStatusName || (targetActive ? 'Active' : 'Suspended');
+
+    const callerId = String(req.user?.userId || req.user?._id || req.user?.id || '');
+    const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
+
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Administrator privileges are required to perform bulk status operations.',
+      });
+    }
+
+    const successful: string[] = [];
+    const failed: Array<{ id: string; reason: string }> = [];
+
+    const uniqueIds = Array.from(new Set(userIds.map((id) => String(id).trim())));
+    const validIds: string[] = [];
+
+    for (const id of uniqueIds) {
+      if (!isValidObjectId(id)) {
+        failed.push({ id, reason: 'Invalid user ID format' });
+      } else {
+        validIds.push(id);
+      }
+    }
+
+    const targetUsers = await User.find({ _id: { $in: validIds } }).lean();
+    const targetUserMap = new Map(targetUsers.map((u: any) => [String(u._id), u]));
+
+    // Fetch Super Admin user IDs to protect them
+    const adminRecords = await Admin.find({}).lean();
+    const superAdminUserIds = new Set(
+      adminRecords
+        .filter((a: any) => a.permissions?.includes('all'))
+        .map((a: any) => String(a.user))
+    );
+
+    const eligibleIdsToUpdate: string[] = [];
+
+    for (const id of validIds) {
+      const userDoc = targetUserMap.get(id);
+
+      if (!userDoc) {
+        failed.push({ id, reason: 'User not found in system' });
+        continue;
+      }
+
+      // Safeguard 1: Do not deactivate currently logged-in administrator
+      if (!targetActive && id === callerId) {
+        failed.push({
+          id,
+          reason: 'Cannot deactivate currently logged-in administrator',
+        });
+        continue;
+      }
+
+      // Safeguard 2: Protect Super Admin accounts from deactivation
+      if (!targetActive && superAdminUserIds.has(id)) {
+        failed.push({
+          id,
+          reason: 'Super Admin accounts are protected and cannot be deactivated',
+        });
+        continue;
+      }
+
+      // If account already has target status, mark as success without needing DB write
+      if (userDoc.isActive === targetActive) {
+        successful.push(id);
+        continue;
+      }
+
+      eligibleIdsToUpdate.push(id);
+      successful.push(id);
+    }
+
+    // Apply updates to eligible accounts
+    if (eligibleIdsToUpdate.length > 0) {
+      const updateData: any = {
+        isActive: targetActive,
+        status: targetActive ? 'Active' : 'Suspended',
+      };
+      if (!targetActive) {
+        updateData.suspensionReason = reason ? String(reason).slice(0, 200) : 'Administrative bulk deactivation';
+        updateData.suspendedAt = new Date();
+        updateData.suspendedBy = callerId;
+      }
+
+      // Concurrency protection: if deactivating any active administrators, serialize via withAdminLifecycleGuard
+      const adminIdsInUpdate = !targetActive
+        ? eligibleIdsToUpdate.filter(
+            (id) => targetUserMap.get(id)?.role === 'admin' && targetUserMap.get(id)?.isActive
+          )
+        : [];
+
+      if (adminIdsInUpdate.length > 0) {
+        try {
+          await withAdminLifecycleGuard(async (tx?: any) => {
+            // Fresh active administrator query inside the serialized lock
+            let freshActiveAdminCount: number;
+            if (tx && typeof tx.user?.count === 'function') {
+              freshActiveAdminCount = await tx.user.count({
+                where: {
+                  role: 'admin',
+                  isActive: true,
+                  isDeleted: false,
+                },
+              });
+            } else {
+              freshActiveAdminCount = await User.countDocuments({
+                role: 'admin',
+                isActive: true,
+                isDeleted: { $ne: true },
+              });
+            }
+
+            let availableBudget = freshActiveAdminCount;
+
+            for (const adminId of adminIdsInUpdate) {
+              if (availableBudget <= 1) {
+                // Reject deactivation: would leave system without an active administrator account
+                const uIdx = eligibleIdsToUpdate.indexOf(adminId);
+                if (uIdx > -1) eligibleIdsToUpdate.splice(uIdx, 1);
+                const sIdx = successful.indexOf(adminId);
+                if (sIdx > -1) successful.splice(sIdx, 1);
+                failed.push({
+                  id: adminId,
+                  reason: 'Cannot deactivate administrator: would leave system without an active administrator account',
+                });
+              } else {
+                availableBudget--;
+              }
+            }
+
+            if (eligibleIdsToUpdate.length > 0) {
+              if (tx && typeof tx.user?.updateMany === 'function') {
+                await tx.user.updateMany({
+                  where: { id: { in: eligibleIdsToUpdate } },
+                  data: {
+                    isActive: targetActive,
+                    status: targetStatus,
+                  },
+                });
+                if (!targetActive && tx.refreshToken?.updateMany) {
+                  await tx.refreshToken.updateMany({
+                    where: { userId: { in: eligibleIdsToUpdate } },
+                    data: { isRevoked: true, isUsed: true },
+                  });
+                }
+              } else {
+                await User.updateMany({ _id: { $in: eligibleIdsToUpdate } }, { $set: updateData });
+                if (!targetActive) {
+                  await RefreshToken.updateMany(
+                    { user: { $in: eligibleIdsToUpdate } },
+                    { $set: { isRevoked: true, isUsed: true } }
+                  );
+                }
+              }
+            }
+          });
+        } catch (guardErr: any) {
+          // Concurrency lock failure / timeout: FAIL CLOSED for all administrator accounts
+          for (const adminId of adminIdsInUpdate) {
+            const uIdx = eligibleIdsToUpdate.indexOf(adminId);
+            if (uIdx > -1) eligibleIdsToUpdate.splice(uIdx, 1);
+            const sIdx = successful.indexOf(adminId);
+            if (sIdx > -1) successful.splice(sIdx, 1);
+            failed.push({
+              id: adminId,
+              reason: 'Cannot deactivate administrator: concurrency lock acquisition failed (fail-closed)',
+            });
+          }
+
+          // Process remaining regular users in the mixed batch, ensuring atomic update & session revocation
+          if (eligibleIdsToUpdate.length > 0) {
+            try {
+              if (prisma && typeof prisma.$transaction === 'function') {
+                await prisma.$transaction(async (userTx: any) => {
+                  if (userTx.user?.updateMany) {
+                    await userTx.user.updateMany({
+                      where: { id: { in: eligibleIdsToUpdate } },
+                      data: {
+                        isActive: targetActive,
+                        status: targetStatus,
+                      },
+                    });
+                    if (!targetActive && userTx.refreshToken?.updateMany) {
+                      await userTx.refreshToken.updateMany({
+                        where: { userId: { in: eligibleIdsToUpdate } },
+                        data: { isRevoked: true, isUsed: true },
+                      });
+                    }
+                  } else {
+                    await User.updateMany({ _id: { $in: eligibleIdsToUpdate } }, { $set: updateData });
+                    if (!targetActive) {
+                      await RefreshToken.updateMany(
+                        { user: { $in: eligibleIdsToUpdate } },
+                        { $set: { isRevoked: true, isUsed: true } }
+                      );
+                    }
+                  }
+                });
+              } else {
+                await User.updateMany({ _id: { $in: eligibleIdsToUpdate } }, { $set: updateData });
+                if (!targetActive) {
+                  await RefreshToken.updateMany(
+                    { user: { $in: eligibleIdsToUpdate } },
+                    { $set: { isRevoked: true, isUsed: true } }
+                  );
+                }
+              }
+            } catch (regUserErr: any) {
+              // If regular-user mutation or session revocation fails, do NOT report success!
+              for (const regId of eligibleIdsToUpdate) {
+                const sIdx = successful.indexOf(regId);
+                if (sIdx > -1) successful.splice(sIdx, 1);
+                failed.push({
+                  id: regId,
+                  reason: 'Failed to update account status due to database error',
+                });
+              }
+              eligibleIdsToUpdate.length = 0;
+            }
+          }
+        }
+      } else {
+        // Regular user activation or deactivation - direct execution without admin lock contention
+        try {
+          if (prisma && typeof prisma.$transaction === 'function') {
+            await prisma.$transaction(async (userTx: any) => {
+              if (userTx.user?.updateMany) {
+                await userTx.user.updateMany({
+                  where: { id: { in: eligibleIdsToUpdate } },
+                  data: {
+                    isActive: targetActive,
+                    status: targetStatus,
+                  },
+                });
+                if (!targetActive && userTx.refreshToken?.updateMany) {
+                  await userTx.refreshToken.updateMany({
+                    where: { userId: { in: eligibleIdsToUpdate } },
+                    data: { isRevoked: true, isUsed: true },
+                  });
+                }
+              } else {
+                await User.updateMany({ _id: { $in: eligibleIdsToUpdate } }, { $set: updateData });
+                if (!targetActive) {
+                  await RefreshToken.updateMany(
+                    { user: { $in: eligibleIdsToUpdate } },
+                    { $set: { isRevoked: true, isUsed: true } }
+                  );
+                }
+              }
+            });
+          } else {
+            await User.updateMany({ _id: { $in: eligibleIdsToUpdate } }, { $set: updateData });
+            if (!targetActive) {
+              await RefreshToken.updateMany(
+                { user: { $in: eligibleIdsToUpdate } },
+                { $set: { isRevoked: true, isUsed: true } }
+              );
+            }
+          }
+        } catch (regUserErr: any) {
+          for (const regId of eligibleIdsToUpdate) {
+            const sIdx = successful.indexOf(regId);
+            if (sIdx > -1) successful.splice(sIdx, 1);
+            failed.push({
+              id: regId,
+              reason: 'Failed to update account status due to database error',
+            });
+          }
+          eligibleIdsToUpdate.length = 0;
+        }
+      }
+
+      if (eligibleIdsToUpdate.length > 0) {
+        const actionType = targetActive ? 'BULK_ACCOUNT_REACTIVATED' : 'BULK_ACCOUNT_DEACTIVATED';
+        const reasonText = reason ? ' (Reason: ' + String(reason).slice(0, 200) + ')' : '';
+        await logAdminAction(
+          adminEmail,
+          actionType,
+          'Bulk ' + (targetActive ? 'reactivated' : 'deactivated') + ' ' + eligibleIdsToUpdate.length + ' user account(s)' + reasonText,
+          'User',
+          callerId,
+          {
+            metadata: {
+              affectedCount: eligibleIdsToUpdate.length,
+              action: targetActive ? 'activate' : 'deactivate',
+            },
+          }
+        );
+
+        await SecurityLog.create({
+          user: callerId,
+          identifier: adminEmail,
+          eventType: 'ADMIN_ACTION',
+          status: 'SUCCESS',
+          details: {
+            action: actionType,
+            affectedUserIds: eligibleIdsToUpdate,
+            reason: reason || undefined,
+          },
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: 'Bulk status update completed: ' + successful.length + ' processed, ' + failed.length + ' failed.',
+      data: {
+        action: targetActive ? 'active' : 'deactivated',
+        totalRequested: uniqueIds.length,
+        successCount: successful.length,
+        failedCount: failed.length,
+        successful,
+        failed,
+      },
     });
   } catch (error) {
     next(error);
@@ -711,19 +1382,91 @@ export async function updateUserRole(req: AuthRequest, res: Response, next: Next
       return res.status(400).json({ success: false, message: 'Invalid role' });
     }
 
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      { role },
-      { new: true }
-    ).select('-password');
-
-    if (!user) {
+    const callerId = String(req.user?.userId || req.user?._id || req.user?.id || '');
+    const targetUser = await User.findById(req.params.id);
+    if (!targetUser) {
       return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Demoting an admin to regular user
+    if (targetUser.role === 'admin' && role === 'user') {
+      if (String(targetUser._id) === callerId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot demote currently logged-in administrator',
+        });
+      }
+
+      const superAdminRecord = await Admin.findOne({ user: targetUser._id });
+      if (superAdminRecord?.permissions?.includes('all')) {
+        return res.status(400).json({
+          success: false,
+          message: 'Super Admin accounts cannot be demoted',
+        });
+      }
+
+      if (targetUser.isActive) {
+        try {
+          await withAdminLifecycleGuard(async (tx?: any) => {
+            let freshActiveAdminCount: number;
+            if (tx && typeof tx.user?.count === 'function') {
+              freshActiveAdminCount = await tx.user.count({
+                where: {
+                  role: 'admin',
+                  isActive: true,
+                  isDeleted: false,
+                },
+              });
+            } else {
+              freshActiveAdminCount = await User.countDocuments({
+                role: 'admin',
+                isActive: true,
+                isDeleted: { $ne: true },
+              });
+            }
+
+            if (freshActiveAdminCount <= 1) {
+              throw new Error('LAST_ACTIVE_ADMIN');
+            }
+
+            if (tx && typeof tx.user?.update === 'function') {
+              await tx.user.update({
+                where: { id: String(targetUser._id) },
+                data: { role },
+              });
+              targetUser.role = role;
+            } else {
+              targetUser.role = role;
+              await targetUser.save();
+            }
+          });
+        } catch (guardErr: any) {
+          if (guardErr?.message === 'LAST_ACTIVE_ADMIN') {
+            return res.status(400).json({
+              success: false,
+              message: 'Cannot demote administrator: would leave system without an active administrator account',
+            });
+          }
+          if (guardErr instanceof AdminLifecycleLockError || guardErr?.code === 'LOCK_TIMEOUT') {
+            return res.status(409).json({
+              success: false,
+              message: 'Administrator role update locked due to concurrent modifications. Please retry.',
+            });
+          }
+          throw guardErr;
+        }
+      } else {
+        targetUser.role = role;
+        await targetUser.save();
+      }
+    } else {
+      targetUser.role = role;
+      await targetUser.save();
     }
 
     if (role === 'admin') {
       await Admin.findOneAndUpdate(
-        { user: user._id },
+        { user: targetUser._id },
         { permissions: ['all', 'users', 'profiles', 'verifications', 'memberships', 'payments', 'reports'] },
         { upsert: true }
       );
@@ -732,36 +1475,162 @@ export async function updateUserRole(req: AuthRequest, res: Response, next: Next
     await logAdminAction(
       req.user?.role || 'admin',
       'USER_ROLE_UPDATED',
-      `Updated user ${user.email} role to ${role}`,
+      'Updated user ' + targetUser.email + ' role to ' + role,
       'User',
-      String(user._id)
+      String(targetUser._id)
     );
 
-    res.json({ success: true, data: user });
+    res.json({ success: true, data: targetUser });
   } catch (error) {
     next(error);
   }
 }
 
+
+/**
+ * Atomic user deletion helper.
+ * If an active database transaction `tx` is provided, executes all child record cleanups
+ * and user record deletion inside that transaction.
+ * Otherwise, wraps all operations inside a standalone interactive `prisma.$transaction`.
+ * In case of any database error, rolls back all deletions atomically (fail-closed).
+ */
+async function executeAtomicUserDeletion(userId: string, tx?: any): Promise<void> {
+  const targetId = String(userId);
+
+  if (tx && typeof tx.user?.delete === 'function') {
+    if (tx.profile?.deleteMany) await tx.profile.deleteMany({ where: { userId: targetId } });
+    if (tx.verification?.deleteMany) await tx.verification.deleteMany({ where: { userId: targetId } });
+    if (tx.subscription?.deleteMany) await tx.subscription.deleteMany({ where: { userId: targetId } });
+    if (tx.payment?.deleteMany) await tx.payment.deleteMany({ where: { userId: targetId } });
+    if (tx.interest?.deleteMany) {
+      await tx.interest.deleteMany({
+        where: { OR: [{ senderId: targetId }, { receiverId: targetId }] },
+      });
+    }
+    if (tx.shortlist?.deleteMany) await tx.shortlist.deleteMany({ where: { userId: targetId } });
+    if (tx.refreshToken?.deleteMany) await tx.refreshToken.deleteMany({ where: { userId: targetId } });
+    if (tx.admin?.deleteMany) await tx.admin.deleteMany({ where: { userId: targetId } });
+    await tx.user.delete({ where: { id: targetId } });
+    return;
+  }
+
+  if (prisma && typeof prisma.$transaction === 'function') {
+    await prisma.$transaction(async (innerTx: any) => {
+      if (innerTx.profile?.deleteMany) await innerTx.profile.deleteMany({ where: { userId: targetId } });
+      if (innerTx.verification?.deleteMany) await innerTx.verification.deleteMany({ where: { userId: targetId } });
+      if (innerTx.subscription?.deleteMany) await innerTx.subscription.deleteMany({ where: { userId: targetId } });
+      if (innerTx.payment?.deleteMany) await innerTx.payment.deleteMany({ where: { userId: targetId } });
+      if (innerTx.interest?.deleteMany) {
+        await innerTx.interest.deleteMany({
+          where: { OR: [{ senderId: targetId }, { receiverId: targetId }] },
+        });
+      }
+      if (innerTx.shortlist?.deleteMany) await innerTx.shortlist.deleteMany({ where: { userId: targetId } });
+      if (innerTx.refreshToken?.deleteMany) await innerTx.refreshToken.deleteMany({ where: { userId: targetId } });
+      if (innerTx.admin?.deleteMany) await innerTx.admin.deleteMany({ where: { userId: targetId } });
+      await innerTx.user.delete({ where: { id: targetId } });
+    });
+    return;
+  }
+
+  // Fallback for non-Prisma / test mock environments
+  await Profile.deleteMany({ user: targetId });
+  await Verification.deleteMany({ user: targetId });
+  await Subscription.deleteMany({ user: targetId });
+  await Payment.deleteMany({ user: targetId });
+  await Interest.deleteMany({ $or: [{ sender: targetId }, { receiver: targetId }] });
+  await Shortlist.deleteMany({ user: targetId });
+  await RefreshToken.deleteMany({ user: targetId });
+  await Admin.deleteMany({ user: targetId });
+  await User.findByIdAndDelete(targetId);
+}
+
 export async function deleteUser(req: AuthRequest, res: Response, next: NextFunction) {
   try {
+    const callerId = String(req.user?.userId || req.user?._id || req.user?.id || '');
     const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    await Profile.deleteMany({ user: user._id });
-    await Verification.deleteMany({ user: user._id });
-    await Subscription.deleteMany({ user: user._id });
-    await Payment.deleteMany({ user: user._id });
-    await Interest.deleteMany({ $or: [{ sender: user._id }, { receiver: user._id }] });
-    await Shortlist.deleteMany({ user: user._id });
-    await User.findByIdAndDelete(user._id);
+    // Protecting administrator accounts from deletion
+    if (user.role === 'admin') {
+      if (String(user._id) === callerId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot delete currently logged-in administrator',
+        });
+      }
+
+      const superAdminRecord = await Admin.findOne({ user: user._id });
+      if (superAdminRecord?.permissions?.includes('all')) {
+        return res.status(400).json({
+          success: false,
+          message: 'Super Admin accounts cannot be deleted',
+        });
+      }
+
+      if (user.isActive) {
+        try {
+          await withAdminLifecycleGuard(async (tx?: any) => {
+            let freshActiveAdminCount: number;
+            if (tx && typeof tx.user?.count === 'function') {
+              freshActiveAdminCount = await tx.user.count({
+                where: {
+                  role: 'admin',
+                  isActive: true,
+                  isDeleted: false,
+                },
+              });
+            } else {
+              freshActiveAdminCount = await User.countDocuments({
+                role: 'admin',
+                isActive: true,
+                isDeleted: { $ne: true },
+              });
+            }
+
+            if (freshActiveAdminCount <= 1) {
+              throw new Error('LAST_ACTIVE_ADMIN');
+            }
+
+            await executeAtomicUserDeletion(String(user._id), tx);
+          });
+        } catch (guardErr: any) {
+          if (guardErr?.message === 'LAST_ACTIVE_ADMIN') {
+            return res.status(400).json({
+              success: false,
+              message: 'Cannot delete the last active administrator account',
+            });
+          }
+          if (guardErr instanceof AdminLifecycleLockError || guardErr?.code === 'LOCK_TIMEOUT') {
+            return res.status(409).json({
+              success: false,
+              message: 'Administrator deletion locked due to concurrent modifications. Please retry.',
+            });
+          }
+          throw guardErr;
+        }
+
+        await logAdminAction(
+          req.user?.role || 'admin',
+          'USER_DELETED',
+          'Deleted user account ' + user.email,
+          'User',
+          String(user._id)
+        );
+
+        return res.json({ success: true, message: 'User and all related records deleted successfully' });
+      }
+    }
+
+    // Standard non-admin or inactive admin atomic deletion
+    await executeAtomicUserDeletion(String(user._id));
 
     await logAdminAction(
       req.user?.role || 'admin',
       'USER_DELETED',
-      `Deleted user account ${user.email}`,
+      'Deleted user account ' + user.email,
       'User',
       String(user._id)
     );

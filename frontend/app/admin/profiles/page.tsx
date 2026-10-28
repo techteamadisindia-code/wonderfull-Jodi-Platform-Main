@@ -32,7 +32,9 @@ import {
   Calendar,
   IndianRupee,
   Building,
+  Download,
 } from 'lucide-react';
+import ExportDataModal from '../../../components/admin/ExportDataModal';
 import {
   fetchProfiles,
   fetchProfileById,
@@ -140,6 +142,7 @@ export default function AdminProfilesPage() {
   const [saveLoading, setSaveLoading] = useState(false);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   const loadProfiles = async () => {
     setLoading(true);
@@ -333,6 +336,14 @@ export default function AdminProfilesPage() {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => setExportModalOpen(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#E51F3E] hover:bg-[#ce102f] text-white text-xs font-bold shadow-xs transition active:scale-95"
+            title="Export candidate profile records to Excel or CSV"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export Data</span>
+          </button>
           <button
             onClick={loadProfiles}
             disabled={loading}
@@ -1090,6 +1101,17 @@ export default function AdminProfilesPage() {
           }}
         />
       )}
+
+      {/* Export Data Modal */}
+      <ExportDataModal
+        isOpen={exportModalOpen}
+        onClose={() => setExportModalOpen(false)}
+        currentFilters={{
+          search: searchInput,
+          gender: genderFilter || undefined,
+        }}
+        filteredCount={total}
+      />
     </div>
   );
 }

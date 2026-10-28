@@ -10,6 +10,7 @@ import {
   getDashboardReports,
   getDashboardRevenue,
   getUsers,
+  bulkUpdateUserStatus,
   getUserById,
   updateUserStatus,
   updateUserRole,
@@ -116,10 +117,16 @@ router.delete('/registrations/:id', deleteAdminRegistration);
 
 // 2. Users
 router.get('/users', getUsers);
+router.put('/users/bulk-status', bulkUpdateUserStatus);
 router.get('/users/:id', getUserById);
 router.put('/users/:id/status', updateUserStatus);
 router.put('/users/:id/role', updateUserRole);
 router.delete('/users/:id', deleteUser);
+
+// 2b. Candidate & Registration Data Export
+import { exportCandidateData } from '../controllers/adminExportController';
+router.get('/export/candidates', exportCandidateData);
+router.post('/export/candidates', exportCandidateData);
 
 // 3. Profiles
 router.get('/profiles', getProfiles);

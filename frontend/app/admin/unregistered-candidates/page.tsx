@@ -32,7 +32,9 @@ import {
   ShieldCheck,
   ShieldAlert,
   Trash2,
+  Download,
 } from 'lucide-react';
+import ExportDataModal from '../../../components/admin/ExportDataModal';
 import {
   fetchAdminRegistrations,
   fetchAdminRegistrationById,
@@ -62,6 +64,7 @@ export default function UnregisteredCandidatesPage() {
   const [stepFilter, setStepFilter] = useState('ALL');
   const [sortBy, setSortBy] = useState('lastActiveAt');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   // Modal / Drawer Detail View
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
@@ -290,6 +293,15 @@ export default function UnregisteredCandidatesPage() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          <button
+            onClick={() => setExportModalOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#E51F3E] hover:bg-[#ce102f] text-white font-bold text-xs shadow-xs transition active:scale-95"
+            title="Export incomplete registrations to Excel or CSV"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export Drafts</span>
+          </button>
+
           <button
             onClick={() => loadData(true)}
             disabled={refreshing}
@@ -1073,6 +1085,17 @@ export default function UnregisteredCandidatesPage() {
           </div>
         </div>
       )}
+
+      {/* Export Data Modal */}
+      <ExportDataModal
+        isOpen={exportModalOpen}
+        onClose={() => setExportModalOpen(false)}
+        currentFilters={{
+          search,
+          status: statusFilter,
+        }}
+        filteredCount={total}
+      />
     </div>
   );
 }

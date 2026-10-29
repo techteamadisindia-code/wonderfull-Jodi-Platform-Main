@@ -33,6 +33,7 @@ import {
   ShieldAlert,
   X,
   Crown,
+  Eye,
 } from 'lucide-react';
 import { formatHeightDisplay } from '../../../lib/doctorConstants';
 import { addShortlist, removeShortlist, getShortlisted, getAuthToken, getMyProfile } from '../../../lib/api';
@@ -47,6 +48,7 @@ import {
 } from '../../../services/interestApi';
 import {
   fetchContactAccessStatus,
+  revealContactDetails,
   sendContactRequest,
   acceptContactRequest,
   declineContactRequest,
@@ -123,7 +125,9 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
     hasAccess: false,
     status: 'NONE',
   });
-  const [contactActionLoading, setContactActionLoading] = useState(false);
+    const [contactActionLoading, setContactActionLoading] = useState(false);
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [upgradeModalPlans, setUpgradeModalPlans] = useState<any[]>([]);
   const [contactMessage, setContactMessage] = useState<{
     text: string;
     type: 'success' | 'error' | 'upgrade';
@@ -166,7 +170,12 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                 getShortlisted().catch(() => []),
               ]);
               if (statusRes) setInterestStatus(statusRes);
-              if (accessRes) setContactAccess(accessRes);
+              if (accessRes) {
+                setContactAccess(accessRes);
+                if (Array.isArray(accessRes.availablePlans) && accessRes.availablePlans.length > 0) {
+                  setUpgradeModalPlans(accessRes.availablePlans);
+                }
+              }
               if (subRes) {
                 const isPaid =
                   subRes.status === 'ACTIVE' &&
@@ -240,6 +249,54 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
     }
   }, [profile, displayName, candidateId]);
 
+  const handleRevealContact = async () => {
+    const token = getAuthToken();
+    if (!token) {
+      router.push(`/login?redirect=/profile/${id}`);
+      return;
+    }
+    setContactActionLoading(true);
+    setContactMessage(null);
+    try {
+      const res = await revealContactDetails(id);
+      if (res.success && res.data) {
+        setContactAccess((prev) => ({
+          ...prev,
+          hasAccess: true,
+          status: 'REVEALED',
+          contactDetails: res.data,
+          freeAllowanceRemaining: res.freeAllowanceRemaining ?? (res.isFreeReveal ? 0 : prev.freeAllowanceRemaining),
+          creditsRemaining: res.creditsRemaining ?? prev.creditsRemaining,
+        }));
+        setContactMessage({
+          text: res.message || 'Contact details revealed successfully!',
+          type: 'success',
+        });
+      }
+    } catch (err: any) {
+      console.error('Error revealing contact details:', err);
+      const data = err.response?.data;
+      const serverMsg = data?.message || 'Failed to reveal contact details.';
+      if (data?.code === 'UPGRADE_REQUIRED' || data?.code === 'NO_CREDITS_REMAINING' || data?.canUpgrade || err.response?.status === 403) {
+        if (Array.isArray(data?.availablePlans) && data.availablePlans.length > 0) {
+          setUpgradeModalPlans(data.availablePlans);
+        }
+        setUpgradeModalOpen(true);
+        setContactMessage({
+          text: serverMsg,
+          type: 'upgrade',
+        });
+      } else {
+        setContactMessage({
+          text: serverMsg,
+          type: 'error',
+        });
+      }
+    } finally {
+      setContactActionLoading(false);
+    }
+  };
+
   const handleRequestContact = async () => {
     const token = getAuthToken();
     if (!token) {
@@ -271,7 +328,11 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
     } catch (err: any) {
       console.error('Error requesting contact:', err);
       const serverMsg = err.response?.data?.message || 'Failed to send contact request.';
-      if (err.response?.data?.canUpgrade || err.response?.status === 403) {
+      if (err.response?.data?.canUpgrade || err.response?.data?.code === 'FREE_PLAN_NO_CREDITS' || err.response?.status === 403) {
+        if (Array.isArray(err.response?.data?.availablePlans) && err.response.data.availablePlans.length > 0) {
+          setUpgradeModalPlans(err.response.data.availablePlans);
+        }
+        setUpgradeModalOpen(true);
         setContactMessage({
           text: serverMsg,
           type: 'upgrade',
@@ -570,7 +631,126 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
             </div>
           </div>
         </div>
-      </main>
+            {/* Upgrade Required Modal */}
+      {upgradeModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200"
+        >
+          <div className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-rose-100 overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-[#800020] via-[#E51F3E] to-[#800020] p-6 text-white text-center relative">
+              <button
+                type="button"
+                onClick={() => setUpgradeModalOpen(false)}
+                className="absolute top-4 right-4 p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-white/10 mb-3 border border-white/20">
+                <Crown className="w-6 h-6 text-amber-300" />
+              </div>
+              <h3 className="font-serif text-xl sm:text-2xl font-bold">
+                Upgrade Your Membership
+              </h3>
+              <p className="text-white/80 text-xs sm:text-sm mt-1 max-w-md mx-auto">
+                You have consumed your 1 complimentary contact view for free members. Upgrade to connect directly with verified doctors.
+              </p>
+            </div>
+
+            {/* Modal Content: Plans */}
+            <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {(upgradeModalPlans.length > 0
+                  ? upgradeModalPlans.filter((p) => p.slug !== 'free')
+                  : [
+                      {
+                        id: 'doctor-connect',
+                        name: 'Doctor Connect',
+                        discountedPrice: 2999,
+                        durationMonths: 3,
+                        contactRequestLimit: 15,
+                        features: ['15 Contact Unlocks', 'Direct Verified Numbers', 'Priority Support'],
+                      },
+                      {
+                        id: 'premium-match',
+                        name: 'Premium Match',
+                        discountedPrice: 5999,
+                        durationMonths: 6,
+                        contactRequestLimit: 40,
+                        isPopular: true,
+                        features: ['40 Contact Unlocks', 'Instant WhatsApp Connect', 'Dedicated Support'],
+                      },
+                    ]
+                ).map((p: any) => (
+                  <div
+                    key={p._id || p.id || p.slug || p.name}
+                    className={`p-5 rounded-2xl border transition relative flex flex-col justify-between ${
+                      p.isPopular
+                        ? 'border-rose-400 bg-rose-50/30 ring-2 ring-rose-300'
+                        : 'border-slate-200 bg-slate-50/50 hover:border-rose-200'
+                    }`}
+                  >
+                    {p.isPopular && (
+                      <span className="absolute -top-3 right-4 px-2.5 py-0.5 rounded-full bg-[#E51F3E] text-white font-bold text-[10px] tracking-wider uppercase">
+                        Most Popular
+                      </span>
+                    )}
+                    <div className="space-y-2">
+                      <h4 className="font-serif font-bold text-slate-900 text-base">{p.name}</h4>
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="font-bold text-xl sm:text-2xl text-slate-900">
+                          ₹{(p.discountedPrice || p.price || 0).toLocaleString()}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          / {p.durationMonths ? `${p.durationMonths} Months` : 'Quarterly'}
+                        </span>
+                      </div>
+                      <p className="text-xs font-semibold text-emerald-700">
+                        {p.isUnlimitedContact
+                          ? 'Unlimited Contact Unlocks'
+                          : `${p.contactRequestLimit || 15} Contact Unlocks`}
+                      </p>
+                      <ul className="text-xs text-slate-600 space-y-1.5 pt-2">
+                        {(p.features || ['Verified Doctor Contacts', 'Direct Email & Phone']).map((f: string, i: number) => (
+                          <li key={i} className="flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>{f}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <Link
+                      href={`/membership?plan=${p.slug || p._id || p.id}`}
+                      className="mt-4 w-full py-2.5 rounded-full bg-[#E51F3E] hover:bg-[#CC1432] text-white font-bold text-xs text-center transition block shadow-2xs"
+                    >
+                      Choose {p.name}
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs">
+              <span className="text-slate-500 flex items-center gap-1">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                100% Verified Doctor Profiles
+              </span>
+              <button
+                type="button"
+                onClick={() => setUpgradeModalOpen(false)}
+                className="text-slate-600 hover:text-slate-800 font-bold px-3 py-1.5 rounded-lg"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
     );
   }
 
@@ -1221,6 +1401,103 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
               </section>
             )}
 
+                        {/* Location & Residency Details */}
+            <section className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-4">
+              <h2 className="font-serif text-lg font-bold text-[#101828] flex items-center gap-2 border-b border-slate-100 pb-3">
+                <MapPin className="w-4.5 h-4.5 text-[#E51F3E]" />
+                <span>Location & Residency</span>
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs sm:text-sm">
+                <div className="p-3.5 bg-slate-50 rounded-2xl">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Current Location
+                  </span>
+                  <span className="font-bold text-slate-800">
+                    {[profile.city, profile.state].filter(Boolean).join(', ') || 'N/A'}
+                  </span>
+                </div>
+                <div className="p-3.5 bg-slate-50 rounded-2xl">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Country of Residence
+                  </span>
+                  <span className="font-bold text-slate-800">{profile.country || 'India'}</span>
+                </div>
+                <div className="p-3.5 bg-slate-50 rounded-2xl">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Native Place / Hometown
+                  </span>
+                  <span className="font-bold text-slate-800">{profile.nativePlace || profile.city || 'N/A'}</span>
+                </div>
+                <div className="p-3.5 bg-slate-50 rounded-2xl">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Relocation Preference
+                  </span>
+                  <span className="font-bold text-slate-800">
+                    {profile.willingToRelocate ? 'Open to Relocate' : 'Prefer Current Region / State'}
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            {/* Lifestyle & Habits */}
+            <section className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-4">
+              <h2 className="font-serif text-lg font-bold text-[#101828] flex items-center gap-2 border-b border-slate-100 pb-3">
+                <Sparkles className="w-4.5 h-4.5 text-[#E51F3E]" />
+                <span>Lifestyle & Personal Habits</span>
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs sm:text-sm">
+                <div className="p-3.5 bg-slate-50 rounded-2xl">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Diet Preference
+                  </span>
+                  <span className="font-bold text-slate-800">
+                    {profile.foodPreference || profile.diet || 'Vegetarian'}
+                  </span>
+                </div>
+                <div className="p-3.5 bg-slate-50 rounded-2xl">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Smoking Habits
+                  </span>
+                  <span className="font-bold text-slate-800">{profile.smoking || 'Non-smoker'}</span>
+                </div>
+                <div className="p-3.5 bg-slate-50 rounded-2xl">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Drinking Habits
+                  </span>
+                  <span className="font-bold text-slate-800">{profile.drinking || 'Non-drinker'}</span>
+                </div>
+                <div className="p-3.5 bg-slate-50 rounded-2xl">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Languages Known
+                  </span>
+                  <span className="font-bold text-slate-800">
+                    {Array.isArray(profile.languages) && profile.languages.length > 0
+                      ? profile.languages.join(', ')
+                      : profile.motherTongue
+                      ? `${profile.motherTongue}, English, Hindi`
+                      : 'English, Hindi'}
+                  </span>
+                </div>
+                {Array.isArray(profile.hobbies) && profile.hobbies.length > 0 && (
+                  <div className="p-3.5 bg-slate-50 rounded-2xl sm:col-span-2">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      Hobbies & Interests
+                    </span>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {profile.hobbies.map((h: string, idx: number) => (
+                        <span
+                          key={idx}
+                          className="px-2.5 py-1 rounded-full bg-rose-50 text-[#800020] font-semibold text-xs border border-rose-100"
+                        >
+                          {h}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+
             {/* Partner Preferences */}
             {profile.partnerPreferences && (
               <section className="bg-white rounded-3xl border border-slate-200/90 shadow-xs p-6 sm:p-7 space-y-4">
@@ -1454,29 +1731,96 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                 /* Protected Contact Details */
                 <div className="space-y-3 pt-1">
                   <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-700">Access Status:</span>
+                      {contactAccess.isPaid ? (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[11px]">
+                          {contactAccess.creditsRemaining === 'UNLIMITED'
+                            ? 'Paid Plan (Unlimited)'
+                            : `Paid Plan (${contactAccess.creditsRemaining} Credits)`}
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold text-[11px]">
+                          {contactAccess.freeAllowanceRemaining !== 0
+                            ? '1 Free View Available'
+                            : 'Free Member (0 Views Left)'}
+                        </span>
+                      )}
+                    </div>
+
                     <p className="text-xs text-slate-600 leading-relaxed">
-                      Contact details are protected for your privacy.
+                      {contactAccess.isPaid
+                        ? 'View contact details instantly using your membership credits or send a direct contact request.'
+                        : contactAccess.freeAllowanceRemaining !== 0
+                        ? 'You have 1 complimentary contact view available with your free account. Click below to reveal.'
+                        : 'You have consumed your 1 complimentary contact view. Upgrade your membership to view more contacts.'}
                     </p>
+
                     {!isMyOwnProfile && (
-                      <button
-                        type="button"
-                        disabled={contactActionLoading}
-                        onClick={handleRequestContact}
-                        className="w-full py-2.5 px-4 rounded-full bg-[#E51F3E] hover:bg-[#CC1432] text-white font-bold text-xs shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                      >
-                        {contactActionLoading ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <div className="space-y-2 pt-1">
+                        {/* Direct Reveal Button */}
+                        {contactAccess.canReveal ? (
+                          <button
+                            type="button"
+                            disabled={contactActionLoading}
+                            onClick={handleRevealContact}
+                            className="w-full py-2.5 px-4 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            {contactActionLoading ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
+                            <span>
+                              {contactAccess.isPaid
+                                ? 'View Contact Details (1 Credit)'
+                                : 'View Contact Details (1 Free View)'}
+                            </span>
+                          </button>
                         ) : (
-                          <PhoneCall className="w-3.5 h-3.5" />
+                          <button
+                            type="button"
+                            onClick={() => setUpgradeModalOpen(true)}
+                            className="w-full py-2.5 px-4 rounded-full bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Crown className="w-3.5 h-3.5" />
+                            <span>Unlock Contact Details (Upgrade)</span>
+                          </button>
                         )}
-                        <span>Request Contact</span>
-                      </button>
+
+                        {/* Contact Request Button */}
+                        <button
+                          type="button"
+                          disabled={contactActionLoading}
+                          onClick={
+                            contactAccess.isPaid
+                              ? handleRequestContact
+                              : () => {
+                                  setContactMessage({
+                                    text: 'Contact requests require an active membership plan. Please choose a plan below.',
+                                    type: 'upgrade',
+                                  });
+                                  setUpgradeModalOpen(true);
+                                }
+                          }
+                          className="w-full py-2.5 px-4 rounded-full bg-[#E51F3E] hover:bg-[#CC1432] text-white font-bold text-xs shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          {contactActionLoading ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <PhoneCall className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            {contactAccess.isPaid ? 'Send Contact Request' : 'Send Contact Request (Paid Only)'}
+                          </span>
+                        </button>
+                      </div>
                     )}
                   </div>
 
                   <p className="text-[11px] text-slate-500 leading-normal flex items-start gap-1.5">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                    <span>Contact details are shared only after mutual interest and acceptance.</span>
+                    <span>Contact details are shared only in compliance with Wonderful Jodi privacy guidelines.</span>
                   </p>
                 </div>
               )}

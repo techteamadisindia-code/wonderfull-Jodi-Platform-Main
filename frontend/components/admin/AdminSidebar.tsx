@@ -32,6 +32,7 @@ import {
   BookOpen,
   Trophy,
   X,
+  Crown,
 } from 'lucide-react';
 import { adminLogout, getAdminUser } from '../../services/authApi';
 import { Logo } from '../Logo';
@@ -62,6 +63,18 @@ export function AdminSidebar({
   };
 
   const navGroups = [
+    {
+      group: 'SUPER ADMIN GOVERNANCE',
+      items: [
+        {
+          href: '/admin/super',
+          label: 'Super Admin Console',
+          icon: Crown,
+          badge: 'SUPER',
+          badgeColor: 'bg-gradient-to-r from-amber-500 to-rose-500 text-white font-bold',
+        },
+      ],
+    },
     {
       group: 'CORE OPERATIONS',
       items: [

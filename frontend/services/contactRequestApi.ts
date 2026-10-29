@@ -15,11 +15,25 @@ export interface ContactAccessStatus {
   hasAccess: boolean;
   isSelf?: boolean;
   isAdmin?: boolean;
-  status: 'NONE' | 'PENDING' | 'RECEIVED_PENDING' | 'ACCEPTED' | 'DECLINED' | 'SELF' | 'ADMIN_ACCESS' | 'GUEST';
+  status:
+    | 'NONE'
+    | 'PENDING'
+    | 'RECEIVED_PENDING'
+    | 'ACCEPTED'
+    | 'DECLINED'
+    | 'SELF'
+    | 'ADMIN_ACCESS'
+    | 'GUEST'
+    | 'REVEALED';
   requestId?: string;
   message?: string;
   unlockedAt?: string;
   contactDetails?: ContactDetails;
+  canReveal?: boolean;
+  isPaid?: boolean;
+  freeAllowanceRemaining?: number | null;
+  creditsRemaining?: number | string;
+  availablePlans?: any[];
 }
 
 export interface ContactRequestItem {
@@ -51,18 +65,58 @@ export async function fetchContactAccessStatus(profileId: string): Promise<Conta
 }
 
 /**
+ * Reveal contact details directly for a target profile
+ * (Consumes 1 complimentary free reveal for free users or 1 credit for paid users)
+ */
+export async function revealContactDetails(profileId: string): Promise<{
+  success: boolean;
+  message: string;
+  data?: ContactDetails;
+  alreadyUnlocked?: boolean;
+  isFreeReveal?: boolean;
+  freeAllowanceRemaining?: number;
+  creditsRemaining?: number | string;
+  canUpgrade?: boolean;
+  availablePlans?: any[];
+}> {
+  const response = await api.post<{
+    success: boolean;
+    message: string;
+    data?: ContactDetails;
+    alreadyUnlocked?: boolean;
+    isFreeReveal?: boolean;
+    freeAllowanceRemaining?: number;
+    creditsRemaining?: number | string;
+    canUpgrade?: boolean;
+    availablePlans?: any[];
+  }>(`/contact-access/${profileId}/reveal`);
+  return response.data;
+}
+
+/**
  * Send a new contact request to a profile/member
  */
 export async function sendContactRequest(payload: {
   recipientId?: string;
   profileId?: string;
   message?: string;
-}): Promise<{ success: boolean; message: string; data?: any; alreadyUnlocked?: boolean }> {
+}): Promise<{
+  success: boolean;
+  message: string;
+  data?: any;
+  alreadyUnlocked?: boolean;
+  canUpgrade?: boolean;
+  code?: string;
+  availablePlans?: any[];
+}> {
   const response = await api.post<{
     success: boolean;
     message: string;
     data?: any;
     alreadyUnlocked?: boolean;
+    canUpgrade?: boolean;
+    code?: string;
+    availablePlans?: any[];
   }>('/contact-requests', payload);
   return response.data;
 }
@@ -80,7 +134,9 @@ export async function fetchMyContactRequests(): Promise<ContactRequestsResponse>
 /**
  * Accept a contact request (recipient accepts -> unlocks contact details & deducts 1 credit from requester)
  */
-export async function acceptContactRequest(requestId: string): Promise<{ success: boolean; message: string; data: any }> {
+export async function acceptContactRequest(
+  requestId: string
+): Promise<{ success: boolean; message: string; data: any }> {
   const response = await api.patch<{ success: boolean; message: string; data: any }>(
     `/contact-requests/${requestId}/accept`
   );
@@ -90,7 +146,9 @@ export async function acceptContactRequest(requestId: string): Promise<{ success
 /**
  * Decline a contact request (0 credits deducted)
  */
-export async function declineContactRequest(requestId: string): Promise<{ success: boolean; message: string; data: any }> {
+export async function declineContactRequest(
+  requestId: string
+): Promise<{ success: boolean; message: string; data: any }> {
   const response = await api.patch<{ success: boolean; message: string; data: any }>(
     `/contact-requests/${requestId}/decline`
   );

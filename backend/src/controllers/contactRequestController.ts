@@ -1,5 +1,7 @@
 import { Response, NextFunction } from 'express';
 import mongoose from '../db/prismaBridge';
+import { prisma, generateObjectId } from '../db/client';
+import { hasActivePaidMembership } from '../services/entitlementService';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { ContactRequest } from '../models/ContactRequest';
 import { ContactAccessLog } from '../models/ContactAccessLog';
@@ -105,13 +107,16 @@ export async function createContactRequest(req: AuthRequest, res: Response, next
     const planSlug = (subscription?.planId || subscription?.plan || 'free').toLowerCase();
     const isFreePlan = !subscription || planSlug === 'free';
 
-    if (isFreePlan) {
+    const isPaidMember = await hasActivePaidMembership(requesterId, req.user?.role);
+    if (!isPaidMember || isFreePlan) {
+      const activePlans = await MembershipPlan.find({ isActive: true }).sort({ displayOrder: 1, discountedPrice: 1 });
       return res.status(403).json({
         success: false,
         canUpgrade: true,
         code: 'FREE_PLAN_NO_CREDITS',
         message:
-          'Contact requests require an active membership. Free plans include 0 contact requests. Please choose Doctor Connect or Premium Match to connect directly.',
+          'Contact requests require an active paid membership. Free plans do not include contact requests. Please choose Doctor Connect or Premium Match to connect directly.',
+        availablePlans: activePlans,
       });
     }
 
@@ -494,7 +499,8 @@ export async function getContactAccessStatus(req: AuthRequest, res: Response, ne
         data: {
           hasAccess: false,
           status: 'GUEST',
-          message: 'Please sign in and request contact details to connect.',
+          canReveal: false,
+          message: 'Please sign in to view contact details or send contact requests.',
         },
       });
     }
@@ -520,34 +526,78 @@ export async function getContactAccessStatus(req: AuthRequest, res: Response, ne
       });
     }
 
-    // If admin, return full access
-    if (req.user?.role === 'admin') {
-      const u = targetProfile.user as any;
+    // Compute entitlement metadata for caller
+    const isPaid = await hasActivePaidMembership(userId, req.user?.role);
+
+    // Profile-owner privacy settings ALWAYS apply across all non-owner callers
+    const privacy = targetProfile.privacySettings || {};
+    const isHiddenByOwner = privacy.contactVisibility === 'hidden' || privacy.contactVisibility === 'nobody';
+
+    if (isHiddenByOwner) {
       return res.json({
         success: true,
         data: {
-          hasAccess: true,
-          isAdmin: true,
-          status: 'ADMIN_ACCESS',
-          contactDetails: {
-            fullName: u?.fullName,
-            mobile: u?.mobile,
-            email: u?.email,
-            workLocation: targetProfile.workLocation,
-            currentHospital: targetProfile.currentHospital,
-            annualIncome: targetProfile.annualIncome,
-          },
+          hasAccess: false,
+          status: 'PRIVACY_RESTRICTED',
+          canReveal: false,
+          isPaid,
+          message: 'Contact details are hidden by profile owner privacy settings.',
         },
       });
     }
 
-    // Check mutual contact request status
-    const existingRequest = await ContactRequest.findOne({
-      $or: [
-        { requester: userId, recipient: targetUserId },
-        { requester: targetUserId, recipient: userId },
-      ],
-    }).sort({ createdAt: -1 });
+    // Admin access: Only verified Super Admins with 'all' permissions have administrative contact visibility.
+    // Regular admins without Super Admin verification are blocked from member contact details.
+    if (req.user?.role === 'admin') {
+      const { Admin } = await import('../models/Admin');
+      const adminRecord = await Admin.findOne({ user: userId });
+      let permissions: string[] = [];
+      if (Array.isArray(adminRecord?.permissions)) {
+        permissions = adminRecord.permissions;
+      } else if (typeof adminRecord?.permissions === 'string') {
+        try {
+          permissions = JSON.parse(adminRecord.permissions);
+        } catch {
+          permissions = [];
+        }
+      }
+
+      if (permissions.includes('all')) {
+        const u = targetProfile.user as any;
+        return res.json({
+          success: true,
+          data: {
+            hasAccess: true,
+            isAdmin: true,
+            status: 'ADMIN_ACCESS',
+            contactDetails: {
+              fullName: u?.fullName,
+              mobile: u?.mobile,
+              email: u?.email,
+              workLocation: targetProfile.workLocation,
+              currentHospital: targetProfile.currentHospital,
+              annualIncome: targetProfile.annualIncome,
+            },
+          },
+        });
+      }
+      // Regular admin without 'all' permissions falls through to standard member entitlement check
+    }
+
+    // Check if already unlocked via ACCEPTED contact request OR existing contact access log
+    const [existingRequest, existingAccessLog] = await Promise.all([
+      ContactRequest.findOne({
+        $or: [
+          { requester: userId, recipient: targetUserId },
+          { requester: targetUserId, recipient: userId },
+        ],
+      }).sort({ createdAt: -1 }),
+      ContactAccessLog.findOne({
+        user: userId,
+        profileOwner: targetUserId,
+        action: { $in: ['FREE_CONTACT_REVEAL', 'CONTACT_VIEWED', 'REQUEST_ACCEPTED'] },
+      }),
+    ]);
 
     if (existingRequest && existingRequest.status === 'ACCEPTED') {
       const u = targetProfile.user as any;
@@ -569,6 +619,70 @@ export async function getContactAccessStatus(req: AuthRequest, res: Response, ne
       });
     }
 
+    if (existingAccessLog) {
+      const u = targetProfile.user as any;
+      return res.json({
+        success: true,
+        data: {
+          hasAccess: true,
+          status: 'REVEALED',
+          unlockedAt: existingAccessLog.createdAt,
+          contactDetails: {
+            fullName: u?.fullName,
+            mobile: u?.mobile,
+            email: u?.email,
+            workLocation: targetProfile.workLocation,
+            currentHospital: targetProfile.currentHospital,
+            annualIncome: targetProfile.annualIncome,
+          },
+        },
+      });
+    }
+
+    // Compute entitlement metadata for locked contacts
+    let canReveal = false;
+    let freeAllowanceRemaining: number | null = null;
+    let creditsRemaining: number | string = 0;
+    let availablePlans: any[] | undefined = undefined;
+
+    if (isPaid) {
+      const sub = await Subscription.findOne({
+        user: userId,
+        status: 'ACTIVE',
+        $or: [{ expiryDate: { $gt: new Date() } }, { expiryDate: null }],
+      }).sort({ createdAt: -1 });
+
+      const planSlug = (sub?.planId || sub?.plan || '').toLowerCase();
+      const isUnlimited = planSlug.includes('concierge') || planSlug === 'vvip' || sub?.plan === 'VVIP';
+      const rem = sub?.contactRequestsRemaining ?? 0;
+      canReveal = !isHiddenByOwner && (isUnlimited || rem > 0);
+      creditsRemaining = isUnlimited ? 'UNLIMITED' : rem;
+
+      if (!canReveal && !isHiddenByOwner) {
+        availablePlans = await MembershipPlan.find({ isActive: true }).sort({ displayOrder: 1, discountedPrice: 1 });
+      }
+    } else {
+      // Free member: 1 complimentary contact view across account lifetime
+      const freeLogs = await ContactAccessLog.find({
+        user: userId,
+        action: { $in: ['FREE_CONTACT_REVEAL', 'CONTACT_VIEWED'] },
+        creditsUsed: 0,
+      });
+
+      const distinctOwners = new Set(
+        freeLogs
+          .map((log: any) => String(log.profileOwner || log.profileOwnerId || ''))
+          .filter((id: string) => id && id !== String(userId))
+      );
+
+      freeAllowanceRemaining = distinctOwners.size >= 1 ? 0 : 1;
+      canReveal = !isHiddenByOwner && freeAllowanceRemaining > 0;
+
+      if (!canReveal && !isHiddenByOwner) {
+        availablePlans = await MembershipPlan.find({ isActive: true }).sort({ displayOrder: 1, discountedPrice: 1 });
+      }
+    }
+
     if (existingRequest && existingRequest.status === 'PENDING') {
       const requesterId = String(
         (existingRequest as any).requester?._id ||
@@ -584,6 +698,11 @@ export async function getContactAccessStatus(req: AuthRequest, res: Response, ne
           hasAccess: false,
           status: isOutgoing ? 'PENDING' : 'RECEIVED_PENDING',
           requestId: existingRequest._id,
+          canReveal,
+          isPaid,
+          freeAllowanceRemaining,
+          creditsRemaining,
+          availablePlans,
           message: isOutgoing
             ? 'Contact request sent. Awaiting member acceptance.'
             : 'This member has sent you a contact request. You can accept or decline below.',
@@ -591,13 +710,385 @@ export async function getContactAccessStatus(req: AuthRequest, res: Response, ne
       });
     }
 
-    // No active request
     return res.json({
       success: true,
       data: {
         hasAccess: false,
         status: existingRequest ? existingRequest.status : 'NONE',
-        message: 'Contact details are protected for your privacy.',
+        canReveal,
+        isPaid,
+        freeAllowanceRemaining,
+        creditsRemaining,
+        availablePlans,
+        message: isHiddenByOwner
+          ? 'Contact details are hidden by profile owner privacy settings.'
+          : canReveal
+          ? (isPaid ? 'You can unlock contact details using your active membership credits.' : 'You have 1 complimentary contact view available.')
+          : 'Upgrade to a membership plan to view contact details.',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * 6. POST /api/contact-access/:profileId/reveal
+ * Reveal contact details of a target profile.
+ * - Free tier: 1 successful profile contact reveal per account lifetime.
+ *   On second distinct profile, denies access with HTTP 403 UPGRADE_REQUIRED.
+ *   Calling again on already-unlocked profile is idempotent (0 credits consumed).
+ * - Paid tier: Reveals per active subscription credits (or unlimited if Concierge/VVIP).
+ *   Deducts 1 credit from active subscription.
+ * - Atomic transaction protects against concurrent race conditions.
+ * - Respects target profile privacy controls, blocking, and account status.
+ */
+export async function revealContactDetails(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const requesterId = req.user?.userId;
+    if (!requesterId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    const rawProfileId = (req.params.profileId || req.params.targetId || req.params.id || '').trim();
+    if (!rawProfileId || rawProfileId.length < 3) {
+      return res.status(400).json({ success: false, message: 'Invalid profile ID' });
+    }
+
+    const targetProfile = await findCanonicalProfile(rawProfileId, { populateUser: true });
+    if (!targetProfile) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+
+    const targetUserId =
+      targetProfile.user?._id?.toString() ||
+      targetProfile.user?.id?.toString() ||
+      (typeof targetProfile.user === 'string' ? targetProfile.user : null) ||
+      (targetProfile as any).userId?.toString() ||
+      null;
+
+    if (!targetUserId) {
+      return res.status(404).json({ success: false, message: 'Profile owner user account not found' });
+    }
+
+    const targetUserObj = targetProfile.user as any;
+
+    // Self check
+    if (String(requesterId) === String(targetUserId)) {
+      return res.status(200).json({
+        success: true,
+        isSelf: true,
+        creditsUsed: 0,
+        message: 'Viewing own contact details.',
+        data: {
+          fullName: targetUserObj?.fullName,
+          mobile: targetUserObj?.mobile,
+          email: targetUserObj?.email,
+          workLocation: targetProfile.workLocation,
+          currentHospital: targetProfile.currentHospital,
+          annualIncome: targetProfile.annualIncome,
+        },
+      });
+    }
+
+    // Target member active / not deleted / not blocked
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser || targetUser.isBlocked || targetUser.status === 'SUSPENDED' || targetUser.status === 'DELETED') {
+      return res.status(404).json({ success: false, message: 'Member account not found or inactive' });
+    }
+
+    // Block check
+    let isBlocked = null;
+    try {
+      isBlocked = await Block.findOne({
+        $or: [
+          { blocker: requesterId, blockedUser: targetUserId },
+          { blocker: targetUserId, blockedUser: requesterId },
+        ],
+      });
+    } catch (blockErr: any) {
+      console.error('[RevealContact] Block verification failed:', blockErr?.message);
+      return res.status(503).json({
+        success: false,
+        message: 'Unable to verify member eligibility at this time. Please try again later.',
+      });
+    }
+    if (isBlocked) {
+      return res.status(403).json({ success: false, message: 'Cannot access contact details of this member' });
+    }
+
+    // Target privacy check
+    const privacy = targetProfile.privacySettings || {};
+    if (privacy.contactVisibility === 'hidden' || privacy.contactVisibility === 'nobody') {
+      return res.status(403).json({
+        success: false,
+        code: 'CONTACT_HIDDEN_BY_OWNER',
+        message: 'The member has set their contact details to private.',
+      });
+    }
+
+    // Admin access check: Only verified Super Admins with 'all' permissions have administrative contact visibility.
+    // Regular admins without Super Admin verification are blocked with 403.
+    if (req.user?.role === 'admin') {
+      const { Admin } = await import('../models/Admin');
+      const adminRecord = await Admin.findOne({ user: requesterId });
+      let permissions: string[] = [];
+      if (Array.isArray(adminRecord?.permissions)) {
+        permissions = adminRecord.permissions;
+      } else if (typeof adminRecord?.permissions === 'string') {
+        try {
+          permissions = JSON.parse(adminRecord.permissions);
+        } catch {
+          permissions = [];
+        }
+      }
+
+      if (!permissions.includes('all')) {
+        return res.status(403).json({
+          success: false,
+          code: 'SUPER_ADMIN_REQUIRED',
+          message: 'Access denied: Super Administrator privileges required to access contact details.',
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        isAdmin: true,
+        creditsUsed: 0,
+        data: {
+          fullName: targetUserObj?.fullName,
+          mobile: targetUserObj?.mobile,
+          email: targetUserObj?.email,
+          workLocation: targetProfile.workLocation,
+          currentHospital: targetProfile.currentHospital,
+          annualIncome: targetProfile.annualIncome,
+        },
+      });
+    }
+
+    // Check if already unlocked via accepted contact request OR existing contact access log
+    const [existingRequest, existingAccessLog] = await Promise.all([
+      ContactRequest.findOne({
+        $or: [
+          { requester: requesterId, recipient: targetUserId },
+          { requester: targetUserId, recipient: requesterId },
+        ],
+        status: 'ACCEPTED',
+      }),
+      ContactAccessLog.findOne({
+        user: requesterId,
+        profileOwner: targetUserId,
+        action: { $in: ['FREE_CONTACT_REVEAL', 'CONTACT_VIEWED', 'REQUEST_ACCEPTED'] },
+      }),
+    ]);
+
+    if (existingRequest || existingAccessLog) {
+      return res.status(200).json({
+        success: true,
+        alreadyUnlocked: true,
+        creditsUsed: 0,
+        message: 'Contact details already unlocked.',
+        data: {
+          fullName: targetUserObj?.fullName,
+          mobile: targetUserObj?.mobile,
+          email: targetUserObj?.email,
+          workLocation: targetProfile.workLocation,
+          currentHospital: targetProfile.currentHospital,
+          annualIncome: targetProfile.annualIncome,
+        },
+      });
+    }
+
+    // Check whether caller has an active paid membership
+    const isPaid = await hasActivePaidMembership(requesterId, req.user?.role);
+
+    if (isPaid) {
+      // Paid member flow
+      const now = new Date();
+      const subscription = await Subscription.findOne({
+        user: requesterId,
+        status: 'ACTIVE',
+        $or: [{ expiryDate: { $gt: now } }, { expiryDate: null }],
+      }).sort({ createdAt: -1 });
+
+      const planSlug = (subscription?.planId || subscription?.plan || '').toLowerCase();
+      const isUnlimited =
+        planSlug.includes('concierge') ||
+        planSlug === 'vvip' ||
+        subscription?.plan === 'VVIP';
+      const creditsRemaining = subscription?.contactRequestsRemaining ?? 0;
+
+      if (!isUnlimited && creditsRemaining <= 0) {
+        const plans = await MembershipPlan.find({ isActive: true }).sort({ displayOrder: 1, discountedPrice: 1 });
+        return res.status(403).json({
+          success: false,
+          code: 'NO_CREDITS_REMAINING',
+          canUpgrade: true,
+          message: 'You have utilized all your contact credits. Please upgrade or renew your membership to view more contacts.',
+          creditsRemaining: 0,
+          availablePlans: plans,
+        });
+      }
+
+      // Atomically decrement credit (if not unlimited) and log access
+      await prisma.$transaction(async (tx) => {
+        if (!isUnlimited && subscription) {
+          await tx.subscription.update({
+            where: { id: String(subscription._id || subscription.id) },
+            data: {
+              contactRequestsRemaining: { decrement: 1 },
+              contactRequestsUsed: { increment: 1 },
+            },
+          });
+        }
+        await tx.contactAccessLog.create({
+          data: {
+            id: generateObjectId(),
+            userId: String(requesterId),
+            profileOwnerId: String(targetUserId),
+            action: 'CONTACT_VIEWED',
+            creditsUsed: isUnlimited ? 0 : 1,
+            ipAddress: req.ip || '127.0.0.1',
+          },
+        });
+      });
+
+      // Send in-app notification to target user
+      const requesterProfile = await Profile.findOne({ user: requesterId });
+      const requesterName = requesterProfile?.displayName || 'A verified doctor';
+      await Notification.create({
+        user: targetUserId,
+        type: 'INTEREST',
+        title: 'Contact Details Viewed',
+        message: `${requesterName} viewed your verified contact details.`,
+        read: false,
+      }).catch(() => {});
+
+      return res.status(200).json({
+        success: true,
+        creditsUsed: isUnlimited ? 0 : 1,
+        creditsRemaining: isUnlimited ? 'UNLIMITED' : Math.max(0, creditsRemaining - 1),
+        message: 'Contact details unlocked successfully.',
+        data: {
+          fullName: targetUserObj?.fullName,
+          mobile: targetUserObj?.mobile,
+          email: targetUserObj?.email,
+          workLocation: targetProfile.workLocation,
+          currentHospital: targetProfile.currentHospital,
+          annualIncome: targetProfile.annualIncome,
+        },
+      });
+    }
+
+    // Free member flow:
+    // User is entitled to 1 complimentary profile contact view per account lifetime.
+    // Query distinct profiles previously viewed by this user with free reveal (creditsUsed = 0)
+    const existingFreeLogs = await ContactAccessLog.find({
+      user: requesterId,
+      action: { $in: ['FREE_CONTACT_REVEAL', 'CONTACT_VIEWED'] },
+      creditsUsed: 0,
+    });
+
+    const distinctOwners = new Set(
+      existingFreeLogs
+        .map((log: any) => String(log.profileOwner || log.profileOwnerId || ''))
+        .filter((ownerId: string) => ownerId && ownerId !== String(requesterId))
+    );
+
+    if (distinctOwners.size >= 1 && !distinctOwners.has(String(targetUserId))) {
+      // Second profile attempt by free member -> strictly denied
+      const plans = await MembershipPlan.find({ isActive: true }).sort({ displayOrder: 1, discountedPrice: 1 });
+      return res.status(403).json({
+        success: false,
+        code: 'UPGRADE_REQUIRED',
+        canUpgrade: true,
+        message: 'You have used your 1 complimentary contact view for free members. Upgrade to Doctor Connect or Premium Match to connect with more verified doctors.',
+        freeAllowanceRemaining: 0,
+        availablePlans: plans,
+      });
+    }
+
+    // Atomic claim within database transaction with pessimistic row lock to serialize concurrent attempts
+    try {
+      await prisma.$transaction(async (tx) => {
+        // Pessimistic row-level lock on user row in MariaDB to serialize concurrent free reveal attempts
+        try {
+          await (tx as any).$executeRawUnsafe(
+            'SELECT _id FROM users WHERE _id = ? FOR UPDATE',
+            String(requesterId)
+          );
+        } catch {
+          await tx.user.update({
+            where: { id: String(requesterId) },
+            data: { updatedAt: new Date() },
+          }).catch(() => {});
+        }
+
+        // Query within locked transaction
+        const concurrentLog = await tx.contactAccessLog.findFirst({
+          where: {
+            userId: String(requesterId),
+            action: { in: ['FREE_CONTACT_REVEAL', 'CONTACT_VIEWED'] },
+            creditsUsed: 0,
+            profileOwnerId: { not: String(requesterId) },
+          },
+        });
+
+        if (concurrentLog && concurrentLog.profileOwnerId !== String(targetUserId)) {
+          const err: any = new Error('Free contact view limit exceeded');
+          err.code = 'UPGRADE_REQUIRED';
+          throw err;
+        }
+
+        await tx.contactAccessLog.create({
+          data: {
+            id: generateObjectId(),
+            userId: String(requesterId),
+            profileOwnerId: String(targetUserId),
+            action: 'FREE_CONTACT_REVEAL',
+            creditsUsed: 0,
+            ipAddress: req.ip || '127.0.0.1',
+          },
+        });
+      });
+    } catch (txErr: any) {
+      if (txErr.code === 'UPGRADE_REQUIRED' || txErr.message?.includes('Free contact view limit')) {
+        const plans = await MembershipPlan.find({ isActive: true }).sort({ displayOrder: 1, discountedPrice: 1 });
+        return res.status(403).json({
+          success: false,
+          code: 'UPGRADE_REQUIRED',
+          canUpgrade: true,
+          message: 'You have used your 1 complimentary contact view for free members. Upgrade to Doctor Connect or Premium Match to connect with more verified doctors.',
+          freeAllowanceRemaining: 0,
+          availablePlans: plans,
+        });
+      }
+      throw txErr;
+    }
+
+    // Send in-app notification to target user
+    const requesterProfile = await Profile.findOne({ user: requesterId });
+    const requesterName = requesterProfile?.displayName || 'A verified doctor';
+    await Notification.create({
+      user: targetUserId,
+      type: 'INTEREST',
+      title: 'Contact Details Viewed',
+      message: `${requesterName} viewed your verified contact details.`,
+      read: false,
+    }).catch(() => {});
+
+    return res.status(200).json({
+      success: true,
+      isFreeReveal: true,
+      freeAllowanceRemaining: 0,
+      message: 'Complimentary contact view successful. You have used your 1 free profile view.',
+      data: {
+        fullName: targetUserObj?.fullName,
+        mobile: targetUserObj?.mobile,
+        email: targetUserObj?.email,
+        workLocation: targetProfile.workLocation,
+        currentHospital: targetProfile.currentHospital,
+        annualIncome: targetProfile.annualIncome,
       },
     });
   } catch (error) {

@@ -165,7 +165,7 @@ async function createContactRequest(req, res, next) {
         const requesterProfile = await Profile_1.Profile.findOne({ user: requesterId });
         const requesterName = requesterProfile?.displayName || 'A verified doctor';
         await Notification_1.Notification.create({
-            recipient: targetUserId,
+            user: targetUserId,
             type: 'INTEREST',
             title: 'New Contact Request',
             message: `${requesterName} has requested to view your contact information.`,
@@ -201,8 +201,8 @@ async function getContactRequests(req, res, next) {
                 .sort({ createdAt: -1 }),
         ]);
         // Attach profile summaries for UI presentation
-        const requesterIds = incomingRequests.map((r) => r.requester?._id).filter(Boolean);
-        const recipientIds = outgoingRequests.map((r) => r.recipient?._id).filter(Boolean);
+        const requesterIds = incomingRequests.map((r) => r.requester?._id || r.requester?.id || (typeof r.requester === 'string' ? r.requester : r.requesterId)).filter(Boolean).map(String);
+        const recipientIds = outgoingRequests.map((r) => r.recipient?._id || r.recipient?.id || (typeof r.recipient === 'string' ? r.recipient : r.recipientId)).filter(Boolean).map(String);
         const [requesterProfiles, recipientProfiles] = await Promise.all([
             Profile_1.Profile.find({ user: { $in: requesterIds } }).select('user displayName primaryPhoto degree education profession city state'),
             Profile_1.Profile.find({ user: { $in: recipientIds } }).select('user displayName primaryPhoto degree education profession city state'),
@@ -210,14 +210,14 @@ async function getContactRequests(req, res, next) {
         const reqProfileMap = new Map(requesterProfiles.map((p) => [p.user.toString(), p]));
         const recProfileMap = new Map(recipientProfiles.map((p) => [p.user.toString(), p]));
         const formatIncoming = incomingRequests.map((reqItem) => {
-            const uId = reqItem.requester?._id?.toString();
+            const uId = String(reqItem.requester?._id || reqItem.requester?.id || reqItem.requester || reqItem.requesterId || '');
             return {
                 ...reqItem.toObject(),
                 profile: uId ? reqProfileMap.get(uId) || null : null,
             };
         });
         const formatOutgoing = outgoingRequests.map((reqItem) => {
-            const uId = reqItem.recipient?._id?.toString();
+            const uId = String(reqItem.recipient?._id || reqItem.recipient?.id || reqItem.recipient || reqItem.recipientId || '');
             return {
                 ...reqItem.toObject(),
                 profile: uId ? recProfileMap.get(uId) || null : null,
@@ -254,7 +254,12 @@ async function acceptContactRequest(req, res, next) {
             return res.status(404).json({ success: false, message: 'Contact request not found' });
         }
         // Security: Only recipient can accept
-        if (contactRequest.recipient.toString() !== userId.toString()) {
+        const recipientId = String(contactRequest.recipient?._id ||
+            contactRequest.recipient?.id ||
+            contactRequest.recipient ||
+            contactRequest.recipientId ||
+            '');
+        if (!recipientId || recipientId !== String(userId)) {
             return res.status(403).json({
                 success: false,
                 message: 'You are not authorized to accept this contact request.',
@@ -312,7 +317,7 @@ async function acceptContactRequest(req, res, next) {
         const recipientProfile = await Profile_1.Profile.findOne({ user: userId });
         const recipientName = recipientProfile?.displayName || 'The candidate';
         await Notification_1.Notification.create({
-            recipient: contactRequest.requester,
+            user: contactRequest.requester,
             type: 'INTEREST',
             title: 'Contact Request Accepted',
             message: `Dr. ${recipientName} has accepted your contact request! You can now view their verified phone and contact details.`,
@@ -348,7 +353,12 @@ async function declineContactRequest(req, res, next) {
             return res.status(404).json({ success: false, message: 'Contact request not found' });
         }
         // Security: Only recipient can decline
-        if (contactRequest.recipient.toString() !== userId.toString()) {
+        const declineRecipientId = String(contactRequest.recipient?._id ||
+            contactRequest.recipient?.id ||
+            contactRequest.recipient ||
+            contactRequest.recipientId ||
+            '');
+        if (!declineRecipientId || declineRecipientId !== String(userId)) {
             return res.status(403).json({
                 success: false,
                 message: 'You are not authorized to decline this contact request.',
@@ -396,7 +406,14 @@ async function getContactAccessStatus(req, res, next) {
         const targetUserId = targetProfile.user?._id?.toString() ||
             targetProfile.user?.id?.toString() ||
             (typeof targetProfile.user === 'string' ? targetProfile.user : null) ||
-            targetProfile.userId?.toString();
+            targetProfile.userId?.toString() ||
+            null;
+        if (!targetUserId) {
+            return res.status(404).json({
+                success: false,
+                message: 'Profile owner user account not found',
+            });
+        }
         // Guest / non-logged-in users cannot access contact details
         if (!userId) {
             return res.json({
@@ -409,7 +426,7 @@ async function getContactAccessStatus(req, res, next) {
             });
         }
         // If own profile, return full access
-        if (userId.toString() === targetUserId) {
+        if (String(userId) === String(targetUserId)) {
             const u = targetProfile.user;
             return res.json({
                 success: true,
@@ -475,7 +492,12 @@ async function getContactAccessStatus(req, res, next) {
             });
         }
         if (existingRequest && existingRequest.status === 'PENDING') {
-            const isOutgoing = existingRequest.requester.toString() === userId.toString();
+            const requesterId = String(existingRequest.requester?._id ||
+                existingRequest.requester?.id ||
+                existingRequest.requester ||
+                existingRequest.requesterId ||
+                '');
+            const isOutgoing = requesterId.length > 0 && requesterId === String(userId);
             return res.json({
                 success: true,
                 data: {

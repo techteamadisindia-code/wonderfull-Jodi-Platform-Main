@@ -47,18 +47,28 @@ export function NotificationBell() {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({});
+  const [pollingSuspended, setPollingSuspended] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Fetch unread count
   const refreshUnreadCount = useCallback(async () => {
+    if (typeof window !== 'undefined' && (!hasAuthSession() || pollingSuspended)) {
+      setUnreadCount(0);
+      return;
+    }
     try {
-      const countRes = await fetchUnreadNotificationCount();
+      const countRes: any = await fetchUnreadNotificationCount();
+      if (countRes?.unauthorized) {
+        setPollingSuspended(true);
+        setUnreadCount(0);
+        return;
+      }
       setUnreadCount(Number(countRes) || 0);
       setIsUnreadCapped(Boolean(countRes?.isCapped));
     } catch {
       // Ignore unauthenticated / error
     }
-  }, []);
+  }, [pollingSuspended]);
 
   // Fetch recent notifications when dropdown opens
   const loadRecentNotifications = useCallback(async () => {
@@ -81,10 +91,30 @@ export function NotificationBell() {
   }, []);
 
   useEffect(() => {
+    if (typeof window !== 'undefined' && (!hasAuthSession() || pollingSuspended)) {
+      setUnreadCount(0);
+      return;
+    }
     refreshUnreadCount();
-    const interval = setInterval(refreshUnreadCount, 60000);
+    const interval = setInterval(() => {
+      if (typeof window !== 'undefined' && (!hasAuthSession() || pollingSuspended)) {
+        setUnreadCount(0);
+        return;
+      }
+      refreshUnreadCount();
+    }, 60000);
     return () => clearInterval(interval);
-  }, [refreshUnreadCount]);
+  }, [refreshUnreadCount, pollingSuspended]);
+
+  useEffect(() => {
+    const handleFocus = () => {
+      if (typeof window !== 'undefined' && hasAuthSession()) {
+        setPollingSuspended(false);
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, []);
 
   useEffect(() => {
     if (open) {

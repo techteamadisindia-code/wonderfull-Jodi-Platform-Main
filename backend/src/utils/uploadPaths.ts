@@ -73,6 +73,19 @@ export function getCanonicalUploadRootDir(): string {
   if (envUploadRoot && envUploadRoot.trim()) {
     return path.resolve(envUploadRoot.trim());
   }
+
+  // On Hostinger deployments with versioned release paths, write uploads directly to the
+  // persistent domain uploads directory so they survive new deployments and version pruning.
+  const searchRoots = [__dirname, process.cwd(), getProjectRootDir()];
+  for (const root of searchRoots) {
+    const normalized = path.resolve(root).replace(/\\/g, '/');
+    const hbuildsIdx = normalized.indexOf('/hbuilds/versions/');
+    if (hbuildsIdx !== -1) {
+      const domainRoot = normalized.substring(0, hbuildsIdx);
+      return path.resolve(domainRoot, 'uploads');
+    }
+  }
+
   return path.resolve(getProjectRootDir(), 'uploads');
 }
 

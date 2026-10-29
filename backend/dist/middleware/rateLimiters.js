@@ -4,17 +4,44 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.kundaliLimiter = exports.uploadLimiter = exports.adminResetLimiter = exports.adminLoginLimiter = exports.passwordResetLimiter = exports.authLimiter = exports.globalLimiter = void 0;
+exports.shouldSkipGlobalRateLimit = shouldSkipGlobalRateLimit;
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
+/**
+ * Determines whether a given request should bypass the application-wide IP rate limiter.
+ * Skips static assets, Next.js internal chunks, image optimization, client RSC navigation
+ * pre-fetches on frontend pages, and health checks so normal web browsing does not trigger HTTP 429.
+ *
+ * STRICT SECURITY INVARIANT:
+ * Requests to /api/** must NEVER bypass global rate limiting via ?_rsc=... or query trickery.
+ * Static-asset exemptions are narrowly scoped. Dedicated mutation/auth limiters remain active.
+ */
+function shouldSkipGlobalRateLimit(req) {
+    const p = req.path || '';
+    // Health checks
+    if (p === '/api/health' || p === '/health')
+        return true;
+    // Static uploaded documents and images (strictly under /uploads/)
+    if (p.startsWith('/uploads/'))
+        return true;
+    // Next.js internal static assets, chunks, and image optimization
+    if (p.startsWith('/_next/'))
+        return true;
+    // Static public assets and favicon
+    if (p.startsWith('/images/') || p === '/favicon.ico')
+        return true;
+    // Next.js App Router client-side RSC navigation prefetch queries (?_rsc=...)
+    // STRICT AUDIT REQUIREMENT: Never allow /api/** requests to bypass rate limiting via ?_rsc=...
+    if (!p.startsWith('/api') && req.query && req.query._rsc !== undefined) {
+        return true;
+    }
+    return false;
+}
 exports.globalLimiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000,
-    max: process.env.NODE_ENV === 'production' ? 1000 : 10000,
+    max: process.env.NODE_ENV === 'production' ? 3000 : 10000,
     standardHeaders: true,
     legacyHeaders: false,
-    skip: (req) => {
-        return (req.path === '/api/health' ||
-            req.path === '/health' ||
-            req.path.startsWith('/uploads'));
-    },
+    skip: shouldSkipGlobalRateLimit,
     message: {
         success: false,
         message: 'Too many requests from this IP. Please try again later.',

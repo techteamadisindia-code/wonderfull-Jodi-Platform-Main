@@ -627,28 +627,23 @@ export async function exportCandidateData(req: AuthRequest, res: Response, next:
         userQuery.$or = orConditions;
       }
 
-      // Gender filter: check both Profile and User records
+      // Gender filter: check Profile records (Profile holds authoritative gender)
       if (gender && gender !== 'all') {
         if (gender === 'not_recorded' || gender === 'Not recorded') {
-          const [profilesWithGender, usersWithGender] = await Promise.all([
-            Profile.find({ gender: { $exists: true, $ne: null } }).select('user').lean(),
-            User.find({ gender: { $exists: true, $ne: null } }).select('_id').lean(),
-          ]);
-          const recordedIds = Array.from(new Set([
-            ...profilesWithGender.map((p: any) => String(p.user)),
-            ...usersWithGender.map((u: any) => String(u._id)),
-          ]));
+          const profilesWithGender = await Profile.find({ gender: { $exists: true, $ne: null } }).select('user gender').lean();
+          const recordedIds = Array.from(new Set(
+            profilesWithGender
+              .filter((p: any) => p.gender && String(p.gender).trim() !== '' && String(p.gender).toLowerCase() !== 'not recorded')
+              .map((p: any) => String(p.user))
+              .filter(Boolean)
+          ));
           userQuery._id = { $nin: recordedIds };
         } else {
           const safeGenderRegex = new RegExp(`^${escapeRegex(String(gender))}$`, 'i');
-          const [profilesWithGender, usersWithGender] = await Promise.all([
-            Profile.find({ gender: safeGenderRegex }).select('user').lean(),
-            User.find({ gender: safeGenderRegex }).select('_id').lean(),
-          ]);
-          const genderUserIds = Array.from(new Set([
-            ...profilesWithGender.map((p: any) => String(p.user)),
-            ...usersWithGender.map((u: any) => String(u._id)),
-          ]));
+          const profilesWithGender = await Profile.find({ gender: safeGenderRegex }).select('user').lean();
+          const genderUserIds = Array.from(new Set(
+            profilesWithGender.map((p: any) => String(p.user)).filter(Boolean)
+          ));
           userQuery._id = { $in: genderUserIds };
         }
       }

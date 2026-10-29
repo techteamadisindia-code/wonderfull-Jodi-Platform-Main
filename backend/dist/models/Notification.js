@@ -36,5 +36,5 @@ const notificationSchema = new prismaBridge_1.Schema({
 // Compound indexes for fast user notification querying and unread counting
 notificationSchema.index({ user: 1, read: 1, createdAt: -1 });
 notificationSchema.index({ user: 1, createdAt: -1 });
-exports.Notification = (0, prismaBridge_1.createPrismaModelAdapter)('notification', { "user": "userId", "broadcast": "broadcastId" });
+exports.Notification = (0, prismaBridge_1.createPrismaModelAdapter)('notification', { "user": "userId", "recipient": "userId", "broadcast": "broadcastId" });
 //# sourceMappingURL=Notification.js.map

@@ -1,3 +1,4 @@
+import superAdminRoutes from './superAdminRoutes';
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middleware/authMiddleware';
 import {
@@ -85,7 +86,10 @@ import {
 
 const router = Router();
 
-// All admin routes require valid JWT & 'admin' role
+// Dedicated Super Administrator Routes
+router.use('/super', superAdminRoutes);
+
+// All standard admin routes require valid JWT & 'admin' role
 router.use(requireAuth, requireRole('admin'));
 
 // 1. Dashboard & Analytics

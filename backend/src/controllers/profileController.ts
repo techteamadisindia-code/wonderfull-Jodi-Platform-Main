@@ -789,19 +789,10 @@ export async function getProfile(req: Request, res: Response, next: NextFunction
     const targetUserId = profile.user?._id?.toString() || profile.user?.toString();
     const isSelf = callerUserId && callerUserId.toString() === targetUserId;
 
-    let isContactUnlocked = Boolean(isSelf || isCallerAdmin);
-
-    if (!isContactUnlocked && callerUserId && targetUserId) {
-      const acceptedReq = await ContactRequest.findOne({
-        $or: [
-          { requester: callerUserId, recipient: targetUserId, status: 'ACCEPTED' },
-          { requester: targetUserId, recipient: callerUserId, status: 'ACCEPTED' },
-        ],
-      });
-      if (acceptedReq) {
-        isContactUnlocked = true;
-      }
-    }
+    // Contact details must NEVER be disclosed through the public profile endpoint for other members,
+    // even if a ContactRequest is ACCEPTED or caller has regular admin role.
+    // Unlocked contact access belongs strictly to dedicated, entitlement-gated contact-access endpoints.
+    let isContactUnlocked = Boolean(isSelf);
 
     // Best-effort profile view notification tracking (non-blocking, failure resilient)
     if (callerUserId && !isSelf && !isCallerAdmin) {
@@ -818,7 +809,7 @@ export async function getProfile(req: Request, res: Response, next: NextFunction
         viewerUserId: callerUserId,
         isContactUnlocked,
         isSelf,
-        isAdmin: isCallerAdmin,
+        isAdmin: false,
       }),
     });
   } catch (error) {

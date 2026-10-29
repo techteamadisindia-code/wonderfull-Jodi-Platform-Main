@@ -39,11 +39,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.requireAuth = requireAuth;
 exports.requireRole = requireRole;
 exports.requireAdminAuth = requireAdminAuth;
+exports.requireSuperAdmin = requireSuperAdmin;
 exports.optionalAuth = optionalAuth;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 async function requireAuth(req, res, next) {
     // 1. Check Bearer Authorization Header
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers?.authorization;
     let token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
     // 2. Fallback to HttpOnly cookie (admin_access_token or access_token)
     if (!token && req.cookies) {
@@ -133,6 +134,54 @@ function requireAdminAuth(req, res, next) {
             });
         }
         next();
+    });
+}
+/**
+ * Super Administrator Authorization Middleware
+ * Strictly enforces that caller has authenticated role === 'admin'
+ * AND a verified record in the 'admins' table with permissions containing 'all'.
+ * Fails closed on missing permissions, deactivated status, or database errors.
+ */
+function requireSuperAdmin(req, res, next) {
+    requireAdminAuth(req, res, async () => {
+        const callerId = req.user?.userId || req.user?._id || req.user?.id;
+        if (!callerId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied: Super Administrator privileges required.',
+            });
+        }
+        try {
+            const { Admin } = await Promise.resolve().then(() => __importStar(require('../models/Admin')));
+            const adminRecord = await Admin.findOne({ user: callerId });
+            let permissions = [];
+            if (Array.isArray(adminRecord?.permissions)) {
+                permissions = adminRecord.permissions;
+            }
+            else if (typeof adminRecord?.permissions === 'string') {
+                try {
+                    permissions = JSON.parse(adminRecord.permissions);
+                }
+                catch {
+                    permissions = [];
+                }
+            }
+            if (!permissions.includes('all')) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'SUPER_ADMIN_REQUIRED',
+                    message: 'Access denied: Super Administrator privileges required.',
+                });
+            }
+            next();
+        }
+        catch (err) {
+            console.error('[AuthMiddleware] Super Admin verification error:', err?.message || err);
+            return res.status(500).json({
+                success: false,
+                message: 'Security authorization check failed. Access denied.',
+            });
+        }
     });
 }
 /**

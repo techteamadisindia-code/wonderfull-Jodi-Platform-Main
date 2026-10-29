@@ -17,7 +17,7 @@ export interface AuthRequest extends Request {
 
 export async function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
   // 1. Check Bearer Authorization Header
-  const authHeader = req.headers.authorization;
+  const authHeader = req.headers?.authorization;
   let token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
 
   // 2. Fallback to HttpOnly cookie (admin_access_token or access_token)
@@ -117,6 +117,55 @@ export function requireAdminAuth(req: AuthRequest, res: Response, next: NextFunc
       });
     }
     next();
+  });
+}
+
+/**
+ * Super Administrator Authorization Middleware
+ * Strictly enforces that caller has authenticated role === 'admin'
+ * AND a verified record in the 'admins' table with permissions containing 'all'.
+ * Fails closed on missing permissions, deactivated status, or database errors.
+ */
+export function requireSuperAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+  requireAdminAuth(req, res, async () => {
+    const callerId = req.user?.userId || req.user?._id || req.user?.id;
+    if (!callerId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: Super Administrator privileges required.',
+      });
+    }
+
+    try {
+      const { Admin } = await import('../models/Admin');
+      const adminRecord = await Admin.findOne({ user: callerId });
+      let permissions: string[] = [];
+      if (Array.isArray(adminRecord?.permissions)) {
+        permissions = adminRecord.permissions;
+      } else if (typeof adminRecord?.permissions === 'string') {
+        try {
+          permissions = JSON.parse(adminRecord.permissions);
+        } catch {
+          permissions = [];
+        }
+      }
+
+      if (!permissions.includes('all')) {
+        return res.status(403).json({
+          success: false,
+          code: 'SUPER_ADMIN_REQUIRED',
+          message: 'Access denied: Super Administrator privileges required.',
+        });
+      }
+
+      next();
+    } catch (err: any) {
+      console.error('[AuthMiddleware] Super Admin verification error:', err?.message || err);
+      return res.status(500).json({
+        success: false,
+        message: 'Security authorization check failed. Access denied.',
+      });
+    }
   });
 }
 

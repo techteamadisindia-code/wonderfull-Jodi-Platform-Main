@@ -7,7 +7,13 @@ export interface IContactAccessLog extends Document {
   profileOwnerId?: mongoose.Types.ObjectId;
   contactRequest?: mongoose.Types.ObjectId;
   contactRequestId?: mongoose.Types.ObjectId;
-  action: 'REQUEST_CREATED' | 'REQUEST_ACCEPTED' | 'REQUEST_DECLINED' | 'CONTACT_VIEWED' | 'CREDIT_DEDUCTED';
+  action:
+    | 'REQUEST_CREATED'
+    | 'REQUEST_ACCEPTED'
+    | 'REQUEST_DECLINED'
+    | 'CONTACT_VIEWED'
+    | 'CREDIT_DEDUCTED'
+    | 'FREE_CONTACT_REVEAL';
   creditsUsed: number;
   ipAddress?: string;
   metadata?: Record<string, any>;
@@ -21,7 +27,14 @@ const contactAccessLogSchema = new Schema<IContactAccessLog>(
     contactRequest: { type: Schema.Types.ObjectId, ref: 'ContactRequest', index: true },
     action: {
       type: String,
-      enum: ['REQUEST_CREATED', 'REQUEST_ACCEPTED', 'REQUEST_DECLINED', 'CONTACT_VIEWED', 'CREDIT_DEDUCTED'],
+      enum: [
+        'REQUEST_CREATED',
+        'REQUEST_ACCEPTED',
+        'REQUEST_DECLINED',
+        'CONTACT_VIEWED',
+        'CREDIT_DEDUCTED',
+        'FREE_CONTACT_REVEAL',
+      ],
       required: true,
       index: true,
     },
@@ -32,6 +45,9 @@ const contactAccessLogSchema = new Schema<IContactAccessLog>(
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
-
-
-export const ContactAccessLog = createPrismaModelAdapter<IContactAccessLog>('contactAccessLog', {"user":"userId","profileOwner":"profileOwnerId","contactRequest":"contactRequestId"});
+export const ContactAccessLog = createPrismaModelAdapter<IContactAccessLog>('contactAccessLog', {
+  _id: 'id',
+  user: 'userId',
+  profileOwner: 'profileOwnerId',
+  contactRequest: 'contactRequestId',
+});

@@ -1,11 +1,17 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
+const superAdminRoutes_1 = __importDefault(require("./superAdminRoutes"));
 const express_1 = require("express");
 const authMiddleware_1 = require("../middleware/authMiddleware");
 const adminController_1 = require("../controllers/adminController");
 const membershipPlanAdminController_1 = require("../controllers/membershipPlanAdminController");
 const router = (0, express_1.Router)();
-// All admin routes require valid JWT & 'admin' role
+// Dedicated Super Administrator Routes
+router.use('/super', superAdminRoutes_1.default);
+// All standard admin routes require valid JWT & 'admin' role
 router.use(authMiddleware_1.requireAuth, (0, authMiddleware_1.requireRole)('admin'));
 // 1. Dashboard & Analytics
 router.get('/dashboard', adminController_1.getDashboardStats);

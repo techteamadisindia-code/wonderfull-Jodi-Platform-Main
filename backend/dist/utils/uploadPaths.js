@@ -81,6 +81,17 @@ function getCanonicalUploadRootDir() {
     if (envUploadRoot && envUploadRoot.trim()) {
         return path_1.default.resolve(envUploadRoot.trim());
     }
+    // On Hostinger deployments with versioned release paths, write uploads directly to the
+    // persistent domain uploads directory so they survive new deployments and version pruning.
+    const searchRoots = [__dirname, process.cwd(), getProjectRootDir()];
+    for (const root of searchRoots) {
+        const normalized = path_1.default.resolve(root).replace(/\\/g, '/');
+        const hbuildsIdx = normalized.indexOf('/hbuilds/versions/');
+        if (hbuildsIdx !== -1) {
+            const domainRoot = normalized.substring(0, hbuildsIdx);
+            return path_1.default.resolve(domainRoot, 'uploads');
+        }
+    }
     return path_1.default.resolve(getProjectRootDir(), 'uploads');
 }
 /**

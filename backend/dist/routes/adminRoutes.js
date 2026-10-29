@@ -27,10 +27,15 @@ router.get('/registrations/:id', registrationController_1.getAdminRegistrationBy
 router.delete('/registrations/:id', registrationController_1.deleteAdminRegistration);
 // 2. Users
 router.get('/users', adminController_1.getUsers);
+router.put('/users/bulk-status', adminController_1.bulkUpdateUserStatus);
 router.get('/users/:id', adminController_1.getUserById);
 router.put('/users/:id/status', adminController_1.updateUserStatus);
 router.put('/users/:id/role', adminController_1.updateUserRole);
 router.delete('/users/:id', adminController_1.deleteUser);
+// 2b. Candidate & Registration Data Export
+const adminExportController_1 = require("../controllers/adminExportController");
+router.get('/export/candidates', adminExportController_1.exportCandidateData);
+router.post('/export/candidates', adminExportController_1.exportCandidateData);
 // 3. Profiles
 router.get('/profiles', adminController_1.getProfiles);
 router.get('/profiles/:id', adminController_1.getProfileById);

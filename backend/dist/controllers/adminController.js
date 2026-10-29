@@ -50,6 +50,7 @@ exports.getDashboardRevenue = getDashboardRevenue;
 exports.getUsers = getUsers;
 exports.getUserById = getUserById;
 exports.updateUserStatus = updateUserStatus;
+exports.bulkUpdateUserStatus = bulkUpdateUserStatus;
 exports.updateUserRole = updateUserRole;
 exports.deleteUser = deleteUser;
 exports.getProfiles = getProfiles;
@@ -140,6 +141,8 @@ const doctorValidation_1 = require("../utils/doctorValidation");
 const visitTrackingService_1 = require("../services/visitTrackingService");
 const complianceDetector_1 = require("../services/complianceDetector");
 const profileController_1 = require("./profileController");
+const client_1 = require("../db/client");
+const adminLifecycleGuard_1 = require("../utils/adminLifecycleGuard");
 // Helper for audit logging
 async function logAdminAction(adminEmail, action, details, targetModel, targetId, extraParams) {
     try {
@@ -542,7 +545,7 @@ async function getDashboardRevenue(req, res, next) {
 // 2. User Management
 async function getUsers(req, res, next) {
     try {
-        const { search, role, status, page = 1, limit = 25 } = req.query;
+        const { search, role, status, gender, registrationStatus, page = 1, limit = 25 } = req.query;
         const query = {};
         if (role && role !== 'all') {
             query.role = role;
@@ -552,6 +555,73 @@ async function getUsers(req, res, next) {
         }
         else if (status === 'inactive') {
             query.isActive = false;
+        }
+        // Gender filter support (Profile holds authoritative gender)
+        let genderUserIds = null;
+        let genderUserIdsNin = null;
+        if (gender && gender !== 'all') {
+            if (gender === 'not_recorded' || gender === 'Not recorded') {
+                const profilesWithGender = await Profile_1.Profile.find({ gender: { $exists: true, $ne: null } }).select('user gender').lean();
+                const recordedSet = new Set(profilesWithGender
+                    .filter((p) => p.gender && String(p.gender).trim() !== '' && String(p.gender).toLowerCase() !== 'not recorded')
+                    .map((p) => String(p.user))
+                    .filter(Boolean));
+                genderUserIdsNin = Array.from(recordedSet);
+            }
+            else {
+                const safeGenderRegex = new RegExp(`^${(0, securityUtils_1.escapeRegex)(String(gender))}$`, 'i');
+                const profilesWithGender = await Profile_1.Profile.find({ gender: safeGenderRegex }).select('user').lean();
+                const genderSet = new Set(profilesWithGender.map((p) => String(p.user)).filter(Boolean));
+                genderUserIds = Array.from(genderSet);
+            }
+        }
+        // Registration status filter support
+        let regStatusUserIdsIn = null;
+        let regStatusUserIdsNin = null;
+        if (registrationStatus && registrationStatus !== 'all') {
+            const [completedProfiles, completedRegs] = await Promise.all([
+                Profile_1.Profile.distinct('user'),
+                Registration_1.Registration.distinct('user', { status: 'COMPLETED', isDeleted: false }),
+            ]);
+            const completedUserSet = new Set([
+                ...completedProfiles.map((id) => String(id)),
+                ...completedRegs.filter(Boolean).map((id) => String(id)),
+            ]);
+            if (registrationStatus === 'complete') {
+                regStatusUserIdsIn = Array.from(completedUserSet);
+            }
+            else if (registrationStatus === 'incomplete') {
+                const activeDrafts = await Registration_1.Registration.distinct('user', {
+                    status: { $in: ['STARTED', 'IN_PROGRESS', 'ABANDONED'] },
+                    isDeleted: false,
+                });
+                regStatusUserIdsIn = activeDrafts.filter((id) => !completedUserSet.has(String(id))).map(String);
+            }
+            else if (registrationStatus === 'pending') {
+                const allRegisteredOrDrafted = await Promise.all([
+                    Profile_1.Profile.distinct('user'),
+                    Registration_1.Registration.distinct('user', { isDeleted: false }),
+                ]);
+                const anyActivitySet = new Set([
+                    ...allRegisteredOrDrafted[0].map(String),
+                    ...allRegisteredOrDrafted[1].filter(Boolean).map(String),
+                ]);
+                regStatusUserIdsNin = Array.from(anyActivitySet);
+            }
+        }
+        // Combine ID-based filters
+        const idFilters = [];
+        if (genderUserIds !== null) {
+            idFilters.push({ _id: { $in: genderUserIds } });
+        }
+        if (genderUserIdsNin !== null) {
+            idFilters.push({ _id: { $nin: genderUserIdsNin } });
+        }
+        if (regStatusUserIdsIn !== null) {
+            idFilters.push({ _id: { $in: regStatusUserIdsIn } });
+        }
+        if (regStatusUserIdsNin !== null) {
+            idFilters.push({ _id: { $nin: regStatusUserIdsNin } });
         }
         if (search) {
             const searchStr = String(search).trim();
@@ -566,6 +636,14 @@ async function getUsers(req, res, next) {
             }
             query.$or = orConditions;
         }
+        if (idFilters.length > 0) {
+            if (query.$and) {
+                query.$and.push(...idFilters);
+            }
+            else {
+                query.$and = idFilters;
+            }
+        }
         const pageSize = Math.min(100, Math.max(1, Number(limit) || 25));
         const pageNumber = Math.max(1, Number(page) || 1);
         const skip = (pageNumber - 1) * pageSize;
@@ -579,17 +657,21 @@ async function getUsers(req, res, next) {
                 .lean(),
         ]);
         const userIds = rawUsers.map((u) => u._id);
-        // Batch fetch associated profiles and active memberships to enrich user rows efficiently
-        const [profiles, subscriptions] = await Promise.all([
+        // Batch fetch associated profiles, active memberships, and registrations
+        const [profiles, subscriptions, registrations] = await Promise.all([
             Profile_1.Profile.find({ user: { $in: userIds } })
-                .select('_id user displayName primaryPhoto photos verificationStatus lastActiveAt')
+                .select('_id user candidateId displayName gender primaryPhoto photos verificationStatus lastActiveAt')
                 .lean(),
             Subscription_1.Subscription.find({ user: { $in: userIds }, status: 'ACTIVE' })
                 .select('user plan')
                 .lean(),
+            Registration_1.Registration.find({ user: { $in: userIds }, isDeleted: false })
+                .select('user registrationId status currentStep completionPercentage')
+                .lean(),
         ]);
         const profileMap = new Map(profiles.map((p) => [String(p.user), p]));
         const subscriptionMap = new Map(subscriptions.map((s) => [String(s.user), s]));
+        const registrationMap = new Map(registrations.map((r) => [String(r.user), r]));
         const callerId = req.user?.userId || req.user?._id || req.user?.id;
         const callerAdmin = await Admin_1.Admin.findOne({ user: callerId });
         const callerPerms = callerAdmin?.permissions || [];
@@ -598,8 +680,24 @@ async function getUsers(req, res, next) {
         const users = rawUsers.map((u) => {
             const p = profileMap.get(String(u._id));
             const s = subscriptionMap.get(String(u._id));
+            const r = registrationMap.get(String(u._id));
+            // Determine real registration status
+            let regStatus = 'Pending';
+            if (p || r?.status === 'COMPLETED') {
+                regStatus = 'Complete';
+            }
+            else if (r?.status === 'STARTED' || r?.status === 'IN_PROGRESS' || r?.status === 'ABANDONED') {
+                regStatus = 'Incomplete';
+            }
+            else {
+                regStatus = 'Pending';
+            }
             const userObj = {
                 ...u,
+                gender: p?.gender || u.gender || null,
+                registrationStatus: regStatus,
+                registrationId: r?.registrationId || null,
+                candidateId: p?.candidateId || null,
                 profileId: p?._id ? String(p._id) : undefined,
                 profilePhoto: p?.primaryPhoto || p?.photos?.[0] || '',
                 displayName: p?.displayName || u.fullName,
@@ -688,17 +786,164 @@ async function updateUserStatus(req, res, next) {
         }
         const { isActive, status, reason } = req.body;
         const activeValue = typeof isActive === 'boolean' ? isActive : status === 'active';
-        const user = await User_1.User.findByIdAndUpdate(id, { isActive: activeValue }, { new: true }).select('-password');
-        if (!user) {
+        const callerId = String(req.user?.userId || req.user?._id || req.user?.id || '');
+        const existingUser = await User_1.User.findById(id).select('-password');
+        if (!existingUser) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
-        // When deactivating, immediately revoke active refresh tokens/sessions
+        // Safeguards when deactivating an account
+        if (!activeValue && existingUser.isActive) {
+            // 1. Cannot deactivate currently logged-in administrator
+            if (String(existingUser._id) === callerId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot deactivate currently logged-in administrator',
+                });
+            }
+            // 2. Protect Super Admin accounts from deactivation
+            const adminRecord = await Admin_1.Admin.findOne({ user: existingUser._id });
+            if (adminRecord?.permissions?.includes('all')) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Super Admin accounts are protected and cannot be deactivated',
+                });
+            }
+            // 3. Protect last active administrator under concurrency guard
+            if (existingUser.role === 'admin') {
+                try {
+                    await (0, adminLifecycleGuard_1.withAdminLifecycleGuard)(async (tx) => {
+                        let freshActiveAdminCount;
+                        if (tx && typeof tx.user?.count === 'function') {
+                            freshActiveAdminCount = await tx.user.count({
+                                where: {
+                                    role: 'admin',
+                                    isActive: true,
+                                    isDeleted: false,
+                                },
+                            });
+                        }
+                        else {
+                            freshActiveAdminCount = await User_1.User.countDocuments({
+                                role: 'admin',
+                                isActive: true,
+                                isDeleted: { $ne: true },
+                            });
+                        }
+                        if (freshActiveAdminCount <= 1) {
+                            throw new Error('LAST_ACTIVE_ADMIN');
+                        }
+                        if (tx && typeof tx.user?.update === 'function') {
+                            await tx.user.update({
+                                where: { id: String(existingUser._id) },
+                                data: {
+                                    isActive: false,
+                                    status: 'Suspended',
+                                },
+                            });
+                            if (tx.refreshToken?.updateMany) {
+                                await tx.refreshToken.updateMany({
+                                    where: { userId: String(existingUser._id) },
+                                    data: { isRevoked: true, isUsed: true },
+                                });
+                            }
+                            existingUser.isActive = false;
+                            existingUser.status = 'Suspended';
+                        }
+                        else {
+                            existingUser.isActive = false;
+                            existingUser.status = 'Suspended';
+                            existingUser.suspensionReason = reason ? String(reason).slice(0, 200) : 'Administrative deactivation';
+                            existingUser.suspendedAt = new Date();
+                            existingUser.suspendedBy = callerId;
+                            await existingUser.save();
+                            await RefreshToken_1.RefreshToken.updateMany({ user: existingUser._id }, { $set: { isRevoked: true, isUsed: true } });
+                        }
+                    });
+                }
+                catch (guardErr) {
+                    if (guardErr?.message === 'LAST_ACTIVE_ADMIN') {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Cannot deactivate the last active administrator account',
+                        });
+                    }
+                    if (guardErr instanceof adminLifecycleGuard_1.AdminLifecycleLockError || guardErr?.code === 'LOCK_TIMEOUT') {
+                        return res.status(409).json({
+                            success: false,
+                            message: 'Administrator status update locked due to concurrent modifications. Please retry.',
+                        });
+                    }
+                    throw guardErr;
+                }
+                const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
+                const reasonText = reason ? ' (Reason: ' + String(reason).slice(0, 200) + ')' : '';
+                await logAdminAction(adminEmail, 'ACCOUNT_DEACTIVATED', 'Updated user ' + existingUser.email + ' status to INACTIVE' + reasonText, 'User', String(existingUser._id));
+                await SecurityLog_1.SecurityLog.create({
+                    user: existingUser._id,
+                    identifier: existingUser.email,
+                    eventType: 'ADMIN_ACTION',
+                    status: 'SUCCESS',
+                    details: {
+                        action: 'ACCOUNT_DEACTIVATED',
+                        adminId: callerId,
+                        reason: reason || undefined,
+                    },
+                });
+                return res.json({
+                    success: true,
+                    data: existingUser,
+                    message: 'Account deactivated successfully',
+                });
+            }
+        }
+        // Standard activation or non-admin deactivation path
+        const updatePayload = { isActive: activeValue };
         if (!activeValue) {
-            await RefreshToken_1.RefreshToken.updateMany({ user: user._id }, { isRevoked: true, isUsed: true });
+            updatePayload.status = 'Suspended';
+            updatePayload.suspensionReason = reason ? String(reason).slice(0, 200) : 'Administrative deactivation';
+            updatePayload.suspendedAt = new Date();
+            updatePayload.suspendedBy = callerId;
+        }
+        else {
+            updatePayload.status = 'Active';
+        }
+        let user;
+        if (client_1.prisma && typeof client_1.prisma.$transaction === 'function') {
+            user = await client_1.prisma.$transaction(async (userTx) => {
+                if (userTx.user?.update) {
+                    await userTx.user.update({
+                        where: { id },
+                        data: {
+                            isActive: activeValue,
+                            status: activeValue ? 'Active' : 'Suspended',
+                        },
+                    });
+                    if (!activeValue && userTx.refreshToken?.updateMany) {
+                        await userTx.refreshToken.updateMany({
+                            where: { userId: id },
+                            data: { isRevoked: true, isUsed: true },
+                        });
+                    }
+                    return await User_1.User.findById(id).select('-password');
+                }
+                else {
+                    const u = await User_1.User.findByIdAndUpdate(id, updatePayload, { new: true }).select('-password');
+                    if (u && !activeValue) {
+                        await RefreshToken_1.RefreshToken.updateMany({ user: u._id }, { isRevoked: true, isUsed: true });
+                    }
+                    return u;
+                }
+            });
+        }
+        else {
+            user = await User_1.User.findByIdAndUpdate(id, updatePayload, { new: true }).select('-password');
+            if (user && !activeValue) {
+                await RefreshToken_1.RefreshToken.updateMany({ user: user._id }, { isRevoked: true, isUsed: true });
+            }
         }
         const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
-        const reasonText = reason ? ` (Reason: ${String(reason).slice(0, 200)})` : '';
-        await logAdminAction(adminEmail, activeValue ? 'ACCOUNT_REACTIVATED' : 'ACCOUNT_DEACTIVATED', `Updated user ${user.email} status to ${activeValue ? 'ACTIVE' : 'INACTIVE'}${reasonText}`, 'User', String(user._id));
+        const reasonText = reason ? ' (Reason: ' + String(reason).slice(0, 200) + ')' : '';
+        await logAdminAction(adminEmail, activeValue ? 'ACCOUNT_REACTIVATED' : 'ACCOUNT_DEACTIVATED', 'Updated user ' + user.email + ' status to ' + (activeValue ? 'ACTIVE' : 'INACTIVE') + reasonText, 'User', String(user._id));
         await SecurityLog_1.SecurityLog.create({
             user: user._id,
             identifier: user.email,
@@ -713,7 +958,371 @@ async function updateUserStatus(req, res, next) {
         res.json({
             success: true,
             data: user,
-            message: `Account ${activeValue ? 'reactivated' : 'deactivated'} successfully`,
+            message: 'Account ' + (activeValue ? 'reactivated' : 'deactivated') + ' successfully',
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+}
+/**
+ * Bulk User Account Activation / Deactivation
+ * Enforces Super Admin, self-deactivation, and last active admin protection
+ */
+async function bulkUpdateUserStatus(req, res, next) {
+    try {
+        const { userIds, status, isActive, reason } = req.body;
+        if (!Array.isArray(userIds) || userIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'A non-empty array of userIds is required for bulk status management.',
+            });
+        }
+        if (userIds.length > 500) {
+            return res.status(400).json({
+                success: false,
+                message: 'Bulk status update batch size cannot exceed 500 accounts per operation.',
+            });
+        }
+        // Require an explicit, valid target state
+        if (isActive === undefined && status === undefined) {
+            return res.status(400).json({
+                success: false,
+                message: 'Target state is required. Provide either "isActive" (boolean) or "status" ("active" | "deactivated").',
+            });
+        }
+        let activeFromFlag = undefined;
+        if (isActive !== undefined) {
+            if (typeof isActive !== 'boolean') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid isActive value. Must be a boolean (true or false).',
+                });
+            }
+            activeFromFlag = isActive;
+        }
+        let activeFromStatus = undefined;
+        let canonicalStatusName = undefined;
+        if (status !== undefined) {
+            if (typeof status !== 'string') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid status value. Must be a string ("active" or "deactivated").',
+                });
+            }
+            const normalizedStatus = status.trim().toLowerCase();
+            if (normalizedStatus === 'active') {
+                activeFromStatus = true;
+                canonicalStatusName = 'Active';
+            }
+            else if (normalizedStatus === 'deactivated' ||
+                normalizedStatus === 'inactive' ||
+                normalizedStatus === 'suspended') {
+                activeFromStatus = false;
+                canonicalStatusName = 'Suspended';
+            }
+            else {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid status "${status}". Supported values are "active" and "deactivated" (or "suspended" / "inactive").`,
+                });
+            }
+        }
+        // Reject ambiguous or contradictory combinations of isActive and status
+        if (activeFromFlag !== undefined && activeFromStatus !== undefined) {
+            if (activeFromFlag !== activeFromStatus) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Contradictory state: isActive is ${activeFromFlag} but status is "${status}".`,
+                });
+            }
+        }
+        const targetActive = activeFromFlag !== undefined ? activeFromFlag : activeFromStatus;
+        const targetStatus = canonicalStatusName || (targetActive ? 'Active' : 'Suspended');
+        const callerId = String(req.user?.userId || req.user?._id || req.user?.id || '');
+        const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
+        if (req.user?.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Administrator privileges are required to perform bulk status operations.',
+            });
+        }
+        const successful = [];
+        const failed = [];
+        const uniqueIds = Array.from(new Set(userIds.map((id) => String(id).trim())));
+        const validIds = [];
+        for (const id of uniqueIds) {
+            if (!(0, securityUtils_1.isValidObjectId)(id)) {
+                failed.push({ id, reason: 'Invalid user ID format' });
+            }
+            else {
+                validIds.push(id);
+            }
+        }
+        const targetUsers = await User_1.User.find({ _id: { $in: validIds } }).lean();
+        const targetUserMap = new Map(targetUsers.map((u) => [String(u._id), u]));
+        // Fetch Super Admin user IDs to protect them
+        const adminRecords = await Admin_1.Admin.find({}).lean();
+        const superAdminUserIds = new Set(adminRecords
+            .filter((a) => a.permissions?.includes('all'))
+            .map((a) => String(a.user)));
+        const eligibleIdsToUpdate = [];
+        for (const id of validIds) {
+            const userDoc = targetUserMap.get(id);
+            if (!userDoc) {
+                failed.push({ id, reason: 'User not found in system' });
+                continue;
+            }
+            // Safeguard 1: Do not deactivate currently logged-in administrator
+            if (!targetActive && id === callerId) {
+                failed.push({
+                    id,
+                    reason: 'Cannot deactivate currently logged-in administrator',
+                });
+                continue;
+            }
+            // Safeguard 2: Protect Super Admin accounts from deactivation
+            if (!targetActive && superAdminUserIds.has(id)) {
+                failed.push({
+                    id,
+                    reason: 'Super Admin accounts are protected and cannot be deactivated',
+                });
+                continue;
+            }
+            // If account already has target status, mark as success without needing DB write
+            if (userDoc.isActive === targetActive) {
+                successful.push(id);
+                continue;
+            }
+            eligibleIdsToUpdate.push(id);
+            successful.push(id);
+        }
+        // Apply updates to eligible accounts
+        if (eligibleIdsToUpdate.length > 0) {
+            const updateData = {
+                isActive: targetActive,
+                status: targetActive ? 'Active' : 'Suspended',
+            };
+            if (!targetActive) {
+                updateData.suspensionReason = reason ? String(reason).slice(0, 200) : 'Administrative bulk deactivation';
+                updateData.suspendedAt = new Date();
+                updateData.suspendedBy = callerId;
+            }
+            // Concurrency protection: if deactivating any active administrators, serialize via withAdminLifecycleGuard
+            const adminIdsInUpdate = !targetActive
+                ? eligibleIdsToUpdate.filter((id) => targetUserMap.get(id)?.role === 'admin' && targetUserMap.get(id)?.isActive)
+                : [];
+            if (adminIdsInUpdate.length > 0) {
+                try {
+                    await (0, adminLifecycleGuard_1.withAdminLifecycleGuard)(async (tx) => {
+                        // Fresh active administrator query inside the serialized lock
+                        let freshActiveAdminCount;
+                        if (tx && typeof tx.user?.count === 'function') {
+                            freshActiveAdminCount = await tx.user.count({
+                                where: {
+                                    role: 'admin',
+                                    isActive: true,
+                                    isDeleted: false,
+                                },
+                            });
+                        }
+                        else {
+                            freshActiveAdminCount = await User_1.User.countDocuments({
+                                role: 'admin',
+                                isActive: true,
+                                isDeleted: { $ne: true },
+                            });
+                        }
+                        let availableBudget = freshActiveAdminCount;
+                        for (const adminId of adminIdsInUpdate) {
+                            if (availableBudget <= 1) {
+                                // Reject deactivation: would leave system without an active administrator account
+                                const uIdx = eligibleIdsToUpdate.indexOf(adminId);
+                                if (uIdx > -1)
+                                    eligibleIdsToUpdate.splice(uIdx, 1);
+                                const sIdx = successful.indexOf(adminId);
+                                if (sIdx > -1)
+                                    successful.splice(sIdx, 1);
+                                failed.push({
+                                    id: adminId,
+                                    reason: 'Cannot deactivate administrator: would leave system without an active administrator account',
+                                });
+                            }
+                            else {
+                                availableBudget--;
+                            }
+                        }
+                        if (eligibleIdsToUpdate.length > 0) {
+                            if (tx && typeof tx.user?.updateMany === 'function') {
+                                await tx.user.updateMany({
+                                    where: { id: { in: eligibleIdsToUpdate } },
+                                    data: {
+                                        isActive: targetActive,
+                                        status: targetStatus,
+                                    },
+                                });
+                                if (!targetActive && tx.refreshToken?.updateMany) {
+                                    await tx.refreshToken.updateMany({
+                                        where: { userId: { in: eligibleIdsToUpdate } },
+                                        data: { isRevoked: true, isUsed: true },
+                                    });
+                                }
+                            }
+                            else {
+                                await User_1.User.updateMany({ _id: { $in: eligibleIdsToUpdate } }, { $set: updateData });
+                                if (!targetActive) {
+                                    await RefreshToken_1.RefreshToken.updateMany({ user: { $in: eligibleIdsToUpdate } }, { $set: { isRevoked: true, isUsed: true } });
+                                }
+                            }
+                        }
+                    });
+                }
+                catch (guardErr) {
+                    // Concurrency lock failure / timeout: FAIL CLOSED for all administrator accounts
+                    for (const adminId of adminIdsInUpdate) {
+                        const uIdx = eligibleIdsToUpdate.indexOf(adminId);
+                        if (uIdx > -1)
+                            eligibleIdsToUpdate.splice(uIdx, 1);
+                        const sIdx = successful.indexOf(adminId);
+                        if (sIdx > -1)
+                            successful.splice(sIdx, 1);
+                        failed.push({
+                            id: adminId,
+                            reason: 'Cannot deactivate administrator: concurrency lock acquisition failed (fail-closed)',
+                        });
+                    }
+                    // Process remaining regular users in the mixed batch, ensuring atomic update & session revocation
+                    if (eligibleIdsToUpdate.length > 0) {
+                        try {
+                            if (client_1.prisma && typeof client_1.prisma.$transaction === 'function') {
+                                await client_1.prisma.$transaction(async (userTx) => {
+                                    if (userTx.user?.updateMany) {
+                                        await userTx.user.updateMany({
+                                            where: { id: { in: eligibleIdsToUpdate } },
+                                            data: {
+                                                isActive: targetActive,
+                                                status: targetStatus,
+                                            },
+                                        });
+                                        if (!targetActive && userTx.refreshToken?.updateMany) {
+                                            await userTx.refreshToken.updateMany({
+                                                where: { userId: { in: eligibleIdsToUpdate } },
+                                                data: { isRevoked: true, isUsed: true },
+                                            });
+                                        }
+                                    }
+                                    else {
+                                        await User_1.User.updateMany({ _id: { $in: eligibleIdsToUpdate } }, { $set: updateData });
+                                        if (!targetActive) {
+                                            await RefreshToken_1.RefreshToken.updateMany({ user: { $in: eligibleIdsToUpdate } }, { $set: { isRevoked: true, isUsed: true } });
+                                        }
+                                    }
+                                });
+                            }
+                            else {
+                                await User_1.User.updateMany({ _id: { $in: eligibleIdsToUpdate } }, { $set: updateData });
+                                if (!targetActive) {
+                                    await RefreshToken_1.RefreshToken.updateMany({ user: { $in: eligibleIdsToUpdate } }, { $set: { isRevoked: true, isUsed: true } });
+                                }
+                            }
+                        }
+                        catch (regUserErr) {
+                            // If regular-user mutation or session revocation fails, do NOT report success!
+                            for (const regId of eligibleIdsToUpdate) {
+                                const sIdx = successful.indexOf(regId);
+                                if (sIdx > -1)
+                                    successful.splice(sIdx, 1);
+                                failed.push({
+                                    id: regId,
+                                    reason: 'Failed to update account status due to database error',
+                                });
+                            }
+                            eligibleIdsToUpdate.length = 0;
+                        }
+                    }
+                }
+            }
+            else {
+                // Regular user activation or deactivation - direct execution without admin lock contention
+                try {
+                    if (client_1.prisma && typeof client_1.prisma.$transaction === 'function') {
+                        await client_1.prisma.$transaction(async (userTx) => {
+                            if (userTx.user?.updateMany) {
+                                await userTx.user.updateMany({
+                                    where: { id: { in: eligibleIdsToUpdate } },
+                                    data: {
+                                        isActive: targetActive,
+                                        status: targetStatus,
+                                    },
+                                });
+                                if (!targetActive && userTx.refreshToken?.updateMany) {
+                                    await userTx.refreshToken.updateMany({
+                                        where: { userId: { in: eligibleIdsToUpdate } },
+                                        data: { isRevoked: true, isUsed: true },
+                                    });
+                                }
+                            }
+                            else {
+                                await User_1.User.updateMany({ _id: { $in: eligibleIdsToUpdate } }, { $set: updateData });
+                                if (!targetActive) {
+                                    await RefreshToken_1.RefreshToken.updateMany({ user: { $in: eligibleIdsToUpdate } }, { $set: { isRevoked: true, isUsed: true } });
+                                }
+                            }
+                        });
+                    }
+                    else {
+                        await User_1.User.updateMany({ _id: { $in: eligibleIdsToUpdate } }, { $set: updateData });
+                        if (!targetActive) {
+                            await RefreshToken_1.RefreshToken.updateMany({ user: { $in: eligibleIdsToUpdate } }, { $set: { isRevoked: true, isUsed: true } });
+                        }
+                    }
+                }
+                catch (regUserErr) {
+                    for (const regId of eligibleIdsToUpdate) {
+                        const sIdx = successful.indexOf(regId);
+                        if (sIdx > -1)
+                            successful.splice(sIdx, 1);
+                        failed.push({
+                            id: regId,
+                            reason: 'Failed to update account status due to database error',
+                        });
+                    }
+                    eligibleIdsToUpdate.length = 0;
+                }
+            }
+            if (eligibleIdsToUpdate.length > 0) {
+                const actionType = targetActive ? 'BULK_ACCOUNT_REACTIVATED' : 'BULK_ACCOUNT_DEACTIVATED';
+                const reasonText = reason ? ' (Reason: ' + String(reason).slice(0, 200) + ')' : '';
+                await logAdminAction(adminEmail, actionType, 'Bulk ' + (targetActive ? 'reactivated' : 'deactivated') + ' ' + eligibleIdsToUpdate.length + ' user account(s)' + reasonText, 'User', callerId, {
+                    metadata: {
+                        affectedCount: eligibleIdsToUpdate.length,
+                        action: targetActive ? 'activate' : 'deactivate',
+                    },
+                });
+                await SecurityLog_1.SecurityLog.create({
+                    user: callerId,
+                    identifier: adminEmail,
+                    eventType: 'ADMIN_ACTION',
+                    status: 'SUCCESS',
+                    details: {
+                        action: actionType,
+                        affectedUserIds: eligibleIdsToUpdate,
+                        reason: reason || undefined,
+                    },
+                });
+            }
+        }
+        return res.json({
+            success: true,
+            message: 'Bulk status update completed: ' + successful.length + ' processed, ' + failed.length + ' failed.',
+            data: {
+                action: targetActive ? 'active' : 'deactivated',
+                totalRequested: uniqueIds.length,
+                successCount: successful.length,
+                failedCount: failed.length,
+                successful,
+                failed,
+            },
         });
     }
     catch (error) {
@@ -726,34 +1335,235 @@ async function updateUserRole(req, res, next) {
         if (!['user', 'admin'].includes(role)) {
             return res.status(400).json({ success: false, message: 'Invalid role' });
         }
-        const user = await User_1.User.findByIdAndUpdate(req.params.id, { role }, { new: true }).select('-password');
-        if (!user) {
+        const callerId = String(req.user?.userId || req.user?._id || req.user?.id || '');
+        const targetUser = await User_1.User.findById(req.params.id);
+        if (!targetUser) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
-        if (role === 'admin') {
-            await Admin_1.Admin.findOneAndUpdate({ user: user._id }, { permissions: ['all', 'users', 'profiles', 'verifications', 'memberships', 'payments', 'reports'] }, { upsert: true });
+        // Demoting an admin to regular user
+        if (targetUser.role === 'admin' && role === 'user') {
+            if (String(targetUser._id) === callerId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot demote currently logged-in administrator',
+                });
+            }
+            const superAdminRecord = await Admin_1.Admin.findOne({ user: targetUser._id });
+            if (superAdminRecord?.permissions?.includes('all')) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Super Admin accounts cannot be demoted',
+                });
+            }
+            if (targetUser.isActive) {
+                try {
+                    await (0, adminLifecycleGuard_1.withAdminLifecycleGuard)(async (tx) => {
+                        let freshActiveAdminCount;
+                        if (tx && typeof tx.user?.count === 'function') {
+                            freshActiveAdminCount = await tx.user.count({
+                                where: {
+                                    role: 'admin',
+                                    isActive: true,
+                                    isDeleted: false,
+                                },
+                            });
+                        }
+                        else {
+                            freshActiveAdminCount = await User_1.User.countDocuments({
+                                role: 'admin',
+                                isActive: true,
+                                isDeleted: { $ne: true },
+                            });
+                        }
+                        if (freshActiveAdminCount <= 1) {
+                            throw new Error('LAST_ACTIVE_ADMIN');
+                        }
+                        if (tx && typeof tx.user?.update === 'function') {
+                            await tx.user.update({
+                                where: { id: String(targetUser._id) },
+                                data: { role },
+                            });
+                            targetUser.role = role;
+                        }
+                        else {
+                            targetUser.role = role;
+                            await targetUser.save();
+                        }
+                    });
+                }
+                catch (guardErr) {
+                    if (guardErr?.message === 'LAST_ACTIVE_ADMIN') {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Cannot demote administrator: would leave system without an active administrator account',
+                        });
+                    }
+                    if (guardErr instanceof adminLifecycleGuard_1.AdminLifecycleLockError || guardErr?.code === 'LOCK_TIMEOUT') {
+                        return res.status(409).json({
+                            success: false,
+                            message: 'Administrator role update locked due to concurrent modifications. Please retry.',
+                        });
+                    }
+                    throw guardErr;
+                }
+            }
+            else {
+                targetUser.role = role;
+                await targetUser.save();
+            }
         }
-        await logAdminAction(req.user?.role || 'admin', 'USER_ROLE_UPDATED', `Updated user ${user.email} role to ${role}`, 'User', String(user._id));
-        res.json({ success: true, data: user });
+        else {
+            targetUser.role = role;
+            await targetUser.save();
+        }
+        if (role === 'admin') {
+            await Admin_1.Admin.findOneAndUpdate({ user: targetUser._id }, { permissions: ['all', 'users', 'profiles', 'verifications', 'memberships', 'payments', 'reports'] }, { upsert: true });
+        }
+        await logAdminAction(req.user?.role || 'admin', 'USER_ROLE_UPDATED', 'Updated user ' + targetUser.email + ' role to ' + role, 'User', String(targetUser._id));
+        res.json({ success: true, data: targetUser });
     }
     catch (error) {
         next(error);
     }
 }
+/**
+ * Atomic user deletion helper.
+ * If an active database transaction `tx` is provided, executes all child record cleanups
+ * and user record deletion inside that transaction.
+ * Otherwise, wraps all operations inside a standalone interactive `prisma.$transaction`.
+ * In case of any database error, rolls back all deletions atomically (fail-closed).
+ */
+async function executeAtomicUserDeletion(userId, tx) {
+    const targetId = String(userId);
+    if (tx && typeof tx.user?.delete === 'function') {
+        if (tx.profile?.deleteMany)
+            await tx.profile.deleteMany({ where: { userId: targetId } });
+        if (tx.verification?.deleteMany)
+            await tx.verification.deleteMany({ where: { userId: targetId } });
+        if (tx.subscription?.deleteMany)
+            await tx.subscription.deleteMany({ where: { userId: targetId } });
+        if (tx.payment?.deleteMany)
+            await tx.payment.deleteMany({ where: { userId: targetId } });
+        if (tx.interest?.deleteMany) {
+            await tx.interest.deleteMany({
+                where: { OR: [{ senderId: targetId }, { receiverId: targetId }] },
+            });
+        }
+        if (tx.shortlist?.deleteMany)
+            await tx.shortlist.deleteMany({ where: { userId: targetId } });
+        if (tx.refreshToken?.deleteMany)
+            await tx.refreshToken.deleteMany({ where: { userId: targetId } });
+        if (tx.admin?.deleteMany)
+            await tx.admin.deleteMany({ where: { userId: targetId } });
+        await tx.user.delete({ where: { id: targetId } });
+        return;
+    }
+    if (client_1.prisma && typeof client_1.prisma.$transaction === 'function') {
+        await client_1.prisma.$transaction(async (innerTx) => {
+            if (innerTx.profile?.deleteMany)
+                await innerTx.profile.deleteMany({ where: { userId: targetId } });
+            if (innerTx.verification?.deleteMany)
+                await innerTx.verification.deleteMany({ where: { userId: targetId } });
+            if (innerTx.subscription?.deleteMany)
+                await innerTx.subscription.deleteMany({ where: { userId: targetId } });
+            if (innerTx.payment?.deleteMany)
+                await innerTx.payment.deleteMany({ where: { userId: targetId } });
+            if (innerTx.interest?.deleteMany) {
+                await innerTx.interest.deleteMany({
+                    where: { OR: [{ senderId: targetId }, { receiverId: targetId }] },
+                });
+            }
+            if (innerTx.shortlist?.deleteMany)
+                await innerTx.shortlist.deleteMany({ where: { userId: targetId } });
+            if (innerTx.refreshToken?.deleteMany)
+                await innerTx.refreshToken.deleteMany({ where: { userId: targetId } });
+            if (innerTx.admin?.deleteMany)
+                await innerTx.admin.deleteMany({ where: { userId: targetId } });
+            await innerTx.user.delete({ where: { id: targetId } });
+        });
+        return;
+    }
+    // Fallback for non-Prisma / test mock environments
+    await Profile_1.Profile.deleteMany({ user: targetId });
+    await Verification_1.Verification.deleteMany({ user: targetId });
+    await Subscription_1.Subscription.deleteMany({ user: targetId });
+    await Payment_1.Payment.deleteMany({ user: targetId });
+    await Interest_1.Interest.deleteMany({ $or: [{ sender: targetId }, { receiver: targetId }] });
+    await Shortlist_1.Shortlist.deleteMany({ user: targetId });
+    await RefreshToken_1.RefreshToken.deleteMany({ user: targetId });
+    await Admin_1.Admin.deleteMany({ user: targetId });
+    await User_1.User.findByIdAndDelete(targetId);
+}
 async function deleteUser(req, res, next) {
     try {
+        const callerId = String(req.user?.userId || req.user?._id || req.user?.id || '');
         const user = await User_1.User.findById(req.params.id);
         if (!user) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
-        await Profile_1.Profile.deleteMany({ user: user._id });
-        await Verification_1.Verification.deleteMany({ user: user._id });
-        await Subscription_1.Subscription.deleteMany({ user: user._id });
-        await Payment_1.Payment.deleteMany({ user: user._id });
-        await Interest_1.Interest.deleteMany({ $or: [{ sender: user._id }, { receiver: user._id }] });
-        await Shortlist_1.Shortlist.deleteMany({ user: user._id });
-        await User_1.User.findByIdAndDelete(user._id);
-        await logAdminAction(req.user?.role || 'admin', 'USER_DELETED', `Deleted user account ${user.email}`, 'User', String(user._id));
+        // Protecting administrator accounts from deletion
+        if (user.role === 'admin') {
+            if (String(user._id) === callerId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot delete currently logged-in administrator',
+                });
+            }
+            const superAdminRecord = await Admin_1.Admin.findOne({ user: user._id });
+            if (superAdminRecord?.permissions?.includes('all')) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Super Admin accounts cannot be deleted',
+                });
+            }
+            if (user.isActive) {
+                try {
+                    await (0, adminLifecycleGuard_1.withAdminLifecycleGuard)(async (tx) => {
+                        let freshActiveAdminCount;
+                        if (tx && typeof tx.user?.count === 'function') {
+                            freshActiveAdminCount = await tx.user.count({
+                                where: {
+                                    role: 'admin',
+                                    isActive: true,
+                                    isDeleted: false,
+                                },
+                            });
+                        }
+                        else {
+                            freshActiveAdminCount = await User_1.User.countDocuments({
+                                role: 'admin',
+                                isActive: true,
+                                isDeleted: { $ne: true },
+                            });
+                        }
+                        if (freshActiveAdminCount <= 1) {
+                            throw new Error('LAST_ACTIVE_ADMIN');
+                        }
+                        await executeAtomicUserDeletion(String(user._id), tx);
+                    });
+                }
+                catch (guardErr) {
+                    if (guardErr?.message === 'LAST_ACTIVE_ADMIN') {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Cannot delete the last active administrator account',
+                        });
+                    }
+                    if (guardErr instanceof adminLifecycleGuard_1.AdminLifecycleLockError || guardErr?.code === 'LOCK_TIMEOUT') {
+                        return res.status(409).json({
+                            success: false,
+                            message: 'Administrator deletion locked due to concurrent modifications. Please retry.',
+                        });
+                    }
+                    throw guardErr;
+                }
+                await logAdminAction(req.user?.role || 'admin', 'USER_DELETED', 'Deleted user account ' + user.email, 'User', String(user._id));
+                return res.json({ success: true, message: 'User and all related records deleted successfully' });
+            }
+        }
+        // Standard non-admin or inactive admin atomic deletion
+        await executeAtomicUserDeletion(String(user._id));
+        await logAdminAction(req.user?.role || 'admin', 'USER_DELETED', 'Deleted user account ' + user.email, 'User', String(user._id));
         res.json({ success: true, message: 'User and all related records deleted successfully' });
     }
     catch (error) {
@@ -1341,6 +2151,22 @@ async function updateProfile(req, res, next) {
             updateData.medicalCollege = req.body.college;
         if (req.body.currentHospital !== undefined)
             updateData.currentHospital = req.body.currentHospital;
+        if (req.body.graduationYear !== undefined)
+            updateData.graduationYear = req.body.graduationYear;
+        if (req.body.medicalUniversity !== undefined)
+            updateData.medicalUniversity = req.body.medicalUniversity;
+        if (req.body.stateMedicalCouncil !== undefined)
+            updateData.stateMedicalCouncil = req.body.stateMedicalCouncil;
+        if (req.body.registrationYear !== undefined)
+            updateData.registrationYear = req.body.registrationYear;
+        if (req.body.currentlyPracticing !== undefined)
+            updateData.currentlyPracticing = req.body.currentlyPracticing;
+        if (req.body.medicalQualifications && typeof req.body.medicalQualifications === 'object') {
+            updateData.medicalQualifications = {
+                ...(profile.medicalQualifications || {}),
+                ...req.body.medicalQualifications,
+            };
+        }
         // Family Details
         if (req.body.familyType !== undefined)
             updateData.familyType = req.body.familyType;
@@ -1358,6 +2184,25 @@ async function updateProfile(req, res, next) {
             updateData.nativePlace = req.body.nativePlace;
         if (req.body.familyLocation !== undefined)
             updateData.familyLocation = req.body.familyLocation;
+        if (req.body.familyBackground && typeof req.body.familyBackground === 'object') {
+            updateData.familyBackground = {
+                ...(profile.familyBackground || {}),
+                ...req.body.familyBackground,
+            };
+        }
+        // Horoscope Details
+        if (req.body.horoscope && typeof req.body.horoscope === 'object') {
+            updateData.horoscope = {
+                ...(profile.horoscope || {}),
+                ...req.body.horoscope,
+            };
+        }
+        else if (req.body.manglik !== undefined) {
+            updateData.horoscope = {
+                ...(profile.horoscope || {}),
+                manglik: req.body.manglik,
+            };
+        }
         // Profile Details & Bio
         if (req.body.about !== undefined)
             updateData.about = req.body.about;
@@ -1452,6 +2297,24 @@ async function updateProfile(req, res, next) {
             updateData.lifestyleInterests = {
                 ...(profile.lifestyleInterests || {}),
                 ...updateData.lifestyleInterests,
+            };
+        }
+        if (updateData.horoscope && typeof updateData.horoscope === 'object') {
+            updateData.horoscope = {
+                ...(profile.horoscope || {}),
+                ...updateData.horoscope,
+            };
+        }
+        if (updateData.familyBackground && typeof updateData.familyBackground === 'object') {
+            updateData.familyBackground = {
+                ...(profile.familyBackground || {}),
+                ...updateData.familyBackground,
+            };
+        }
+        if (updateData.medicalQualifications && typeof updateData.medicalQualifications === 'object') {
+            updateData.medicalQualifications = {
+                ...(profile.medicalQualifications || {}),
+                ...updateData.medicalQualifications,
             };
         }
         // 7. Track diff for audit logging
@@ -1648,23 +2511,101 @@ async function approveVerification(req, res, next) {
         const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
         const adminId = req.user?.userId;
         const adminNote = notes?.trim() || 'Verified and approved by Administrator after document credential audit';
-        currentDoc.status = 'APPROVED';
-        currentDoc.reviewedAt = new Date();
-        if (adminId && (0, securityUtils_1.isValidObjectId)(adminId)) {
-            currentDoc.reviewedBy = adminId;
+        const targetUserId = String(currentDoc.user || currentDoc.userId || '').trim();
+        if (!targetUserId || !(0, securityUtils_1.isValidObjectId)(targetUserId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Verification record does not contain a valid associated user ID.',
+            });
         }
-        currentDoc.reviewedByEmail = adminEmail;
-        currentDoc.adminNotes = adminNote;
-        await currentDoc.save();
-        // Update User & Profile Status to VERIFIED
-        await User_1.User.findByIdAndUpdate(currentDoc.user, { verified: true, verificationStatus: 'VERIFIED' });
-        await Profile_1.Profile.findOneAndUpdate({ user: currentDoc.user }, { verificationStatus: 'VERIFIED' });
+        const targetUser = await User_1.User.findById(targetUserId);
+        if (!targetUser) {
+            return res.status(404).json({
+                success: false,
+                message: 'Target candidate user account linked to this verification was not found.',
+            });
+        }
+        const now = new Date();
+        if (client_1.prisma && typeof client_1.prisma.$transaction === 'function') {
+            try {
+                await client_1.prisma.$transaction(async (tx) => {
+                    const updateResult = await tx.verification.updateMany({
+                        where: { id, status: 'PENDING' },
+                        data: {
+                            status: 'APPROVED',
+                            reviewedAt: now,
+                            reviewedById: adminId && (0, securityUtils_1.isValidObjectId)(adminId) ? adminId : null,
+                            reviewedByEmail: adminEmail,
+                            adminNotes: adminNote,
+                        },
+                    });
+                    if (updateResult.count === 0) {
+                        throw new Error('CONCURRENCY_CONFLICT_OR_REVIEWED');
+                    }
+                    await tx.user.update({
+                        where: { id: targetUserId },
+                        data: {
+                            verified: true,
+                            verificationStatus: 'VERIFIED',
+                        },
+                    });
+                    if (tx.profile?.updateMany) {
+                        await tx.profile.updateMany({
+                            where: { userId: targetUserId },
+                            data: {
+                                verificationStatus: 'VERIFIED',
+                            },
+                        });
+                    }
+                    if (tx.notification?.create) {
+                        await tx.notification.create({
+                            data: {
+                                id: (0, client_1.generateObjectId)(),
+                                userId: targetUserId,
+                                type: 'VERIFICATION',
+                                title: 'Verification Approved',
+                                message: `Your ${currentDoc.documentType.replace(/_/g, ' ')} (${currentDoc.documentName || 'Document'}) has been successfully verified. Your profile now proudly displays the verified badge.`,
+                                actionUrl: '/profile',
+                                read: false,
+                            },
+                        });
+                    }
+                });
+            }
+            catch (txErr) {
+                if (txErr.message === 'CONCURRENCY_CONFLICT_OR_REVIEWED') {
+                    const reloaded = await Verification_1.Verification.findById(id);
+                    return res.status(409).json({
+                        success: false,
+                        message: `This verification record has already been reviewed (Current status: ${reloaded?.status || 'REVIEWED'}).`,
+                        currentStatus: reloaded?.status,
+                    });
+                }
+                console.error('[AdminVerification] Approval transaction failed:', txErr);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to complete verification approval transaction. Please retry.',
+                });
+            }
+        }
+        else {
+            currentDoc.status = 'APPROVED';
+            currentDoc.reviewedAt = now;
+            if (adminId && (0, securityUtils_1.isValidObjectId)(adminId)) {
+                currentDoc.reviewedBy = adminId;
+            }
+            currentDoc.reviewedByEmail = adminEmail;
+            currentDoc.adminNotes = adminNote;
+            await currentDoc.save();
+            await User_1.User.findByIdAndUpdate(targetUserId, { verified: true, verificationStatus: 'VERIFIED' });
+            await Profile_1.Profile.findOneAndUpdate({ user: targetUserId }, { verificationStatus: 'VERIFIED' });
+        }
         // Immutable Audit Log
-        await logAdminAction(adminEmail, 'VERIFICATION_APPROVED', `Approved ${currentDoc.documentType} verification for User ID: ${currentDoc.user}. Notes: ${adminNote}`, 'Verification', String(currentDoc._id));
+        await logAdminAction(adminEmail, 'VERIFICATION_APPROVED', `Approved ${currentDoc.documentType} verification for User ID: ${targetUserId}. Notes: ${adminNote}`, 'Verification', String(currentDoc._id));
         // User Notification
         try {
             await Notification_1.Notification.create({
-                user: currentDoc.user,
+                user: targetUserId,
                 type: 'VERIFICATION',
                 title: 'Verification Approved',
                 message: `Your ${currentDoc.documentType.replace(/_/g, ' ')} (${currentDoc.documentName || 'Document'}) has been successfully verified. Your profile now proudly displays the verified badge.`,
@@ -1715,31 +2656,119 @@ async function rejectVerification(req, res, next) {
         const adminEmail = req.user?.email || 'admin@wonderfuljodi.com';
         const adminId = req.user?.userId;
         const adminNote = notes?.trim() || selectedReason;
-        currentDoc.status = 'REJECTED';
-        currentDoc.reviewedAt = new Date();
-        if (adminId && (0, securityUtils_1.isValidObjectId)(adminId)) {
-            currentDoc.reviewedBy = adminId;
+        const targetUserId = String(currentDoc.user || currentDoc.userId || '').trim();
+        if (!targetUserId || !(0, securityUtils_1.isValidObjectId)(targetUserId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Verification record does not contain a valid associated user ID.',
+            });
         }
-        currentDoc.reviewedByEmail = adminEmail;
-        currentDoc.rejectionReason = selectedReason;
-        currentDoc.adminNotes = adminNote;
-        await currentDoc.save();
-        // Check if user has other approved verifications before setting to REJECTED
-        const remainingApproved = await Verification_1.Verification.countDocuments({
-            user: currentDoc.user,
-            status: 'APPROVED',
-            _id: { $ne: currentDoc._id },
-        });
-        if (remainingApproved === 0) {
-            await User_1.User.findByIdAndUpdate(currentDoc.user, { verified: false, verificationStatus: 'REJECTED' });
-            await Profile_1.Profile.findOneAndUpdate({ user: currentDoc.user }, { verificationStatus: 'REJECTED' });
+        const targetUser = await User_1.User.findById(targetUserId);
+        if (!targetUser) {
+            return res.status(404).json({
+                success: false,
+                message: 'Target candidate user account linked to this verification was not found.',
+            });
+        }
+        const now = new Date();
+        if (client_1.prisma && typeof client_1.prisma.$transaction === 'function') {
+            try {
+                await client_1.prisma.$transaction(async (tx) => {
+                    const updateResult = await tx.verification.updateMany({
+                        where: { id, status: 'PENDING' },
+                        data: {
+                            status: 'REJECTED',
+                            reviewedAt: now,
+                            reviewedById: adminId && (0, securityUtils_1.isValidObjectId)(adminId) ? adminId : null,
+                            reviewedByEmail: adminEmail,
+                            rejectionReason: selectedReason,
+                            adminNotes: adminNote,
+                        },
+                    });
+                    if (updateResult.count === 0) {
+                        throw new Error('CONCURRENCY_CONFLICT_OR_REVIEWED');
+                    }
+                    const remainingApprovedCount = await tx.verification.count({
+                        where: {
+                            userId: targetUserId,
+                            status: 'APPROVED',
+                            id: { not: id },
+                        },
+                    });
+                    if (remainingApprovedCount === 0) {
+                        await tx.user.update({
+                            where: { id: targetUserId },
+                            data: {
+                                verified: false,
+                                verificationStatus: 'REJECTED',
+                            },
+                        });
+                        if (tx.profile?.updateMany) {
+                            await tx.profile.updateMany({
+                                where: { userId: targetUserId },
+                                data: {
+                                    verificationStatus: 'REJECTED',
+                                },
+                            });
+                        }
+                    }
+                    if (tx.notification?.create) {
+                        await tx.notification.create({
+                            data: {
+                                id: (0, client_1.generateObjectId)(),
+                                userId: targetUserId,
+                                type: 'VERIFICATION',
+                                title: 'Verification Requires Attention',
+                                message: `Your submitted ${currentDoc.documentType.replace(/_/g, ' ')} could not be verified. Reason: ${selectedReason}. Please visit your profile verification page to upload a new document.`,
+                                actionUrl: '/profile/verification',
+                                read: false,
+                            },
+                        });
+                    }
+                });
+            }
+            catch (txErr) {
+                if (txErr.message === 'CONCURRENCY_CONFLICT_OR_REVIEWED') {
+                    const reloaded = await Verification_1.Verification.findById(id);
+                    return res.status(409).json({
+                        success: false,
+                        message: `This verification record has already been reviewed (Current status: ${reloaded?.status || 'REVIEWED'}).`,
+                        currentStatus: reloaded?.status,
+                    });
+                }
+                console.error('[AdminVerification] Rejection transaction failed:', txErr);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to complete verification rejection transaction. Please retry.',
+                });
+            }
+        }
+        else {
+            currentDoc.status = 'REJECTED';
+            currentDoc.reviewedAt = now;
+            if (adminId && (0, securityUtils_1.isValidObjectId)(adminId)) {
+                currentDoc.reviewedBy = adminId;
+            }
+            currentDoc.reviewedByEmail = adminEmail;
+            currentDoc.rejectionReason = selectedReason;
+            currentDoc.adminNotes = adminNote;
+            await currentDoc.save();
+            const remainingApproved = await Verification_1.Verification.countDocuments({
+                user: targetUserId,
+                status: 'APPROVED',
+                _id: { $ne: currentDoc._id },
+            });
+            if (remainingApproved === 0) {
+                await User_1.User.findByIdAndUpdate(targetUserId, { verified: false, verificationStatus: 'REJECTED' });
+                await Profile_1.Profile.findOneAndUpdate({ user: targetUserId }, { verificationStatus: 'REJECTED' });
+            }
         }
         // Immutable Audit Log
-        await logAdminAction(adminEmail, 'VERIFICATION_REJECTED', `Rejected ${currentDoc.documentType} verification for User ID: ${currentDoc.user}. Reason: ${selectedReason}. Notes: ${adminNote}`, 'Verification', String(currentDoc._id));
+        await logAdminAction(adminEmail, 'VERIFICATION_REJECTED', `Rejected ${currentDoc.documentType} verification for User ID: ${targetUserId}. Reason: ${selectedReason}. Notes: ${adminNote}`, 'Verification', String(currentDoc._id));
         // User Notification
         try {
             await Notification_1.Notification.create({
-                user: currentDoc.user,
+                user: targetUserId,
                 type: 'VERIFICATION',
                 title: 'Verification Requires Attention',
                 message: `Your submitted ${currentDoc.documentType.replace(/_/g, ' ')} could not be verified. Reason: ${selectedReason}. Please visit your profile verification page to upload a new document.`,

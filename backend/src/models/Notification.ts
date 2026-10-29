@@ -52,4 +52,4 @@ const notificationSchema = new Schema<INotification>(
 notificationSchema.index({ user: 1, read: 1, createdAt: -1 });
 notificationSchema.index({ user: 1, createdAt: -1 });
 
-export const Notification = createPrismaModelAdapter<INotification>('notification', {"user":"userId","broadcast":"broadcastId"});
+export const Notification = createPrismaModelAdapter<INotification>('notification', {"user":"userId","recipient":"userId","broadcast":"broadcastId"});

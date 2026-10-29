@@ -182,7 +182,7 @@ export async function createContactRequest(req: AuthRequest, res: Response, next
     const requesterName = requesterProfile?.displayName || 'A verified doctor';
 
     await Notification.create({
-      recipient: targetUserId,
+      user: targetUserId,
       type: 'INTEREST',
       title: 'New Contact Request',
       message: `${requesterName} has requested to view your contact information.`,
@@ -222,8 +222,12 @@ export async function getContactRequests(req: AuthRequest, res: Response, next: 
     ]);
 
     // Attach profile summaries for UI presentation
-    const requesterIds = incomingRequests.map((r: any) => r.requester?._id).filter(Boolean);
-    const recipientIds = outgoingRequests.map((r: any) => r.recipient?._id).filter(Boolean);
+    const requesterIds = incomingRequests.map((r: any) =>
+      r.requester?._id || r.requester?.id || (typeof r.requester === 'string' ? r.requester : r.requesterId)
+    ).filter(Boolean).map(String);
+    const recipientIds = outgoingRequests.map((r: any) =>
+      r.recipient?._id || r.recipient?.id || (typeof r.recipient === 'string' ? r.recipient : r.recipientId)
+    ).filter(Boolean).map(String);
 
     const [requesterProfiles, recipientProfiles] = await Promise.all([
       Profile.find({ user: { $in: requesterIds } }).select(
@@ -238,7 +242,9 @@ export async function getContactRequests(req: AuthRequest, res: Response, next: 
     const recProfileMap = new Map(recipientProfiles.map((p) => [p.user.toString(), p]));
 
     const formatIncoming = incomingRequests.map((reqItem: any) => {
-      const uId = reqItem.requester?._id?.toString();
+      const uId = String(
+        reqItem.requester?._id || reqItem.requester?.id || reqItem.requester || reqItem.requesterId || ''
+      );
       return {
         ...reqItem.toObject(),
         profile: uId ? reqProfileMap.get(uId) || null : null,
@@ -246,7 +252,9 @@ export async function getContactRequests(req: AuthRequest, res: Response, next: 
     });
 
     const formatOutgoing = outgoingRequests.map((reqItem: any) => {
-      const uId = reqItem.recipient?._id?.toString();
+      const uId = String(
+        reqItem.recipient?._id || reqItem.recipient?.id || reqItem.recipient || reqItem.recipientId || ''
+      );
       return {
         ...reqItem.toObject(),
         profile: uId ? recProfileMap.get(uId) || null : null,
@@ -287,7 +295,14 @@ export async function acceptContactRequest(req: AuthRequest, res: Response, next
     }
 
     // Security: Only recipient can accept
-    if (contactRequest.recipient.toString() !== userId.toString()) {
+    const recipientId = String(
+      (contactRequest as any).recipient?._id ||
+      (contactRequest as any).recipient?.id ||
+      (contactRequest as any).recipient ||
+      (contactRequest as any).recipientId ||
+      ''
+    );
+    if (!recipientId || recipientId !== String(userId)) {
       return res.status(403).json({
         success: false,
         message: 'You are not authorized to accept this contact request.',
@@ -359,7 +374,7 @@ export async function acceptContactRequest(req: AuthRequest, res: Response, next
     const recipientName = recipientProfile?.displayName || 'The candidate';
 
     await Notification.create({
-      recipient: contactRequest.requester,
+      user: contactRequest.requester,
       type: 'INTEREST',
       title: 'Contact Request Accepted',
       message: `Dr. ${recipientName} has accepted your contact request! You can now view their verified phone and contact details.`,
@@ -399,7 +414,14 @@ export async function declineContactRequest(req: AuthRequest, res: Response, nex
     }
 
     // Security: Only recipient can decline
-    if (contactRequest.recipient.toString() !== userId.toString()) {
+    const declineRecipientId = String(
+      (contactRequest as any).recipient?._id ||
+      (contactRequest as any).recipient?.id ||
+      (contactRequest as any).recipient ||
+      (contactRequest as any).recipientId ||
+      ''
+    );
+    if (!declineRecipientId || declineRecipientId !== String(userId)) {
       return res.status(403).json({
         success: false,
         message: 'You are not authorized to decline this contact request.',
@@ -455,7 +477,15 @@ export async function getContactAccessStatus(req: AuthRequest, res: Response, ne
       targetProfile.user?._id?.toString() ||
       targetProfile.user?.id?.toString() ||
       (typeof targetProfile.user === 'string' ? targetProfile.user : null) ||
-      (targetProfile as any).userId?.toString();
+      (targetProfile as any).userId?.toString() ||
+      null;
+
+    if (!targetUserId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Profile owner user account not found',
+      });
+    }
 
     // Guest / non-logged-in users cannot access contact details
     if (!userId) {
@@ -470,7 +500,7 @@ export async function getContactAccessStatus(req: AuthRequest, res: Response, ne
     }
 
     // If own profile, return full access
-    if (userId.toString() === targetUserId) {
+    if (String(userId) === String(targetUserId)) {
       const u = targetProfile.user as any;
       return res.json({
         success: true,
@@ -540,7 +570,14 @@ export async function getContactAccessStatus(req: AuthRequest, res: Response, ne
     }
 
     if (existingRequest && existingRequest.status === 'PENDING') {
-      const isOutgoing = existingRequest.requester.toString() === userId.toString();
+      const requesterId = String(
+        (existingRequest as any).requester?._id ||
+        (existingRequest as any).requester?.id ||
+        (existingRequest as any).requester ||
+        (existingRequest as any).requesterId ||
+        ''
+      );
+      const isOutgoing = requesterId.length > 0 && requesterId === String(userId);
       return res.json({
         success: true,
         data: {

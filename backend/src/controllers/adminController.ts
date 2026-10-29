@@ -34,7 +34,7 @@ import { validateDateOfBirth, validateMedicalQualification } from '../utils/doct
 import { getFormattedVisitDate } from '../services/visitTrackingService';
 import { detectCompliance } from '../services/complianceDetector';
 import { findCanonicalProfile } from './profileController';
-import { prisma } from '../db/client';
+import { prisma, generateObjectId } from '../db/client';
 import {
   withAdminLifecycleGuard,
   AdminLifecycleLockError,
@@ -510,30 +510,25 @@ export async function getUsers(req: AuthRequest, res: Response, next: NextFuncti
       query.isActive = false;
     }
 
-    // Gender filter support (across Profile and User records)
+    // Gender filter support (Profile holds authoritative gender)
     let genderUserIds: string[] | null = null;
     let genderUserIdsNin: string[] | null = null;
     if (gender && gender !== 'all') {
       if (gender === 'not_recorded' || gender === 'Not recorded') {
-        const [profilesWithGender, usersWithGender] = await Promise.all([
-          Profile.find({ gender: { $exists: true, $ne: null } }).select('user').lean(),
-          User.find({ gender: { $exists: true, $ne: null } }).select('_id').lean(),
-        ]);
-        const recordedSet = new Set([
-          ...profilesWithGender.map((p: any) => String(p.user)),
-          ...usersWithGender.map((u: any) => String(u._id)),
-        ]);
+        const profilesWithGender = await Profile.find({ gender: { $exists: true, $ne: null } }).select('user gender').lean();
+        const recordedSet = new Set(
+          profilesWithGender
+            .filter((p: any) => p.gender && String(p.gender).trim() !== '' && String(p.gender).toLowerCase() !== 'not recorded')
+            .map((p: any) => String(p.user))
+            .filter(Boolean)
+        );
         genderUserIdsNin = Array.from(recordedSet);
       } else {
         const safeGenderRegex = new RegExp(`^${escapeRegex(String(gender))}$`, 'i');
-        const [profilesWithGender, usersWithGender] = await Promise.all([
-          Profile.find({ gender: safeGenderRegex }).select('user').lean(),
-          User.find({ gender: safeGenderRegex }).select('_id').lean(),
-        ]);
-        const genderSet = new Set([
-          ...profilesWithGender.map((p: any) => String(p.user)),
-          ...usersWithGender.map((u: any) => String(u._id)),
-        ]);
+        const profilesWithGender = await Profile.find({ gender: safeGenderRegex }).select('user').lean();
+        const genderSet = new Set(
+          profilesWithGender.map((p: any) => String(p.user)).filter(Boolean)
+        );
         genderUserIds = Array.from(genderSet);
       }
     }
@@ -2631,24 +2626,106 @@ export async function approveVerification(req: AuthRequest, res: Response, next:
     const adminId = req.user?.userId;
     const adminNote = notes?.trim() || 'Verified and approved by Administrator after document credential audit';
 
-    currentDoc.status = 'APPROVED';
-    currentDoc.reviewedAt = new Date();
-    if (adminId && isValidObjectId(adminId)) {
-      currentDoc.reviewedBy = adminId as any;
+    const targetUserId = String(currentDoc.user || (currentDoc as any).userId || '').trim();
+    if (!targetUserId || !isValidObjectId(targetUserId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Verification record does not contain a valid associated user ID.',
+      });
     }
-    currentDoc.reviewedByEmail = adminEmail;
-    currentDoc.adminNotes = adminNote;
-    await currentDoc.save();
 
-    // Update User & Profile Status to VERIFIED
-    await User.findByIdAndUpdate(currentDoc.user, { verified: true, verificationStatus: 'VERIFIED' });
-    await Profile.findOneAndUpdate({ user: currentDoc.user }, { verificationStatus: 'VERIFIED' });
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'Target candidate user account linked to this verification was not found.',
+      });
+    }
+
+    const now = new Date();
+    if (prisma && typeof prisma.$transaction === 'function') {
+      try {
+        await prisma.$transaction(async (tx: any) => {
+          const updateResult = await tx.verification.updateMany({
+            where: { id, status: 'PENDING' },
+            data: {
+              status: 'APPROVED',
+              reviewedAt: now,
+              reviewedById: adminId && isValidObjectId(adminId) ? adminId : null,
+              reviewedByEmail: adminEmail,
+              adminNotes: adminNote,
+            },
+          });
+
+          if (updateResult.count === 0) {
+            throw new Error('CONCURRENCY_CONFLICT_OR_REVIEWED');
+          }
+
+          await tx.user.update({
+            where: { id: targetUserId },
+            data: {
+              verified: true,
+              verificationStatus: 'VERIFIED',
+            },
+          });
+
+          if (tx.profile?.updateMany) {
+            await tx.profile.updateMany({
+              where: { userId: targetUserId },
+              data: {
+                verificationStatus: 'VERIFIED',
+              },
+            });
+          }
+
+          if (tx.notification?.create) {
+            await tx.notification.create({
+              data: {
+                id: generateObjectId(),
+                userId: targetUserId,
+                type: 'VERIFICATION',
+                title: 'Verification Approved',
+                message: `Your ${currentDoc.documentType.replace(/_/g, ' ')} (${currentDoc.documentName || 'Document'}) has been successfully verified. Your profile now proudly displays the verified badge.`,
+                actionUrl: '/profile',
+                read: false,
+              },
+            });
+          }
+        });
+      } catch (txErr: any) {
+        if (txErr.message === 'CONCURRENCY_CONFLICT_OR_REVIEWED') {
+          const reloaded = await Verification.findById(id);
+          return res.status(409).json({
+            success: false,
+            message: `This verification record has already been reviewed (Current status: ${reloaded?.status || 'REVIEWED'}).`,
+            currentStatus: reloaded?.status,
+          });
+        }
+        console.error('[AdminVerification] Approval transaction failed:', txErr);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to complete verification approval transaction. Please retry.',
+        });
+      }
+    } else {
+      currentDoc.status = 'APPROVED';
+      currentDoc.reviewedAt = now;
+      if (adminId && isValidObjectId(adminId)) {
+        currentDoc.reviewedBy = adminId as any;
+      }
+      currentDoc.reviewedByEmail = adminEmail;
+      currentDoc.adminNotes = adminNote;
+      await currentDoc.save();
+
+      await User.findByIdAndUpdate(targetUserId, { verified: true, verificationStatus: 'VERIFIED' });
+      await Profile.findOneAndUpdate({ user: targetUserId }, { verificationStatus: 'VERIFIED' });
+    }
 
     // Immutable Audit Log
     await logAdminAction(
       adminEmail,
       'VERIFICATION_APPROVED',
-      `Approved ${currentDoc.documentType} verification for User ID: ${currentDoc.user}. Notes: ${adminNote}`,
+      `Approved ${currentDoc.documentType} verification for User ID: ${targetUserId}. Notes: ${adminNote}`,
       'Verification',
       String(currentDoc._id)
     );
@@ -2656,7 +2733,7 @@ export async function approveVerification(req: AuthRequest, res: Response, next:
     // User Notification
     try {
       await Notification.create({
-        user: currentDoc.user,
+        user: targetUserId,
         type: 'VERIFICATION',
         title: 'Verification Approved',
         message: `Your ${currentDoc.documentType.replace(/_/g, ' ')} (${currentDoc.documentName || 'Document'}) has been successfully verified. Your profile now proudly displays the verified badge.`,
@@ -2717,33 +2794,126 @@ export async function rejectVerification(req: AuthRequest, res: Response, next: 
     const adminId = req.user?.userId;
     const adminNote = notes?.trim() || selectedReason;
 
-    currentDoc.status = 'REJECTED';
-    currentDoc.reviewedAt = new Date();
-    if (adminId && isValidObjectId(adminId)) {
-      currentDoc.reviewedBy = adminId as any;
+    const targetUserId = String(currentDoc.user || (currentDoc as any).userId || '').trim();
+    if (!targetUserId || !isValidObjectId(targetUserId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Verification record does not contain a valid associated user ID.',
+      });
     }
-    currentDoc.reviewedByEmail = adminEmail;
-    currentDoc.rejectionReason = selectedReason;
-    currentDoc.adminNotes = adminNote;
-    await currentDoc.save();
 
-    // Check if user has other approved verifications before setting to REJECTED
-    const remainingApproved = await Verification.countDocuments({
-      user: currentDoc.user,
-      status: 'APPROVED',
-      _id: { $ne: currentDoc._id },
-    });
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'Target candidate user account linked to this verification was not found.',
+      });
+    }
 
-    if (remainingApproved === 0) {
-      await User.findByIdAndUpdate(currentDoc.user, { verified: false, verificationStatus: 'REJECTED' });
-      await Profile.findOneAndUpdate({ user: currentDoc.user }, { verificationStatus: 'REJECTED' });
+    const now = new Date();
+    if (prisma && typeof prisma.$transaction === 'function') {
+      try {
+        await prisma.$transaction(async (tx: any) => {
+          const updateResult = await tx.verification.updateMany({
+            where: { id, status: 'PENDING' },
+            data: {
+              status: 'REJECTED',
+              reviewedAt: now,
+              reviewedById: adminId && isValidObjectId(adminId) ? adminId : null,
+              reviewedByEmail: adminEmail,
+              rejectionReason: selectedReason,
+              adminNotes: adminNote,
+            },
+          });
+
+          if (updateResult.count === 0) {
+            throw new Error('CONCURRENCY_CONFLICT_OR_REVIEWED');
+          }
+
+          const remainingApprovedCount = await tx.verification.count({
+            where: {
+              userId: targetUserId,
+              status: 'APPROVED',
+              id: { not: id },
+            },
+          });
+
+          if (remainingApprovedCount === 0) {
+            await tx.user.update({
+              where: { id: targetUserId },
+              data: {
+                verified: false,
+                verificationStatus: 'REJECTED',
+              },
+            });
+
+            if (tx.profile?.updateMany) {
+              await tx.profile.updateMany({
+                where: { userId: targetUserId },
+                data: {
+                  verificationStatus: 'REJECTED',
+                },
+              });
+            }
+          }
+
+          if (tx.notification?.create) {
+            await tx.notification.create({
+              data: {
+                id: generateObjectId(),
+                userId: targetUserId,
+                type: 'VERIFICATION',
+                title: 'Verification Requires Attention',
+                message: `Your submitted ${currentDoc.documentType.replace(/_/g, ' ')} could not be verified. Reason: ${selectedReason}. Please visit your profile verification page to upload a new document.`,
+                actionUrl: '/profile/verification',
+                read: false,
+              },
+            });
+          }
+        });
+      } catch (txErr: any) {
+        if (txErr.message === 'CONCURRENCY_CONFLICT_OR_REVIEWED') {
+          const reloaded = await Verification.findById(id);
+          return res.status(409).json({
+            success: false,
+            message: `This verification record has already been reviewed (Current status: ${reloaded?.status || 'REVIEWED'}).`,
+            currentStatus: reloaded?.status,
+          });
+        }
+        console.error('[AdminVerification] Rejection transaction failed:', txErr);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to complete verification rejection transaction. Please retry.',
+        });
+      }
+    } else {
+      currentDoc.status = 'REJECTED';
+      currentDoc.reviewedAt = now;
+      if (adminId && isValidObjectId(adminId)) {
+        currentDoc.reviewedBy = adminId as any;
+      }
+      currentDoc.reviewedByEmail = adminEmail;
+      currentDoc.rejectionReason = selectedReason;
+      currentDoc.adminNotes = adminNote;
+      await currentDoc.save();
+
+      const remainingApproved = await Verification.countDocuments({
+        user: targetUserId,
+        status: 'APPROVED',
+        _id: { $ne: currentDoc._id },
+      });
+
+      if (remainingApproved === 0) {
+        await User.findByIdAndUpdate(targetUserId, { verified: false, verificationStatus: 'REJECTED' });
+        await Profile.findOneAndUpdate({ user: targetUserId }, { verificationStatus: 'REJECTED' });
+      }
     }
 
     // Immutable Audit Log
     await logAdminAction(
       adminEmail,
       'VERIFICATION_REJECTED',
-      `Rejected ${currentDoc.documentType} verification for User ID: ${currentDoc.user}. Reason: ${selectedReason}. Notes: ${adminNote}`,
+      `Rejected ${currentDoc.documentType} verification for User ID: ${targetUserId}. Reason: ${selectedReason}. Notes: ${adminNote}`,
       'Verification',
       String(currentDoc._id)
     );
@@ -2751,7 +2921,7 @@ export async function rejectVerification(req: AuthRequest, res: Response, next: 
     // User Notification
     try {
       await Notification.create({
-        user: currentDoc.user,
+        user: targetUserId,
         type: 'VERIFICATION',
         title: 'Verification Requires Attention',
         message: `Your submitted ${currentDoc.documentType.replace(/_/g, ' ')} could not be verified. Reason: ${selectedReason}. Please visit your profile verification page to upload a new document.`,

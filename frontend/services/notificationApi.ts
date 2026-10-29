@@ -81,10 +81,11 @@ export async function fetchUnreadNotificationCount(): Promise<{ count: number; i
     countObj.count = count;
     countObj.isCapped = isCapped;
     return countObj;
-  } catch {
+  } catch (err: any) {
     const countObj = new Number(0) as any;
     countObj.count = 0;
     countObj.isCapped = false;
+    countObj.unauthorized = err?.response?.status === 401;
     return countObj;
   }
 }

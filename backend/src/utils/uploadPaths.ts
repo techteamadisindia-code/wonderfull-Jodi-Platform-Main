@@ -294,30 +294,40 @@ export function findUploadedFile(urlOrPath: string): string | null {
   for (const baseDir of getUploadBaseDirectories()) {
     if (!fs.existsSync(baseDir)) continue;
 
-    const candidatePath = path.resolve(baseDir, clean);
+    const candidatePaths = [path.resolve(baseDir, clean)];
 
-    // Initial check: lexical containment
-    if (!isStrictlyInside(candidatePath, baseDir)) {
-      continue;
+    // If clean has no subfolder specified (e.g. pure filename "photo.jpg"),
+    // also check approved public subdirectories
+    if (!clean.includes('/')) {
+      for (const sub of ['profiles', 'blogs', 'awards']) {
+        candidatePaths.push(path.resolve(baseDir, sub, clean));
+      }
     }
 
-    if (fs.existsSync(candidatePath)) {
-      try {
-        // Resolve symlinks to verify physical destination is within approved upload base
-        const realCandidate = fs.realpathSync(candidatePath);
-        const realBase = fs.realpathSync(baseDir);
+    for (const candidatePath of candidatePaths) {
+      // Initial check: lexical containment
+      if (!isStrictlyInside(candidatePath, baseDir)) {
+        continue;
+      }
 
-        if (!isStrictlyInside(realCandidate, realBase)) {
-          // Symlink escapes approved upload directory!
+      if (fs.existsSync(candidatePath)) {
+        try {
+          // Resolve symlinks to verify physical destination is within approved upload base
+          const realCandidate = fs.realpathSync(candidatePath);
+          const realBase = fs.realpathSync(baseDir);
+
+          if (!isStrictlyInside(realCandidate, realBase)) {
+            // Symlink escapes approved upload directory!
+            continue;
+          }
+
+          const stats = fs.statSync(realCandidate);
+          if (stats.isFile() && stats.size > 0) {
+            return candidatePath;
+          }
+        } catch {
           continue;
         }
-
-        const stats = fs.statSync(realCandidate);
-        if (stats.isFile() && stats.size > 0) {
-          return candidatePath;
-        }
-      } catch {
-        continue;
       }
     }
   }

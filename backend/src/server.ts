@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { prisma } from './db/client';
 import { verifyEmailTransporter, getEmailConfigDiagnostics } from './services/emailService';
+import { restoreAllMissingProfilePhotos } from './services/profilePhotoRecoveryService';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -249,6 +250,17 @@ async function startServer() {
       '=================================================='
     );
     console.log('');
+
+    // Asynchronously self-heal missing profile photos to canonical persistent storage
+    restoreAllMissingProfilePhotos()
+      .then((res) => {
+        if (res.restoredCount > 0) {
+          console.log(`[Startup] Self-healed ${res.restoredCount} missing profile photos to persistent storage.`);
+        }
+      })
+      .catch((err) => {
+        console.error('[Startup] Profile photo self-healing encountered an error:', err);
+      });
   });
 }
 

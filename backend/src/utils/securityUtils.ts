@@ -106,6 +106,32 @@ export function validateDocumentBuffer(buffer: Buffer): { valid: boolean; detect
 }
 
 /**
+ * Validates whether a given string is a safe public web photo URL.
+ * Strictly rejects:
+ * - Internal server filesystem paths (/home/, /var/, /tmp/, /etc/, C:\, etc.)
+ * - Path traversal sequences (..)
+ * - Null-byte injection (\0)
+ * - Backslashes
+ * - Strings like "null", "undefined", "[object Object]"
+ */
+export function isSafePublicPhotoUrl(str?: string | null): boolean {
+  if (!str || typeof str !== 'string') return false;
+  const t = str.trim();
+  if (!t || t === 'null' || t === 'undefined' || t === '[object Object]' || t === 'NaN') return false;
+  if (t.includes('..') || t.includes('\\') || t.includes('\0')) return false;
+
+  // Disallow internal server filesystem paths
+  if (/^\/(home|var|tmp|etc|proc|sys|dev|root|usr|opt)\b/i.test(t)) return false;
+  if (/^[a-zA-Z]:/i.test(t)) return false;
+
+  // Root-relative public assets or full web URLs
+  if (t.startsWith('/uploads/') || t.startsWith('/images/') || t.startsWith('/assets/') || t.startsWith('/static/')) return true;
+  if (t.startsWith('https://') || t.startsWith('http://')) return true;
+
+  return false;
+}
+
+/**
  * Safely resolves and materializes profile photos to disk.
  * If photo data is an absolute URL or local path (/uploads/...), returns it directly.
  * If photo data is base64, validates magic bytes and writes it to disk under uploads/profiles/
@@ -116,12 +142,9 @@ export function resolveProfilePhotoUrl(
   primaryPhoto?: string | null,
   photos?: string[] | null
 ): string | null {
-  // 1. If primaryPhoto is already an upload or web URL
-  if (primaryPhoto && typeof primaryPhoto === 'string') {
-    const trimmed = primaryPhoto.trim();
-    if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      return trimmed;
-    }
+  // 1. If primaryPhoto is already an approved safe upload or web URL
+  if (isSafePublicPhotoUrl(primaryPhoto)) {
+    return primaryPhoto!.trim();
   }
 
   // 2. Gather candidates to inspect (excluding truncated 65535 strings)
@@ -138,12 +161,11 @@ export function resolveProfilePhotoUrl(
   if (Array.isArray(photos)) {
     for (const p of photos) {
       if (typeof p === 'string') {
-        const trimmed = p.trim();
-        if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-          return trimmed;
+        if (isSafePublicPhotoUrl(p)) {
+          return p.trim();
         }
-        if (trimmed.startsWith('data:image/')) {
-          candidateStrings.push(trimmed);
+        if (p.startsWith('data:image/')) {
+          candidateStrings.push(p);
         }
       }
     }
@@ -307,9 +329,7 @@ export function serializePublicProfile(
     safePhotos = p.photos.filter(
       (photoItem: any) =>
         typeof photoItem === 'string' &&
-        (photoItem.startsWith('/') ||
-          photoItem.startsWith('http://') ||
-          photoItem.startsWith('https://'))
+        isSafePublicPhotoUrl(photoItem)
     );
   }
   if (resolvedPhoto && !safePhotos.includes(resolvedPhoto)) {
@@ -697,8 +717,10 @@ export function serializePrivateProfile(profile: any, user: any, subscription?: 
     medicalQualifications: p.medicalQualifications,
     previousMarriageDetails: p.previousMarriageDetails || undefined,
     partnerExpectations: p.partnerExpectations,
-    photos: p.photos || [],
-    primaryPhoto: p.primaryPhoto,
+    photos: Array.isArray(p.photos)
+      ? p.photos.filter((photoItem: any) => typeof photoItem === 'string' && isSafePublicPhotoUrl(photoItem))
+      : [],
+    primaryPhoto: isSafePublicPhotoUrl(p.primaryPhoto) ? p.primaryPhoto : null,
     verificationStatus: p.verificationStatus,
     completionPercentage: completionResult.score,
     completionScore: completionResult.score,

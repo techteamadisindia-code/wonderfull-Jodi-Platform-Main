@@ -23,6 +23,8 @@ const PasswordResetToken_1 = require("../models/PasswordResetToken");
 const AuditLog_1 = require("../models/AuditLog");
 const emailService_1 = require("../services/emailService");
 const securityUtils_1 = require("../utils/securityUtils");
+const authController_1 = require("./authController");
+const permissionUtils_1 = require("../utils/permissionUtils");
 // Dummy hash to perform constant-time verification when user or admin does not exist
 // This prevents timing-based email enumeration attacks.
 const DUMMY_HASH = '$2b$12$e8Yk2wQ6r0g2c.yK6O5yNu9q7JpT7wH6tV1zN2l3x4y5z6a7b8c9d';
@@ -224,7 +226,7 @@ async function adminLogin(req, res, next) {
             email: user.email,
             mobile: user.mobile,
             role: user.role,
-            permissions: adminRecord?.permissions || ['all'],
+            permissions: (0, permissionUtils_1.normalizeAdminPermissions)(adminRecord?.permissions),
             isActive: user.isActive,
         };
         return res.json({
@@ -269,7 +271,7 @@ async function getAdminMe(req, res, next) {
                 email: user.email,
                 mobile: user.mobile,
                 role: user.role,
-                permissions: adminRecord?.permissions || ['all'],
+                permissions: (0, permissionUtils_1.normalizeAdminPermissions)(adminRecord?.permissions),
                 isActive: user.isActive,
             },
         });
@@ -398,16 +400,11 @@ async function adminResetPassword(req, res, next) {
         const { token, password } = parsed.data;
         const tokenHash = (0, securityUtils_1.hashToken)(token.trim());
         const tokenDoc = await PasswordResetToken_1.PasswordResetToken.findOne({ tokenHash });
-        if (!tokenDoc || tokenDoc.isUsed || tokenDoc.usedAt) {
+        const evaluation = (0, authController_1.evaluatePasswordResetTokenDoc)(tokenDoc);
+        if (!tokenDoc || !evaluation.isValid) {
             return res.status(400).json({
                 success: false,
-                message: 'This reset link is invalid or has already been used.',
-            });
-        }
-        if (new Date() > tokenDoc.expiresAt) {
-            return res.status(400).json({
-                success: false,
-                message: 'This reset link has expired. Please request a new one.',
+                message: evaluation.message,
             });
         }
         const user = await User_1.User.findById(tokenDoc.user);

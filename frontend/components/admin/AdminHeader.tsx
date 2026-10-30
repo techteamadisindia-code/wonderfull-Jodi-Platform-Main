@@ -10,7 +10,7 @@ import {
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react';
-import { getAdminUser } from '../../services/authApi';
+import { getAdminUser, getAdminMe, isSuperAdmin, AdminUser } from '../../services/authApi';
 import apiClient from '../../services/api';
 
 interface AdminHeaderProps {
@@ -19,11 +19,28 @@ interface AdminHeaderProps {
 
 export function AdminHeader({ onOpenMobileMenu }: AdminHeaderProps) {
   const pathname = usePathname();
-  const adminUser = getAdminUser();
+  const [adminUser, setAdminUser] = useState<AdminUser | null>(() => getAdminUser());
   const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null);
 
   useEffect(() => {
     let isMounted = true;
+
+    // Refresh administrative profile on load to ensure current permissions
+    getAdminMe().then((fresh) => {
+      if (isMounted && fresh) {
+        setAdminUser(fresh);
+      }
+    });
+
+    const handleUserUpdate = (e: any) => {
+      if (e.detail) {
+        setAdminUser(e.detail);
+      } else {
+        setAdminUser(getAdminUser());
+      }
+    };
+    window.addEventListener('admin_user_updated', handleUserUpdate);
+
     const checkHealth = async () => {
       try {
         const res = await apiClient.get('/health');
@@ -46,6 +63,7 @@ export function AdminHeader({ onOpenMobileMenu }: AdminHeaderProps) {
     return () => {
       isMounted = false;
       clearInterval(interval);
+      window.removeEventListener('admin_user_updated', handleUserUpdate);
     };
   }, []);
 
@@ -209,7 +227,13 @@ export function AdminHeader({ onOpenMobileMenu }: AdminHeaderProps) {
             <span className="text-xs font-bold text-slate-900 leading-tight">
               {adminUser?.fullName || 'Admin User'}
             </span>
-            <span className="text-[10px] text-slate-400 font-semibold leading-none">Super Admin</span>
+            <span
+              className={`text-[10px] font-semibold leading-none ${
+                isSuperAdmin(adminUser) ? 'text-amber-600 font-bold' : 'text-slate-400'
+              }`}
+            >
+              {isSuperAdmin(adminUser) ? 'Super Admin' : 'Administrator'}
+            </span>
           </div>
         </div>
       </div>

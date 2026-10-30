@@ -1,4 +1,4 @@
-import mongoose, { createPrismaModelAdapter, Document, Schema, Types } from '../db/prismaBridge';
+import mongoose, { createPrismaModelAdapter, Document, Schema } from '../db/prismaBridge';
 
 export interface IAdmin extends Document {
   user: mongoose.Types.ObjectId;
@@ -15,4 +15,7 @@ const adminSchema = new Schema<IAdmin>(
   { timestamps: true }
 );
 
-export const Admin = createPrismaModelAdapter<IAdmin>('admin', {"user":"userId"});
+export const Admin = createPrismaModelAdapter<IAdmin>('admin', {
+  _id: 'id',
+  user: 'userId',
+});

@@ -1070,6 +1070,42 @@ async function resolveVirtualPopulates(records, populates, delegateName) {
             }
             continue;
         }
+        // 1c. ContactRequest relations (requester, recipient)
+        // Handled virtually to safely tolerate orphaned foreign keys without Prisma Inconsistent query result crash
+        if (delegateName === 'contactRequest' && (rawPath === 'requester' || rawPath === 'recipient')) {
+            const fieldId = rawPath === 'requester' ? 'requesterId' : 'recipientId';
+            const userIds = new Set();
+            for (const rec of records) {
+                if (!rec)
+                    continue;
+                const val = rec[fieldId] ||
+                    (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+                if (val && typeof val === 'string')
+                    userIds.add(val);
+            }
+            if (userIds.size > 0) {
+                const users = await client_2.prisma.user.findMany({
+                    where: { id: { in: Array.from(userIds) } },
+                    select: selectObj ? { id: true, ...selectObj } : undefined,
+                });
+                const userMap = new Map(users.map((u) => [u.id, (0, client_2.toClient)(u)]));
+                for (const rec of records) {
+                    if (!rec)
+                        continue;
+                    const val = rec[fieldId] ||
+                        (typeof rec[rawPath] === 'string' ? rec[rawPath] : rec[rawPath]?.id || rec[rawPath]?._id);
+                    rec[rawPath] = (val && userMap.get(val)) || null;
+                }
+            }
+            else {
+                for (const rec of records) {
+                    if (!rec)
+                        continue;
+                    rec[rawPath] = null;
+                }
+            }
+            continue;
+        }
         if (delegateName === 'interest' && (rawPath === 'senderProfile' || rawPath === 'receiverProfile')) {
             const fieldId = rawPath === 'senderProfile' ? 'senderProfileId' : 'receiverProfileId';
             const profileIds = new Set();
@@ -1563,7 +1599,8 @@ class PrismaQueryBuilder {
             if ((this.delegateName === 'report' &&
                 ['reporter', 'reportedUser', 'reportedProfile', 'moderator', 'handledByAdminId'].includes(targetPath)) ||
                 ((this.delegateName === 'profile' || this.delegateName === 'admin' || this.delegateName === 'payment' || this.delegateName === 'subscription') && targetPath === 'user') ||
-                (this.delegateName === 'interest' && ['sender', 'receiver', 'senderProfile', 'receiverProfile'].includes(targetPath))) {
+                (this.delegateName === 'interest' && ['sender', 'receiver', 'senderProfile', 'receiverProfile'].includes(targetPath)) ||
+                (this.delegateName === 'contactRequest' && ['requester', 'recipient'].includes(targetPath))) {
                 this.virtualPopulates.push({ path: targetPath, select: targetSelect });
                 return this;
             }

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth, requireSuperAdmin } from '../middleware/authMiddleware';
 import {
+  verifySuperAdminAccess,
   getMonetizationSummary,
   getMembershipPlans,
   updateMembershipPlan,
@@ -24,6 +25,9 @@ const router = Router();
 // Strictly enforce Super Administrator privileges for ALL routes on this router.
 // Fails closed if token is invalid, role !== 'admin', or admin permissions do not include 'all'.
 router.use(requireAuth, requireSuperAdmin);
+
+// 0. Dedicated Authoritative Super Admin Authorization Verification Endpoint
+router.get('/auth/verify', verifySuperAdminAccess);
 
 // 1. Monetization & Promotion
 router.get('/monetization/summary', getMonetizationSummary);

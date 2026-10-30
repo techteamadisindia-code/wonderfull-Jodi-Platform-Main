@@ -7,11 +7,12 @@ import {
   ADMIN_TOKEN_KEY,
   getApiBaseUrl,
   handleMemberSessionExpired,
+  isSafeApiOrigin,
   normalizeApiUrl,
   refreshAuthSession,
 } from '../services/api';
 
-export { getApiBaseUrl, handleMemberSessionExpired, normalizeApiUrl, refreshAuthSession };
+export { getApiBaseUrl, handleMemberSessionExpired, isSafeApiOrigin, normalizeApiUrl, refreshAuthSession };
 
 const api = axios.create({
   baseURL: getApiBaseUrl(),
@@ -22,10 +23,24 @@ const api = axios.create({
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (typeof window !== 'undefined') {
     config.baseURL = getApiBaseUrl();
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
-    if (token) {
-      config.headers = config.headers ?? {};
-      (config.headers as Record<string, string>).Authorization = `Bearer ${token}`;
+    const requestUrl = config.url || '';
+
+    if (isSafeApiOrigin(requestUrl, config.baseURL || getApiBaseUrl())) {
+      const isAdminRequest =
+        requestUrl.includes('/admin') ||
+        window.location.pathname.startsWith('/admin');
+
+      // Administrative requests must exclusively use the intended admin token,
+      // preventing a stale or mismatched general-user token from overriding or corrupting admin auth.
+      // General user requests must exclusively use the user token.
+      const adminToken = localStorage.getItem(ADMIN_TOKEN_KEY);
+      const userToken = localStorage.getItem(AUTH_TOKEN_KEY);
+      const token = isAdminRequest ? adminToken : userToken;
+
+      if (token) {
+        config.headers = config.headers ?? {};
+        (config.headers as Record<string, string>).Authorization = `Bearer ${token}`;
+      }
     }
   }
   return config;

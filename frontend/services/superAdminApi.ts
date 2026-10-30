@@ -1,5 +1,10 @@
 import api from '../lib/api';
 
+export async function verifySuperAdminAccessApi() {
+  const res = await api.get('/admin/super/auth/verify');
+  return res.data;
+}
+
 export async function fetchMonetizationSummary() {
   const res = await api.get('/admin/super/monetization/summary');
   return res.data;

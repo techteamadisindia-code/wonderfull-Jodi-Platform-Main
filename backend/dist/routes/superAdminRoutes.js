@@ -7,6 +7,8 @@ const router = (0, express_1.Router)();
 // Strictly enforce Super Administrator privileges for ALL routes on this router.
 // Fails closed if token is invalid, role !== 'admin', or admin permissions do not include 'all'.
 router.use(authMiddleware_1.requireAuth, authMiddleware_1.requireSuperAdmin);
+// 0. Dedicated Authoritative Super Admin Authorization Verification Endpoint
+router.get('/auth/verify', superAdminController_1.verifySuperAdminAccess);
 // 1. Monetization & Promotion
 router.get('/monetization/summary', superAdminController_1.getMonetizationSummary);
 router.get('/monetization/plans', superAdminController_1.getMembershipPlans);

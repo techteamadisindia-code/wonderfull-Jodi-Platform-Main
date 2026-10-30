@@ -13,6 +13,7 @@ import { MembershipPlan } from '../models/MembershipPlan';
 import { Block } from '../models/Block';
 import { isValidObjectId } from '../utils/securityUtils';
 import { findCanonicalProfile } from './profileController';
+import { hasSuperAdminPermission } from '../utils/permissionUtils';
 
 /**
  * 1. POST /api/contact-requests
@@ -551,18 +552,7 @@ export async function getContactAccessStatus(req: AuthRequest, res: Response, ne
     if (req.user?.role === 'admin') {
       const { Admin } = await import('../models/Admin');
       const adminRecord = await Admin.findOne({ user: userId });
-      let permissions: string[] = [];
-      if (Array.isArray(adminRecord?.permissions)) {
-        permissions = adminRecord.permissions;
-      } else if (typeof adminRecord?.permissions === 'string') {
-        try {
-          permissions = JSON.parse(adminRecord.permissions);
-        } catch {
-          permissions = [];
-        }
-      }
-
-      if (permissions.includes('all')) {
+      if (adminRecord && hasSuperAdminPermission(adminRecord.permissions)) {
         const u = targetProfile.user as any;
         return res.json({
           success: true,
@@ -832,18 +822,7 @@ export async function revealContactDetails(req: AuthRequest, res: Response, next
     if (req.user?.role === 'admin') {
       const { Admin } = await import('../models/Admin');
       const adminRecord = await Admin.findOne({ user: requesterId });
-      let permissions: string[] = [];
-      if (Array.isArray(adminRecord?.permissions)) {
-        permissions = adminRecord.permissions;
-      } else if (typeof adminRecord?.permissions === 'string') {
-        try {
-          permissions = JSON.parse(adminRecord.permissions);
-        } catch {
-          permissions = [];
-        }
-      }
-
-      if (!permissions.includes('all')) {
+      if (!adminRecord || !hasSuperAdminPermission(adminRecord.permissions)) {
         return res.status(403).json({
           success: false,
           code: 'SUPER_ADMIN_REQUIRED',

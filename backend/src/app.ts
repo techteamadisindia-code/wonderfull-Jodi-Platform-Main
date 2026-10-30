@@ -82,6 +82,7 @@ import { globalLimiter } from './middleware/rateLimiters';
 import { errorHandler } from './middleware/errorHandler';
 import { checkMaintenanceMode } from './middleware/maintenanceMiddleware';
 import { getUploadBaseDirectories, findUploadedFile } from './utils/uploadPaths';
+import { selfHealProfilePhoto } from './services/profilePhotoRecoveryService';
 
 // When running in development via ts-node-dev or npm run dev, ensure NODE_ENV defaults to 'development'
 // so that local development runs with dev-appropriate settings (e.g. relaxed rate limits, non-secure cookies on http://localhost)
@@ -376,12 +377,24 @@ const DEFAULT_PROFILE_FALLBACK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" wi
   <path d="M26 106C26 86 42 70 64 70C86 70 102 86 102 106" stroke="#E51F3E" stroke-width="6" stroke-linecap="round"/>
 </svg>`.trim();
 
-app.all(/^\/uploads\/profiles(\/.*)?$/i, (req, res) => {
-  const found = findUploadedFile(req.path);
-  if (found) {
-    return res.sendFile(found);
+app.get(/^\/uploads\/profiles(\/.*)?$/i, async (req, res) => {
+  try {
+    let found = findUploadedFile(req.path);
+    if (!found) {
+      // Self-healing: if file is missing from disk, restore from verified DB base64 backup
+      found = await selfHealProfilePhoto(req.path);
+    }
+    if (found) {
+      return res.sendFile(found);
+    }
+  } catch (err) {
+    console.error('[Uploads/Profiles] Error during static file resolution:', err);
   }
-  res.status(404).setHeader('Content-Type', 'image/svg+xml; charset=utf-8').send(DEFAULT_PROFILE_FALLBACK_SVG);
+  res
+    .status(404)
+    .setHeader('Content-Type', 'image/svg+xml; charset=utf-8')
+    .setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+    .send(DEFAULT_PROFILE_FALLBACK_SVG);
 });
 
 // Clean 404 response for any other missing upload assets

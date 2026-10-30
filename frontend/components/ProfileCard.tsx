@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ProfileCard as ProfileCardType } from '../types/profile';
 import { ShieldCheck, MapPin, Briefcase, GraduationCap, Heart, ArrowRight } from 'lucide-react';
@@ -29,7 +29,17 @@ export function ProfileCard({
   const [shortlisted, setShortlisted] = useState(isShortlistedDefault);
   const [isUpdating, setIsUpdating] = useState(false);
   const age = profile.age || getAge(profile.dob);
-  const [imgError, setImgError] = useState(!isValidImageUrl(profile.primaryPhoto));
+  const photoCandidate =
+    profile.primaryPhoto ||
+    (profile.photos && profile.photos.length > 0 ? profile.photos[0] : null) ||
+    (profile as any).photo ||
+    null;
+  const isCandidateValid = isValidImageUrl(photoCandidate);
+  const [imgError, setImgError] = useState(!isCandidateValid);
+
+  useEffect(() => {
+    setImgError(!isValidImageUrl(photoCandidate));
+  }, [photoCandidate]);
 
   const displayName = getProfileDisplayName(profile);
   const candidateId = getCandidateId(profile);
@@ -99,9 +109,9 @@ export function ProfileCard({
           title={`View full profile of ${displayName}`}
           aria-label={`View full profile of ${displayName}`}
         >
-          {profile.primaryPhoto && !imgError && isValidImageUrl(profile.primaryPhoto) ? (
+          {photoCandidate && !imgError && isCandidateValid ? (
             <img
-              src={profile.primaryPhoto}
+              src={photoCandidate}
               alt={displayName}
               onError={() => setImgError(true)}
               className="h-full w-full object-cover object-center block transition-transform duration-500 group-hover:scale-105 cursor-pointer"

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Stethoscope } from 'lucide-react';
 import { isValidImageUrl } from '../lib/imageUtils';
 
@@ -21,19 +21,31 @@ export function DoctorAvatar({
   className = '',
 }: DoctorAvatarProps) {
   const [hasError, setHasError] = useState(false);
+  const [lastAttemptedUrl, setLastAttemptedUrl] = useState<string | null | undefined>(photoUrl);
 
+  // Safely reset error state only when photoUrl meaningfully changes to a new URL
   useEffect(() => {
-    setHasError(false);
-  }, [photoUrl]);
+    if (photoUrl !== lastAttemptedUrl) {
+      setLastAttemptedUrl(photoUrl);
+      setHasError(false);
+    }
+  }, [photoUrl, lastAttemptedUrl]);
 
-  // Derive candidate initials (e.g. "RK" for Rushikesh Kulkarni)
-  const initials = (name || 'Doctor')
-    .replace(/^Dr\.?\s+/i, '')
-    .trim()
-    .split(/\s+/)
-    .map((w) => w[0]?.toUpperCase())
-    .slice(0, 2)
-    .join('') || 'DR';
+  // Derive candidate initials (e.g. "RK" for Rushikesh Kulkarni, "AP" for Aishwarya Pawar)
+  const initials = useMemo(() => {
+    return (name || 'Doctor')
+      .replace(/^Dr\.?\s+/i, '')
+      .trim()
+      .split(/\s+/)
+      .map((w) => w[0]?.toUpperCase())
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('') || 'DR';
+  }, [name]);
+
+  const hasExplicitWidth = className.includes('w-');
+  const hasExplicitHeight = className.includes('h-');
+  const hasExplicitRounding = className.includes('rounded-');
 
   const sizeClasses = {
     sm: 'w-10 h-10 text-xs',
@@ -51,17 +63,21 @@ export function DoctorAvatar({
     '2xl': 'w-7 h-7',
   }[size];
 
+  const dimensionsClass = hasExplicitWidth && hasExplicitHeight ? '' : sizeClasses;
+  const roundingClass = hasExplicitRounding ? '' : 'rounded-[18px]';
+
   // If a valid uploaded photo URL is provided and has not failed to load
   if (photoUrl && !hasError && isValidImageUrl(photoUrl)) {
     return (
       <div
-        className={`relative overflow-hidden rounded-[18px] bg-slate-100 shrink-0 select-none ${sizeClasses} ${className}`}
+        className={`relative overflow-hidden bg-slate-100 shrink-0 select-none ${roundingClass} ${dimensionsClass} ${className}`}
       >
         <img
           src={photoUrl}
-          alt={name}
+          alt={name || 'Doctor Profile'}
           onError={() => setHasError(true)}
-          className="w-full h-full object-cover object-center"
+          className="w-full h-full object-cover object-center block"
+          loading="lazy"
         />
       </div>
     );
@@ -69,11 +85,13 @@ export function DoctorAvatar({
 
   // Official Wonderful Jodi Doctor Avatar (neutral, privacy-safe, branded vector avatar)
   const isFemale = gender?.toLowerCase() === 'female';
+  const cleanTitle = name && name.trim() ? name.trim() : 'Doctor Profile';
 
   return (
     <div
-      className={`relative overflow-hidden rounded-[18px] bg-gradient-to-br from-[#FFF5F6] via-[#FFEBEF] to-[#FFDDE4] border border-[#FBCFE8] flex flex-col items-center justify-center text-slate-800 shrink-0 select-none shadow-2xs ${sizeClasses} ${className}`}
-      title={`${name} (No photo uploaded)`}
+      className={`relative overflow-hidden bg-gradient-to-br from-[#FFF5F6] via-[#FFEBEF] to-[#FFDDE4] border border-[#FBCFE8] flex flex-col items-center justify-center text-slate-800 shrink-0 select-none shadow-2xs ${roundingClass} ${dimensionsClass} ${className}`}
+      title={cleanTitle}
+      aria-label={cleanTitle}
     >
       {/* Background soft doctor silhouette SVG */}
       <svg
@@ -92,17 +110,17 @@ export function DoctorAvatar({
       </svg>
 
       {/* Initials & Stethoscope Icon */}
-      <div className="relative z-10 flex flex-col items-center justify-center">
-        <span className="font-serif font-bold text-[#800020] tracking-wider">
+      <div className="relative z-10 flex flex-col items-center justify-center pointer-events-none">
+        <span className={`font-serif font-bold text-[#800020] tracking-wider ${hasExplicitWidth ? 'text-2xl sm:text-3xl' : ''}`}>
           {initials}
         </span>
-        <div className="flex items-center gap-1 mt-0.5 text-[#E51F3E]">
-          <Stethoscope className={iconSizes} />
+        <div className="flex items-center gap-1 mt-1 text-[#E51F3E]">
+          <Stethoscope className={hasExplicitWidth ? 'w-5 h-5 sm:w-6 sm:h-6' : iconSizes} />
         </div>
       </div>
 
       {/* Subtle bottom badge for doctor gender hint */}
-      <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md bg-white/90 backdrop-blur-2xs border border-rose-100 text-[8.5px] font-bold text-[#800020] uppercase tracking-tighter">
+      <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-white/90 backdrop-blur-2xs border border-rose-100 text-[9px] font-bold text-[#800020] uppercase tracking-tighter pointer-events-none">
         {isFemale ? 'Dr. (F)' : 'Dr. (M)'}
       </div>
     </div>

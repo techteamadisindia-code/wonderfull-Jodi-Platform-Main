@@ -239,21 +239,52 @@ export function isSafeRegistrationEndpoint(rawUrl: string | undefined, configure
          subPath.startsWith('/registrations/');
 }
 
+/**
+ * Verifies that a target request URL is directed to the same origin or configured API base,
+ * preventing credentials from leaking to external or untrusted third-party origins.
+ */
+export function isSafeApiOrigin(rawUrl: string | undefined, baseUrl?: string): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string') return true;
+  const trimmed = rawUrl.trim();
+  if (/^[\/\\]{2}/.test(trimmed)) return false;
+  // Relative paths are always safe same-origin
+  if (trimmed.startsWith('/') || !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+    return true;
+  }
+  try {
+    const targetUrl = new URL(trimmed);
+    const apiBase = baseUrl || getApiBaseUrl();
+    const resolvedBase = new URL(apiBase, typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:5000');
+    return targetUrl.origin === resolvedBase.origin;
+  } catch {
+    return false;
+  }
+}
+
 apiClient.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     config.baseURL = getApiBaseUrl();
 
-    // Check for admin token first if inside admin context, or standard token
-    const adminToken = localStorage.getItem(ADMIN_TOKEN_KEY);
-    const userToken = localStorage.getItem(USER_TOKEN_KEY);
-    const token = adminToken || userToken;
+    const requestUrl = config.url || '';
+    if (isSafeApiOrigin(requestUrl, config.baseURL || getApiBaseUrl())) {
+      const isAdminRequest =
+        requestUrl.includes('/admin') ||
+        window.location.pathname.startsWith('/admin');
 
-    if (token) {
-      config.headers = config.headers ?? {};
-      config.headers.Authorization = `Bearer ${token}`;
+      // Administrative requests must exclusively use the intended admin token,
+      // preventing a stale or mismatched general-user token from overriding or corrupting admin auth.
+      // General user requests must exclusively use the user token.
+      const adminToken = localStorage.getItem(ADMIN_TOKEN_KEY);
+      const userToken = localStorage.getItem(USER_TOKEN_KEY);
+      const token = isAdminRequest ? adminToken : userToken;
+
+      if (token) {
+        config.headers = config.headers ?? {};
+        config.headers.Authorization = `Bearer ${token}`;
+      }
     }
 
-    // Attach x-resume-token only for verified registration draft endpoints on the configured API origin
+        // Attach x-resume-token only for verified registration draft endpoints on the configured API origin
     if (isSafeRegistrationEndpoint(config.url, config.baseURL || getApiBaseUrl())) {
       config.headers = config.headers ?? {};
       const headers = config.headers as any;

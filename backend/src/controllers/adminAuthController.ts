@@ -18,6 +18,7 @@ import {
 } from '../utils/securityUtils';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { evaluatePasswordResetTokenDoc } from './authController';
+import { normalizeAdminPermissions } from '../utils/permissionUtils';
 
 // Dummy hash to perform constant-time verification when user or admin does not exist
 // This prevents timing-based email enumeration attacks.
@@ -290,7 +291,7 @@ export async function adminLogin(req: Request, res: Response, next: NextFunction
       email: user.email,
       mobile: user.mobile,
       role: user.role,
-      permissions: adminRecord?.permissions || ['all'],
+      permissions: normalizeAdminPermissions(adminRecord?.permissions),
       isActive: user.isActive,
     };
 
@@ -340,7 +341,7 @@ export async function getAdminMe(req: AuthRequest, res: Response, next: NextFunc
         email: user.email,
         mobile: user.mobile,
         role: user.role,
-        permissions: adminRecord?.permissions || ['all'],
+        permissions: normalizeAdminPermissions(adminRecord?.permissions),
         isActive: user.isActive,
       },
     });

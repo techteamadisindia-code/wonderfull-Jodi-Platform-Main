@@ -7,6 +7,7 @@ exports.getSafetySummary = getSafetySummary;
 exports.getContactRequestsOversight = getContactRequestsOversight;
 exports.getBlocksList = getBlocksList;
 exports.getModerationQueue = getModerationQueue;
+exports.verifySuperAdminAccess = verifySuperAdminAccess;
 exports.getSecuritySummary = getSecuritySummary;
 exports.getAdminUsers = getAdminUsers;
 exports.updateAdminPermissions = updateAdminPermissions;
@@ -27,6 +28,7 @@ const Report_1 = require("../models/Report");
 const AuditLog_1 = require("../models/AuditLog");
 const ContactInquiry_1 = require("../models/ContactInquiry");
 const emailService_1 = require("../services/emailService");
+const permissionUtils_1 = require("../utils/permissionUtils");
 /**
  * Helper to record Super Admin actions in AuditLog
  */
@@ -218,10 +220,31 @@ async function getContactRequestsOversight(req, res, next) {
                 .limit(limit),
             ContactRequest_1.ContactRequest.countDocuments(query),
         ]);
+        const sanitizedRequests = requests.map((item) => {
+            const raw = typeof item?.toObject === 'function' ? item.toObject() : { ...item };
+            const missingRecipient = !raw.recipient;
+            const missingRequester = !raw.requester;
+            const hasOrphanedReference = missingRecipient || missingRequester;
+            return {
+                ...raw,
+                recipient: raw.recipient || null,
+                requester: raw.requester || null,
+                dataIntegrity: {
+                    hasOrphanedReference,
+                    missingRecipient,
+                    missingRequester,
+                    warning: missingRecipient
+                        ? `Orphaned record: Recipient user '${raw.recipientId || raw.recipient}' does not exist in users database.`
+                        : missingRequester
+                            ? `Orphaned record: Requester user '${raw.requesterId || raw.requester}' does not exist in users database.`
+                            : null,
+                },
+            };
+        });
         res.json({
             success: true,
             data: {
-                requests,
+                requests: sanitizedRequests,
                 pagination: {
                     page,
                     limit,
@@ -305,23 +328,63 @@ async function getModerationQueue(req, res, next) {
 // ==========================================
 // 3. SECURITY & SYSTEM OPERATIONS
 // ==========================================
+/**
+ * Dedicated Authoritative Super Admin Authorization Verification Endpoint
+ * (GET /api/admin/super/auth/verify)
+ * Returns authoritative session details and confirms active super admin status.
+ */
+async function verifySuperAdminAccess(req, res, next) {
+    try {
+        const callerId = req.user?.userId || req.user?._id || req.user?.id;
+        if (!callerId) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required: Administrator identity missing.',
+            });
+        }
+        const user = await User_1.User.findById(callerId).select('-password');
+        if (!user || user.role !== 'admin' || user.isDeleted || user.isActive === false) {
+            return res.status(403).json({
+                success: false,
+                code: 'ADMIN_DEACTIVATED',
+                message: 'Administrator account is deactivated or not found.',
+            });
+        }
+        const adminRecord = await Admin_1.Admin.findOne({ user: callerId });
+        const permissions = (0, permissionUtils_1.normalizeAdminPermissions)(adminRecord?.permissions);
+        const isSuperAdmin = permissions.includes('all');
+        if (!isSuperAdmin) {
+            return res.status(403).json({
+                success: false,
+                code: 'SUPER_ADMIN_REQUIRED',
+                message: 'Access denied: Super Administrator privileges required.',
+            });
+        }
+        return res.json({
+            success: true,
+            authorized: true,
+            data: {
+                id: user._id,
+                _id: user._id,
+                userId: user._id,
+                fullName: user.fullName,
+                email: user.email,
+                role: user.role,
+                permissions,
+                isSuperAdmin: true,
+            },
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+}
 async function getSecuritySummary(req, res, next) {
     try {
         const admins = await Admin_1.Admin.find().populate('user', 'fullName email role status isActive');
         let superAdminCount = 0;
         for (const a of admins) {
-            let perms = [];
-            if (Array.isArray(a.permissions))
-                perms = a.permissions;
-            else if (typeof a.permissions === 'string') {
-                try {
-                    perms = JSON.parse(a.permissions);
-                }
-                catch {
-                    perms = [];
-                }
-            }
-            if (perms.includes('all'))
+            if ((0, permissionUtils_1.hasSuperAdminPermission)(a.permissions))
                 superAdminCount++;
         }
         const recentAuditLogsCount = await AuditLog_1.AuditLog.countDocuments({
@@ -349,9 +412,19 @@ async function getSecuritySummary(req, res, next) {
 async function getAdminUsers(req, res, next) {
     try {
         const admins = await Admin_1.Admin.find().populate('user', 'fullName email role status isActive isDeleted');
+        const formattedAdmins = admins.map((a) => {
+            const plain = typeof a.toObject === 'function' ? a.toObject() : { ...a };
+            const adminId = plain.id || plain._id;
+            return {
+                ...plain,
+                id: adminId,
+                _id: adminId,
+                permissions: (0, permissionUtils_1.normalizeAdminPermissions)(plain.permissions),
+            };
+        });
         res.json({
             success: true,
-            data: admins,
+            data: formattedAdmins,
         });
     }
     catch (error) {
@@ -365,28 +438,128 @@ async function updateAdminPermissions(req, res, next) {
         const callerId = req.user?.userId;
         const callerEmail = req.user?.email || 'superadmin@wonderfuljodi.com';
         if (!Array.isArray(permissions)) {
-            return res.status(400).json({ success: false, message: 'Permissions must be an array of strings' });
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_PERMISSIONS_FORMAT',
+                message: 'Permissions must be an array of strings.',
+            });
         }
+        // Validate that all items in permissions are strings
+        for (const p of permissions) {
+            if (typeof p !== 'string') {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_PERMISSION_ITEM',
+                    message: 'All permission entries must be valid strings.',
+                });
+            }
+        }
+        const cleanPermissions = (0, permissionUtils_1.normalizeAdminPermissions)(permissions);
+        // 1. Identify target Admin row using persisted Admin primary key (admin.id)
         const admin = await Admin_1.Admin.findById(id);
         if (!admin) {
-            return res.status(404).json({ success: false, message: 'Admin account not found' });
+            // Check if the caller supplied a User ID instead of an Admin ID
+            const user = await User_1.User.findById(id);
+            if (user) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_ADMIN_IDENTIFIER',
+                    message: 'The supplied ID belongs to a User account, not an Admin record. Admin primary key required.',
+                });
+            }
+            return res.status(404).json({
+                success: false,
+                code: 'ADMIN_NOT_FOUND',
+                message: 'Administrator record not found.',
+            });
         }
-        const prevPermissions = admin.permissions;
-        admin.permissions = permissions.map(String);
+        // Verify linked user account exists
+        const targetUserId = admin.user?._id || admin.user || admin.userId;
+        const targetUser = await User_1.User.findById(targetUserId);
+        if (!targetUser) {
+            return res.status(404).json({
+                success: false,
+                code: 'LINKED_USER_NOT_FOUND',
+                message: 'Linked administrator user account does not exist.',
+            });
+        }
+        const prevPermissions = (0, permissionUtils_1.normalizeAdminPermissions)(admin.permissions);
+        const wasSuperAdmin = prevPermissions.includes('all');
+        const willBeSuperAdmin = cleanPermissions.includes('all');
+        // 2. Safeguard against accidental loss of the last designated Super Admin
+        if (wasSuperAdmin && !willBeSuperAdmin) {
+            const allAdmins = await Admin_1.Admin.find().populate('user', 'role status isActive isDeleted');
+            let otherSuperAdminCount = 0;
+            for (const other of allAdmins) {
+                const otherAdminId = other.id || other._id;
+                const currentAdminId = admin.id || admin._id;
+                if (String(otherAdminId) === String(currentAdminId))
+                    continue;
+                const otherUser = other.user;
+                const isOtherActive = otherUser &&
+                    otherUser.role === 'admin' &&
+                    otherUser.isActive !== false &&
+                    otherUser.isDeleted !== true &&
+                    otherUser.status !== 'Deleted' &&
+                    otherUser.status !== 'Suspended';
+                if (isOtherActive && (0, permissionUtils_1.hasSuperAdminPermission)(other.permissions)) {
+                    otherSuperAdminCount++;
+                }
+            }
+            if (otherSuperAdminCount < 1) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'LAST_SUPER_ADMIN_PROTECTION',
+                    message: 'Cannot revoke Super Admin privileges from the last active Super Administrator.',
+                });
+            }
+        }
+        // 3. Persist and verify
+        admin.permissions = cleanPermissions;
         await admin.save();
+        // Verify persisted result from DB before returning success
+        const verifiedAdmin = await Admin_1.Admin.findById(id).populate('user', 'fullName email role status isActive isDeleted');
+        if (!verifiedAdmin) {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to verify updated administrator permissions in database.',
+            });
+        }
+        const persistedPerms = (0, permissionUtils_1.normalizeAdminPermissions)(verifiedAdmin.permissions);
+        if (JSON.stringify([...persistedPerms].sort()) !== JSON.stringify([...cleanPermissions].sort())) {
+            return res.status(500).json({
+                success: false,
+                code: 'PERSISTENCE_VERIFICATION_FAILED',
+                message: 'Database persistence verification mismatch for administrator permissions.',
+            });
+        }
+        // 4. Audit Log
         await recordSuperAdminAudit({
             adminUser: callerId,
             adminEmail: callerEmail,
             action: 'ADMIN_PERMISSIONS_UPDATED',
             targetModel: 'Admin',
-            targetId: id,
-            details: JSON.stringify({ before: prevPermissions, after: admin.permissions }),
+            targetId: String(admin.id || admin._id),
+            details: JSON.stringify({
+                targetUserEmail: targetUser.email,
+                targetUserId: String(targetUser._id || targetUser.id),
+                before: prevPermissions,
+                after: cleanPermissions,
+            }),
             ipAddress: req.ip,
         });
-        res.json({
+        const adminId = verifiedAdmin.id || verifiedAdmin._id;
+        return res.json({
             success: true,
-            message: 'Admin permissions updated successfully.',
-            data: admin,
+            message: 'Admin permissions updated and verified successfully.',
+            data: {
+                id: adminId,
+                _id: adminId,
+                user: verifiedAdmin.user,
+                userId: targetUserId,
+                permissions: persistedPerms,
+                updatedAt: verifiedAdmin.updatedAt,
+            },
         });
     }
     catch (error) {

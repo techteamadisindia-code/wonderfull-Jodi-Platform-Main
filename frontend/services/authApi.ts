@@ -51,6 +51,7 @@ export async function adminLogin(email: string, password: string): Promise<Admin
     setAdminToken(response.data.token);
     if (typeof window !== 'undefined') {
       localStorage.setItem('wonderfuljodi_admin_user', JSON.stringify(response.data.user));
+      window.dispatchEvent(new CustomEvent('admin_user_updated', { detail: response.data.user }));
     }
   }
 
@@ -63,6 +64,7 @@ export async function getAdminMe(): Promise<AdminUser | null> {
     if (response.data.success && response.data.data) {
       if (typeof window !== 'undefined') {
         localStorage.setItem('wonderfuljodi_admin_user', JSON.stringify(response.data.data));
+        window.dispatchEvent(new CustomEvent('admin_user_updated', { detail: response.data.data }));
       }
       return response.data.data;
     }
@@ -70,6 +72,12 @@ export async function getAdminMe(): Promise<AdminUser | null> {
   } catch {
     return null;
   }
+}
+
+export function isSuperAdmin(user?: AdminUser | null): boolean {
+  if (!user || user.role !== 'admin') return false;
+  if (!Array.isArray(user.permissions)) return false;
+  return user.permissions.includes('all');
 }
 
 export function getAdminUser(): AdminUser | null {

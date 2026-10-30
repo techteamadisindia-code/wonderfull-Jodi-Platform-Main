@@ -134,6 +134,7 @@ const RefreshToken_1 = require("../models/RefreshToken");
 const SecurityLog_1 = require("../models/SecurityLog");
 const securityUtils_1 = require("../utils/securityUtils");
 const maintenanceMiddleware_1 = require("../middleware/maintenanceMiddleware");
+const permissionUtils_1 = require("../utils/permissionUtils");
 const notificationBroadcastService_1 = require("../services/notificationBroadcastService");
 const DailyUserVisit_1 = require("../models/DailyUserVisit");
 const Registration_1 = require("../models/Registration");
@@ -5301,7 +5302,7 @@ async function getAdminById(req, res, next) {
         }
         // Authorization: caller must have 'all', 'admins', or 'users' permissions or be superadmin
         const callerAdmin = await Admin_1.Admin.findOne({ user: callerId });
-        const callerPerms = callerAdmin?.permissions || [];
+        const callerPerms = (0, permissionUtils_1.normalizeAdminPermissions)(callerAdmin?.permissions);
         const isAuthorized = callerPerms.includes('all') ||
             callerPerms.includes('admins') ||
             callerPerms.includes('users');
@@ -5353,8 +5354,7 @@ async function deleteAdmin(req, res, next) {
         }
         // 1. Authorization: Only Super Admin (permissions contains 'all') can delete admin accounts
         const callerAdmin = await Admin_1.Admin.findOne({ user: callerId });
-        const callerPerms = callerAdmin?.permissions || [];
-        const isSuperAdmin = callerPerms.includes('all');
+        const isSuperAdmin = (0, permissionUtils_1.hasSuperAdminPermission)(callerAdmin?.permissions);
         if (!isSuperAdmin) {
             return res.status(403).json({
                 success: false,
@@ -5379,8 +5379,7 @@ async function deleteAdmin(req, res, next) {
         }
         // 4. Check if target is a Super Admin and if they are the last active Super Admin
         const targetAdminDoc = await Admin_1.Admin.findOne({ user: targetUser._id });
-        const targetPerms = targetAdminDoc?.permissions || [];
-        const isTargetSuperAdmin = targetPerms.includes('all');
+        const isTargetSuperAdmin = (0, permissionUtils_1.hasSuperAdminPermission)(targetAdminDoc?.permissions);
         if (isTargetSuperAdmin) {
             const allActiveAdmins = await User_1.User.find({
                 role: 'admin',
@@ -5391,7 +5390,7 @@ async function deleteAdmin(req, res, next) {
             let superAdminCount = 0;
             for (const adm of allActiveAdmins) {
                 const doc = await Admin_1.Admin.findOne({ user: adm._id });
-                if (doc?.permissions?.includes('all')) {
+                if ((0, permissionUtils_1.hasSuperAdminPermission)(doc?.permissions)) {
                     superAdminCount++;
                 }
             }

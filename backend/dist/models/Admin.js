@@ -6,5 +6,8 @@ const adminSchema = new prismaBridge_1.Schema({
     user: { type: prismaBridge_1.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
     permissions: [{ type: String, trim: true }],
 }, { timestamps: true });
-exports.Admin = (0, prismaBridge_1.createPrismaModelAdapter)('admin', { "user": "userId" });
+exports.Admin = (0, prismaBridge_1.createPrismaModelAdapter)('admin', {
+    _id: 'id',
+    user: 'userId',
+});
 //# sourceMappingURL=Admin.js.map

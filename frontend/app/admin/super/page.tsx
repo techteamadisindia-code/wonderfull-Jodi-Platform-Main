@@ -25,6 +25,7 @@ import {
   Eye,
 } from 'lucide-react';
 import {
+  verifySuperAdminAccessApi,
   fetchMonetizationSummary,
   fetchSuperAdminPlans,
   updateSuperAdminPlan,
@@ -42,14 +43,18 @@ import {
   replySupportInquiry,
   retrySupportInquiryEmail,
 } from '../../../services/superAdminApi';
+import { getAdminUser, getAdminMe } from '../../../services/authApi';
 
 type SuperAdminTab = 'monetization' | 'safety' | 'security' | 'support';
+type AuthState = 'loading' | 'authorized' | 'unauthenticated' | 'forbidden' | 'error';
 
 export default function SuperAdminDashboardPage() {
   const [activeTab, setActiveTab] = useState<SuperAdminTab>('monetization');
-  const [loading, setLoading] = useState(true);
+  const [authState, setAuthState] = useState<AuthState>('loading');
+  const [authErrorMessage, setAuthErrorMessage] = useState<string>('');
+  const [verifiedUser, setVerifiedUser] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isSuperAdminDenied, setIsSuperAdminDenied] = useState(false);
 
   // Tab 1: Monetization
   const [monetizationData, setMonetizationData] = useState<any>(null);
@@ -79,15 +84,77 @@ export default function SuperAdminDashboardPage() {
   const [supportActionLoading, setSupportActionLoading] = useState(false);
   const [supportActionMsg, setSupportActionMsg] = useState<{ text: string; success: boolean } | null>(null);
 
-  // Load initial data for active tab
+  /**
+   * Dedicated Authoritative Super Admin Authorization Check
+   */
+  const checkAuthorization = async (): Promise<boolean> => {
+    setAuthState('loading');
+    setAuthErrorMessage('');
+    try {
+      const res = await verifySuperAdminAccessApi();
+      if (res?.success && res?.authorized) {
+        setAuthState('authorized');
+        setVerifiedUser(res.data);
+        if (res.data && typeof window !== 'undefined') {
+          localStorage.setItem('wonderfuljodi_admin_user', JSON.stringify(res.data));
+          window.dispatchEvent(new CustomEvent('admin_user_updated', { detail: res.data }));
+        }
+        return true;
+      } else {
+        setAuthState('forbidden');
+        setAuthErrorMessage('Super Administrator privileges required (permission "all" missing).');
+        return false;
+      }
+    } catch (err: any) {
+      const status = err.response?.status;
+      if (status === 401) {
+        setAuthState('unauthenticated');
+        setAuthErrorMessage('Your administrator session has expired or is invalid. Please sign in again.');
+        return false;
+      } else if (status === 403) {
+        setAuthState('forbidden');
+        setAuthErrorMessage(
+          err.response?.data?.message ||
+            'Super Administrator privileges required. Your account does not have "all" permissions.'
+        );
+        return false;
+      } else {
+        // Network or 5xx server failure: must NOT show false permission denial
+        setAuthState('error');
+        setAuthErrorMessage(
+          err.response?.data?.message ||
+            'Temporary error connecting to Super Administrator authorization service. Please check your network and retry.'
+        );
+        return false;
+      }
+    }
+  };
+
+  // Perform initial authoritative authorization check on mount
   useEffect(() => {
-    loadTabData(activeTab);
+    let isMounted = true;
+    const init = async () => {
+      const ok = await checkAuthorization();
+      if (ok && isMounted) {
+        loadTabData(activeTab);
+      }
+    };
+    init();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // When activeTab changes, load tab data if authorized
+  useEffect(() => {
+    if (authState === 'authorized') {
+      loadTabData(activeTab);
+    }
   }, [activeTab]);
 
   const loadTabData = async (tab: SuperAdminTab) => {
     setLoading(true);
     setError(null);
-    setIsSuperAdminDenied(false);
 
     try {
       if (tab === 'monetization') {
@@ -123,9 +190,12 @@ export default function SuperAdminDashboardPage() {
       }
     } catch (err: any) {
       console.error('[SuperAdminDashboard] Error loading data:', err);
-      if (err.response?.status === 403) {
-        setIsSuperAdminDenied(true);
-        setError('Super Administrator privileges required. Your account does not have "all" permissions.');
+      if (err.response?.status === 401) {
+        setAuthState('unauthenticated');
+        setAuthErrorMessage('Your administrator session has expired. Please sign in again.');
+      } else if (err.response?.status === 403) {
+        // Authoritative re-verification if an endpoint returns 403
+        await checkAuthorization();
       } else {
         setError(err.response?.data?.message || 'Failed to load Super Administrator dashboard data.');
       }
@@ -167,18 +237,31 @@ export default function SuperAdminDashboardPage() {
     if (!editingAdmin) return;
     setAdminPermSaving(true);
     try {
-      const perms = Array.isArray(editingAdmin.permissions)
-        ? editingAdmin.permissions
-        : String(editingAdmin.permissions)
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean);
-      const res = await updateAdminPermissions(editingAdmin._id || editingAdmin.id, perms);
+      let perms: string[] = [];
+      if (Array.isArray(editingAdmin.permissions)) {
+        perms = editingAdmin.permissions;
+      } else if (typeof editingAdmin.permissions === 'string') {
+        try {
+          const parsed = JSON.parse(editingAdmin.permissions);
+          perms = Array.isArray(parsed) ? parsed : [];
+        } catch {
+          perms = editingAdmin.permissions.split(',').map((s: string) => s.trim()).filter(Boolean);
+        }
+      }
+      const adminId = editingAdmin.id || editingAdmin._id;
+      const res = await updateAdminPermissions(adminId, perms);
       if (res.success) {
         setAdminUsers((prev) =>
-          prev.map((a) => ((a._id || a.id) === (editingAdmin._id || editingAdmin.id) ? res.data : a))
+          prev.map((a) => ((a.id || a._id) === adminId ? res.data : a))
         );
         setEditingAdmin(null);
+
+        // If updating the currently logged-in admin, refresh session
+        const current = getAdminUser();
+        const targetUserId = editingAdmin.user?._id || editingAdmin.user?.id || editingAdmin.userId;
+        if (current && (current._id === targetUserId || current.id === targetUserId)) {
+          await getAdminMe();
+        }
       }
     } catch (err: any) {
       alert(err.response?.data?.message || 'Failed to update admin permissions.');
@@ -245,7 +328,51 @@ export default function SuperAdminDashboardPage() {
     }
   };
 
-  if (isSuperAdminDenied) {
+  if (authState === 'loading') {
+    return (
+      <div className="min-h-[400px] flex flex-col items-center justify-center p-8 text-center space-y-3">
+        <Loader2 className="w-10 h-10 animate-spin text-[#800020] mb-2" />
+        <h2 className="font-serif text-xl font-bold text-slate-800">Verifying Super Administrator Authorization...</h2>
+        <p className="text-xs text-slate-500 max-w-sm">Checking authoritative privileges and credentials.</p>
+      </div>
+    );
+  }
+
+  if (authState === 'unauthenticated') {
+    return (
+      <div className="space-y-6">
+        <div className="p-8 rounded-3xl bg-amber-50 border border-amber-200 text-center max-w-xl mx-auto my-12 space-y-4">
+          <div className="w-16 h-16 rounded-3xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
+            <Lock className="w-8 h-8" />
+          </div>
+          <h2 className="font-serif text-2xl font-bold text-amber-950">Authentication Required</h2>
+          <p className="text-sm text-amber-800 leading-relaxed">
+            {authErrorMessage || 'Your administrator session has expired or is invalid. Please sign in again.'}
+          </p>
+          <div className="pt-2 flex justify-center gap-3">
+            <a
+              href="/admin/login?redirect=/admin/super"
+              className="px-5 py-2.5 rounded-full bg-[#800020] hover:bg-[#600018] text-white font-bold text-xs shadow-xs"
+            >
+              Sign In to Admin Portal
+            </a>
+            <button
+              onClick={() => {
+                checkAuthorization().then((ok) => {
+                  if (ok) loadTabData(activeTab);
+                });
+              }}
+              className="px-5 py-2.5 rounded-full bg-amber-200 hover:bg-amber-300 text-amber-900 font-bold text-xs shadow-xs cursor-pointer"
+            >
+              Retry Session Check
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (authState === 'forbidden') {
     return (
       <div className="space-y-6">
         <div className="p-8 rounded-3xl bg-rose-50 border border-rose-200 text-center max-w-xl mx-auto my-12 space-y-4">
@@ -254,15 +381,58 @@ export default function SuperAdminDashboardPage() {
           </div>
           <h2 className="font-serif text-2xl font-bold text-rose-950">Super Administrator Access Required</h2>
           <p className="text-sm text-rose-800 leading-relaxed">
-            This module is restricted strictly to verified Super Administrators with full administrative permissions (
-            <code className="bg-rose-100 px-2 py-0.5 rounded font-mono text-xs">all</code>).
+            {authErrorMessage || (
+              <>
+                This module is restricted strictly to verified Super Administrators with full administrative permissions (
+                <code className="bg-rose-100 px-2 py-0.5 rounded font-mono text-xs">all</code>).
+              </>
+            )}
+          </p>
+          <div className="pt-2 flex justify-center gap-3">
+            <button
+              onClick={() => {
+                checkAuthorization().then((ok) => {
+                  if (ok) loadTabData(activeTab);
+                });
+              }}
+              className="px-5 py-2.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+            >
+              Retry Access Check
+            </button>
+            <a
+              href="/admin/dashboard"
+              className="px-5 py-2.5 rounded-full bg-white border border-rose-300 text-rose-800 font-bold text-xs hover:bg-rose-100/60 transition"
+            >
+              Return to Admin Dashboard
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (authState === 'error') {
+    return (
+      <div className="space-y-6">
+        <div className="p-8 rounded-3xl bg-slate-50 border border-slate-200 text-center max-w-xl mx-auto my-12 space-y-4">
+          <div className="w-16 h-16 rounded-3xl bg-slate-100 text-slate-600 flex items-center justify-center mx-auto">
+            <AlertCircle className="w-8 h-8 text-amber-600" />
+          </div>
+          <h2 className="font-serif text-2xl font-bold text-slate-900">Service Temporarily Unavailable</h2>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            {authErrorMessage || 'Could not verify authorization due to a temporary network or server error. Access has not been denied.'}
           </p>
           <div className="pt-2">
             <button
-              onClick={() => loadTabData(activeTab)}
-              className="px-5 py-2.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs"
+              onClick={() => {
+                checkAuthorization().then((ok) => {
+                  if (ok) loadTabData(activeTab);
+                });
+              }}
+              className="px-5 py-2.5 rounded-full bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs shadow-xs cursor-pointer inline-flex items-center gap-2"
             >
-              Retry Access Check
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry Connection</span>
             </button>
           </div>
         </div>
@@ -649,12 +819,38 @@ export default function SuperAdminDashboardPage() {
                   {contactRequests.map((req) => (
                     <tr key={req._id || req.id} className="hover:bg-slate-50/80">
                       <td className="py-3.5 px-3">
-                        <span className="font-bold text-slate-900 block">{req.requester?.fullName || 'Doctor'}</span>
-                        <span className="text-[11px] text-slate-400">{req.requester?.email || req.requester?._id}</span>
+                        {req.requester ? (
+                          <>
+                            <span className="font-bold text-slate-900 block">{req.requester.fullName || 'Doctor'}</span>
+                            <span className="text-[11px] text-slate-400">{req.requester.email || req.requester._id || req.requester.id}</span>
+                          </>
+                        ) : (
+                          <div className="space-y-0.5">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                              ⚠️ Orphaned Account
+                            </span>
+                            <span className="text-[10px] text-slate-400 block font-mono">
+                              ID: {req.requesterId || (typeof req.requester === 'string' ? req.requester : 'Unknown')}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="py-3.5 px-3">
-                        <span className="font-bold text-slate-900 block">{req.recipient?.fullName || 'Doctor'}</span>
-                        <span className="text-[11px] text-slate-400">{req.recipient?.email || req.recipient?._id}</span>
+                        {req.recipient ? (
+                          <>
+                            <span className="font-bold text-slate-900 block">{req.recipient.fullName || 'Doctor'}</span>
+                            <span className="text-[11px] text-slate-400">{req.recipient.email || req.recipient._id || req.recipient.id}</span>
+                          </>
+                        ) : (
+                          <div className="space-y-0.5">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                              ⚠️ Orphaned Account
+                            </span>
+                            <span className="text-[10px] text-slate-400 block font-mono">
+                              ID: {req.recipientId || (typeof req.recipient === 'string' ? req.recipient : 'Unknown')}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="py-3.5 px-3">
                         <span

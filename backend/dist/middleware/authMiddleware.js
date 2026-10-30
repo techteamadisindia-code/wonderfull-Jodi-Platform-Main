@@ -42,6 +42,7 @@ exports.requireAdminAuth = requireAdminAuth;
 exports.requireSuperAdmin = requireSuperAdmin;
 exports.optionalAuth = optionalAuth;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const permissionUtils_1 = require("../utils/permissionUtils");
 async function requireAuth(req, res, next) {
     // 1. Check Bearer Authorization Header
     const authHeader = req.headers?.authorization;
@@ -87,7 +88,7 @@ async function requireAuth(req, res, next) {
             })
                 .catch(() => { });
         }
-        next();
+        await next();
     }
     catch (error) {
         if (error?.name === 'TokenExpiredError') {
@@ -126,14 +127,14 @@ function requireRole(role) {
     };
 }
 function requireAdminAuth(req, res, next) {
-    requireAuth(req, res, () => {
+    return requireAuth(req, res, async () => {
         if (!req.user || req.user.role !== 'admin') {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied: Administrator privileges required.',
             });
         }
-        next();
+        return await next();
     });
 }
 /**
@@ -143,7 +144,7 @@ function requireAdminAuth(req, res, next) {
  * Fails closed on missing permissions, deactivated status, or database errors.
  */
 function requireSuperAdmin(req, res, next) {
-    requireAdminAuth(req, res, async () => {
+    return requireAdminAuth(req, res, async () => {
         const callerId = req.user?.userId || req.user?._id || req.user?.id;
         if (!callerId) {
             return res.status(403).json({
@@ -154,26 +155,14 @@ function requireSuperAdmin(req, res, next) {
         try {
             const { Admin } = await Promise.resolve().then(() => __importStar(require('../models/Admin')));
             const adminRecord = await Admin.findOne({ user: callerId });
-            let permissions = [];
-            if (Array.isArray(adminRecord?.permissions)) {
-                permissions = adminRecord.permissions;
-            }
-            else if (typeof adminRecord?.permissions === 'string') {
-                try {
-                    permissions = JSON.parse(adminRecord.permissions);
-                }
-                catch {
-                    permissions = [];
-                }
-            }
-            if (!permissions.includes('all')) {
+            if (!adminRecord || !(0, permissionUtils_1.hasSuperAdminPermission)(adminRecord.permissions)) {
                 return res.status(403).json({
                     success: false,
                     code: 'SUPER_ADMIN_REQUIRED',
                     message: 'Access denied: Super Administrator privileges required.',
                 });
             }
-            next();
+            return await next();
         }
         catch (err) {
             console.error('[AuthMiddleware] Super Admin verification error:', err?.message || err);

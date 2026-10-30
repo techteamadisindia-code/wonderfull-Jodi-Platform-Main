@@ -55,6 +55,7 @@ const MembershipPlan_1 = require("../models/MembershipPlan");
 const Block_1 = require("../models/Block");
 const securityUtils_1 = require("../utils/securityUtils");
 const profileController_1 = require("./profileController");
+const permissionUtils_1 = require("../utils/permissionUtils");
 /**
  * 1. POST /api/contact-requests
  * Send a new contact request to a member
@@ -508,19 +509,7 @@ async function getContactAccessStatus(req, res, next) {
         if (req.user?.role === 'admin') {
             const { Admin } = await Promise.resolve().then(() => __importStar(require('../models/Admin')));
             const adminRecord = await Admin.findOne({ user: userId });
-            let permissions = [];
-            if (Array.isArray(adminRecord?.permissions)) {
-                permissions = adminRecord.permissions;
-            }
-            else if (typeof adminRecord?.permissions === 'string') {
-                try {
-                    permissions = JSON.parse(adminRecord.permissions);
-                }
-                catch {
-                    permissions = [];
-                }
-            }
-            if (permissions.includes('all')) {
+            if (adminRecord && (0, permissionUtils_1.hasSuperAdminPermission)(adminRecord.permissions)) {
                 const u = targetProfile.user;
                 return res.json({
                     success: true,
@@ -765,19 +754,7 @@ async function revealContactDetails(req, res, next) {
         if (req.user?.role === 'admin') {
             const { Admin } = await Promise.resolve().then(() => __importStar(require('../models/Admin')));
             const adminRecord = await Admin.findOne({ user: requesterId });
-            let permissions = [];
-            if (Array.isArray(adminRecord?.permissions)) {
-                permissions = adminRecord.permissions;
-            }
-            else if (typeof adminRecord?.permissions === 'string') {
-                try {
-                    permissions = JSON.parse(adminRecord.permissions);
-                }
-                catch {
-                    permissions = [];
-                }
-            }
-            if (!permissions.includes('all')) {
+            if (!adminRecord || !(0, permissionUtils_1.hasSuperAdminPermission)(adminRecord.permissions)) {
                 return res.status(403).json({
                     success: false,
                     code: 'SUPER_ADMIN_REQUIRED',

@@ -2582,9 +2582,10 @@ export async function getVerificationById(req: AuthRequest, res: Response, next:
     }
 
     // Also fetch associated user profile and previous verification history
+    const targetUserId = verification.user?._id || verification.user?.id || verification.userId;
     const [profile, history] = await Promise.all([
-      Profile.findOne({ user: verification.user._id }),
-      Verification.find({ user: verification.user._id, _id: { $ne: verification._id } }).sort({ createdAt: -1 }),
+      targetUserId ? Profile.findOne({ user: targetUserId }) : null,
+      targetUserId ? Verification.find({ user: targetUserId, _id: { $ne: verification._id } }).sort({ createdAt: -1 }) : [],
     ]);
 
     res.json({
@@ -3324,12 +3325,19 @@ export async function grantMembershipBySuperAdmin(req: AuthRequest, res: Respons
   try {
     // 1. Strict Super Admin Authorization Gate
     const callerId = req.user?.userId || req.user?._id || req.user?.id;
+    if (!callerId) {
+      return res.status(401).json({
+        success: false,
+        code: 'UNAUTHENTICATED',
+        message: 'Authentication required',
+      });
+    }
+
     const callerAdmin = await Admin.findOne({ user: callerId });
-    const callerPerms: string[] = callerAdmin?.permissions || [];
-    const isSuperAdmin = callerPerms.includes('all');
-    if (!isSuperAdmin) {
+    if (!hasSuperAdminPermission(callerAdmin?.permissions)) {
       return res.status(403).json({
         success: false,
+        code: 'SUPER_ADMIN_REQUIRED',
         message: 'Access denied: Only Super Administrators can manually grant paid memberships.',
       });
     }
@@ -3387,21 +3395,7 @@ export async function grantMembershipBySuperAdmin(req: AuthRequest, res: Respons
       });
     }
     if (!plan) {
-      const fallbackPlans = [
-        { name: 'Basic Doctor Connect', slug: 'basic-doctor-connect', durationDays: 30, contactRequestLimit: 15 },
-        { name: 'Premium Match', slug: 'premium-match', durationDays: 180, contactRequestLimit: 60 },
-        { name: 'Priority Matchmaking', slug: 'priority-matchmaking', durationDays: 180, contactRequestLimit: 120 },
-        { name: 'Elite Assisted VIP', slug: 'elite-assisted-vip', durationDays: 365, contactRequestLimit: 300 },
-      ];
-      plan = fallbackPlans.find(
-        (p) =>
-          p.slug === String(planId).toLowerCase().trim() ||
-          p.name.toLowerCase() === String(planId).toLowerCase().trim()
-      );
-    }
-
-    if (!plan) {
-      return res.status(404).json({ success: false, message: 'Specified membership plan was not found.' });
+      return res.status(404).json({ success: false, message: 'Specified membership plan was not found in configured plans.' });
     }
 
     // 4. Calculate Duration & Expiration
@@ -3414,7 +3408,22 @@ export async function grantMembershipBySuperAdmin(req: AuthRequest, res: Respons
       }
     }
 
-    const contactCredits = plan.contactRequestLimit || 30;
+    // Safe credit calculation: 0 remains 0 (free plans do not accidentally receive 30 paid credits)
+    let contactCredits = 0;
+    if (plan.contactRequestLimit !== undefined && plan.contactRequestLimit !== null) {
+      contactCredits = Number(plan.contactRequestLimit);
+      if (isNaN(contactCredits)) contactCredits = 0;
+    } else if (plan.contactLimit !== undefined && plan.contactLimit !== null) {
+      contactCredits = Number(plan.contactLimit);
+      if (isNaN(contactCredits)) contactCredits = 0;
+    }
+
+    // Handle unlimited plans
+    const planSlugLower = (plan.slug || plan.name || '').toLowerCase();
+    const isUnlimited = plan.isUnlimitedContact || planSlugLower.includes('concierge') || planSlugLower === 'vvip';
+    if (isUnlimited) {
+      contactCredits = -1; // -1 represents unlimited contact entitlement
+    }
     const now = new Date();
 
     const existingActiveSub = await Subscription.findOne({

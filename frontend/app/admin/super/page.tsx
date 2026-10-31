@@ -80,6 +80,7 @@ export default function SuperAdminDashboardPage() {
   const [selectedInquiry, setSelectedInquiry] = useState<any | null>(null);
   const [inquiryNote, setInquiryNote] = useState('');
   const [inquiryReply, setInquiryReply] = useState('');
+  const [replyIdempotencyKey, setReplyIdempotencyKey] = useState('');
   const [replyStatus, setReplyStatus] = useState('RESOLVED');
   const [supportActionLoading, setSupportActionLoading] = useState(false);
   const [supportActionMsg, setSupportActionMsg] = useState<{ text: string; success: boolean } | null>(null);
@@ -295,28 +296,68 @@ export default function SuperAdminDashboardPage() {
     setSupportActionLoading(true);
     setSupportActionMsg(null);
     try {
+      // Retain and reuse identical idempotencyKey across retries for the same draft reply
+      const idempotencyKey = replyIdempotencyKey || (
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `rep_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+      );
+      if (!replyIdempotencyKey) {
+        setReplyIdempotencyKey(idempotencyKey);
+      }
+
       const res = await replySupportInquiry(selectedInquiry._id || selectedInquiry.id, {
         replyText: inquiryReply.trim(),
         newStatus: replyStatus,
+        idempotencyKey,
       });
       if (res.success) {
         setSelectedInquiry(res.data);
         setInquiryReply('');
-        setSupportActionMsg({ text: res.message || 'Reply recorded and email sent.', success: true });
+        setReplyIdempotencyKey(''); // Only cleared on successful completion
+        setSupportActionMsg({
+          text: res.message || 'Reply recorded and email accepted by SMTP.',
+          success: true,
+        });
       }
     } catch (err: any) {
-      setSupportActionMsg({ text: err.response?.data?.message || 'Failed to send reply.', success: false });
+      const errorData = err.response?.data;
+      if (errorData?.code === 'EMAIL_ACCEPTED_PERSISTENCE_FAILED') {
+        setSupportActionMsg({
+          text: 'Email was accepted by SMTP, but persisting final reply record encountered a database error. Please refresh.',
+          success: false,
+        });
+      } else if (errorData?.code === 'REPLY_IN_PROGRESS') {
+        setSupportActionMsg({
+          text: 'This reply is already being transmitted to the SMTP server. Please wait a moment before retrying.',
+          success: false,
+        });
+      } else {
+        setSupportActionMsg({
+          text: errorData?.message || 'Failed to send reply.',
+          success: false,
+        });
+      }
     } finally {
       setSupportActionLoading(false);
     }
   };
 
-  const handleRetryEmail = async () => {
+  const handleRetryEmail = async (reconcileAction?: string, replyId?: string) => {
     if (!selectedInquiry) return;
+    if (reconcileAction === 'FORCE_RETRY') {
+      const confirmed = window.confirm(
+        'Warning: When SMTP delivery is uncertain or in-progress, force-retrying may send a DUPLICATE email to the user if the original message was already accepted or delivered. Check mail server logs first. Proceed?'
+      );
+      if (!confirmed) return;
+    }
     setSupportActionLoading(true);
     setSupportActionMsg(null);
     try {
-      const res = await retrySupportInquiryEmail(selectedInquiry._id || selectedInquiry.id);
+      const res = await retrySupportInquiryEmail(selectedInquiry._id || selectedInquiry.id, {
+        reconcileAction,
+        replyId,
+      });
       if (res.data) {
         setSelectedInquiry(res.data);
       }
@@ -1194,11 +1235,34 @@ export default function SuperAdminDashboardPage() {
                       <FileText className="w-4 h-4 text-slate-600" />
                       <span>Internal Administrator Notes</span>
                     </h4>
-                    {selectedInquiry.adminNotes && (
-                      <pre className="p-3 bg-amber-50/70 border border-amber-200/70 rounded-2xl text-xs font-mono text-amber-950 whitespace-pre-wrap">
-                        {selectedInquiry.adminNotes}
-                      </pre>
-                    )}
+                    {(() => {
+                      const noteEntries = Array.isArray(selectedInquiry.statusHistory)
+                        ? selectedInquiry.statusHistory.filter((h: any) => h.eventType === 'NOTE_ADDED' || h.noteText)
+                        : [];
+                      if (noteEntries.length > 0) {
+                        return (
+                          <div className="space-y-2">
+                            {noteEntries.map((n: any, idx: number) => (
+                              <div key={idx} className="p-3 bg-amber-50/70 border border-amber-200/70 rounded-2xl text-xs space-y-1">
+                                <div className="flex items-center justify-between text-[11px] text-amber-900/70 font-semibold">
+                                  <span>{n.changedByEmail || 'Administrator'}</span>
+                                  <span>{n.changedAt ? new Date(n.changedAt).toLocaleString() : ''}</span>
+                                </div>
+                                <p className="text-amber-950 font-medium whitespace-pre-wrap">{n.reason || n.noteText}</p>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      }
+                      if (selectedInquiry.adminNotes) {
+                        return (
+                          <pre className="p-3 bg-amber-50/70 border border-amber-200/70 rounded-2xl text-xs font-mono text-amber-950 whitespace-pre-wrap">
+                            {selectedInquiry.adminNotes}
+                          </pre>
+                        );
+                      }
+                      return null;
+                    })()}
                     <form onSubmit={handleAddNote} className="flex gap-2">
                       <input
                         type="text"
@@ -1261,41 +1325,77 @@ export default function SuperAdminDashboardPage() {
                     </form>
                   </div>
 
-                  {/* Reply History & Retry Email */}
+                  {/* Reply History & Delivery Status */}
                   {Array.isArray(selectedInquiry.adminReplies) && selectedInquiry.adminReplies.length > 0 && (
                     <div className="space-y-3 border-t border-slate-100 pt-4">
                       <h4 className="font-serif text-sm font-bold text-slate-900">Reply History & Delivery Status</h4>
                       <div className="space-y-2">
-                        {selectedInquiry.adminReplies.map((r: any, idx: number) => (
-                          <div key={idx} className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-xs space-y-1">
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold text-slate-800">{r.sentByEmail || 'Support Admin'}</span>
-                              {r.emailSent ? (
-                                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
-                                  Email Delivered
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold text-[10px]">
-                                  Delivery Failed: {r.emailError || 'SMTP Error'}
-                                </span>
+                        {selectedInquiry.adminReplies.map((r: any, idx: number) => {
+                          const isDefinitiveFailure = r.deliveryStatus === 'FAILED' || (!r.deliveryStatus && !r.emailSent);
+                          const isSending = r.deliveryStatus === 'SENDING' || r.deliveryStatus === 'QUEUED';
+                          const isUnknown = r.deliveryStatus === 'DELIVERY_UNKNOWN';
+                          const isAccepted = r.deliveryStatus === 'SENT' || (r.emailSent && !r.deliveryStatus);
+
+                          return (
+                            <div key={idx} className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-xs space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-slate-800">{r.sentByEmail || 'Support Admin'}</span>
+                                {isAccepted ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                                    Accepted by SMTP
+                                  </span>
+                                ) : isSending ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold text-[10px]">
+                                    Sending in progress
+                                  </span>
+                                ) : isUnknown ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-bold text-[10px]">
+                                    Delivery Unknown (Manual check required)
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold text-[10px]">
+                                    Delivery Failed: {r.deliveryError || r.emailError || 'SMTP Error'}
+                                  </span>
+                                )}
+                              </div>
+                              {r.smtpMessageId && (
+                                <div className="text-[10px] text-slate-500 font-mono">
+                                  Message-ID: {r.smtpMessageId}
+                                </div>
+                              )}
+                              <p className="text-slate-700 whitespace-pre-wrap">{r.replyText}</p>
+                              {isUnknown && (
+                                <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] space-y-1.5 mt-2">
+                                  <p className="font-semibold text-amber-800">
+                                    ⚠️ Notice: When SMTP acceptance is uncertain, force-retrying may dispatch a duplicate email if the message was delivered. Check mail logs first.
+                                  </p>
+                                  <button
+                                    type="button"
+                                    disabled={supportActionLoading}
+                                    onClick={() => handleRetryEmail('FORCE_RETRY', r.replyId)}
+                                    className="px-2.5 py-1 rounded-lg bg-amber-700 hover:bg-amber-800 text-white font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <RefreshCw className="w-3 h-3" />
+                                    <span>Force Retry (May Duplicate if Delivered)</span>
+                                  </button>
+                                </div>
+                              )}
+                              {isDefinitiveFailure && idx === selectedInquiry.adminReplies.length - 1 && (
+                                <div className="pt-1.5">
+                                  <button
+                                    type="button"
+                                    disabled={supportActionLoading}
+                                    onClick={() => handleRetryEmail()}
+                                    className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <RefreshCw className="w-3 h-3" />
+                                    <span>Retry Sending Email</span>
+                                  </button>
+                                </div>
                               )}
                             </div>
-                            <p className="text-slate-700 whitespace-pre-wrap">{r.replyText}</p>
-                            {!r.emailSent && idx === selectedInquiry.adminReplies.length - 1 && (
-                              <div className="pt-1.5">
-                                <button
-                                  type="button"
-                                  disabled={supportActionLoading}
-                                  onClick={handleRetryEmail}
-                                  className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] inline-flex items-center gap-1"
-                                >
-                                  <RefreshCw className="w-3 h-3" />
-                                  <span>Retry Sending Email</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}

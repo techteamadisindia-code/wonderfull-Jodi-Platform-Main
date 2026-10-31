@@ -8,6 +8,7 @@ import { WeddingSearch } from '../components/WeddingSearch';
 import { Testimonials } from '../components/Testimonials';
 import { AwardsSection } from '../components/AwardsSection';
 import { AnimatedStatCounter } from '../components/AnimatedStatCounter';
+import { DiwaliEffectsController } from '../components/diwali';
 import {
   Heart,
   Users,
@@ -115,6 +116,9 @@ export default function HomePage() {
           background: 'linear-gradient(135deg, #FAF8F5 0%, #FFF9F5 45%, #FAF8F5 100%)',
         }}
       >
+        {/* Interactive Diwali Festive Effects Layer & Controller */}
+        <DiwaliEffectsController />
+
         {/* Floating Petals and Subtle Hearts */}
         <div className="absolute pointer-events-none select-none hidden sm:block" style={{ top: '18%', left: '35%' }}>
           <svg width="18" height="24" viewBox="0 0 28 34" className="animate-float" style={{ opacity: 0.4 }}>

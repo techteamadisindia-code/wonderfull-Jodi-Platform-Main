@@ -19,16 +19,23 @@ export interface IStatusHistory {
   changedBy?: mongoose.Types.ObjectId;
   changedByEmail?: string;
   note?: string;
+  eventType?: 'STATUS_CHANGE' | 'NOTE_ADDED';
   timestamp: Date;
 }
 
 export interface IAdminReply {
+  replyId?: string;
+  idempotencyKey?: string;
+  payloadHash?: string;
   replyText: string;
   sentBy?: mongoose.Types.ObjectId;
   sentByEmail?: string;
   sentAt: Date;
   emailSent: boolean;
   emailError?: string;
+  deliveryStatus?: 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED' | 'DELIVERY_UNKNOWN';
+  smtpMessageId?: string;
+  deliveryError?: string;
 }
 
 export interface IContactInquiry extends Document {
@@ -150,7 +157,7 @@ contactInquirySchema.index({ category: 1, createdAt: -1 });
 contactInquirySchema.index({ email: 1, createdAt: -1 });
 contactInquirySchema.index({ createdAt: -1 });
 
-export const ContactInquiry = createPrismaModelAdapter<IContactInquiry>('contactInquiry', {"user":"userId","assignedTo":"assignedToId","adminReplies":"replies"});
+export const ContactInquiry = createPrismaModelAdapter<IContactInquiry>('contactInquiry', { user: 'userId', adminReplies: 'replies' });
 
 /**
  * Generate a unique contact inquiry ID in format WJ-CON-YYYY-XXXX

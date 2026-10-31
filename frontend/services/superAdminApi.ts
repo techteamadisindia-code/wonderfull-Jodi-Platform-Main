@@ -75,12 +75,12 @@ export async function addSupportInquiryNote(id: string, note: string) {
   return res.data;
 }
 
-export async function replySupportInquiry(id: string, payload: { replyText: string; newStatus?: string }) {
+export async function replySupportInquiry(id: string, payload: { replyText: string; newStatus?: string; idempotencyKey?: string }) {
   const res = await api.post(`/admin/super/support/inquiries/${id}/reply`, payload);
   return res.data;
 }
 
-export async function retrySupportInquiryEmail(id: string) {
+export async function retrySupportInquiryEmail(id: string, payload?: { replyId?: string; reconcileAction?: string }) {
   const res = await api.post(`/admin/super/support/inquiries/${id}/retry-email`);
   return res.data;
 }

@@ -73,7 +73,7 @@ import {
 } from '../../../../services/profileApi';
 import { AdminEditProfileModal } from '../../../../components/admin/AdminEditProfileModal';
 import { getAdminUser } from '../../../../services/authApi';
-import apiClient from '../../../../services/api';
+import apiClient, { normalizeApiPath } from '../../../../services/api';
 
 function calculateAge(dob?: string | Date): number | null {
   if (!dob) return null;
@@ -320,7 +320,7 @@ function AdminProfileDetailsContent() {
         payload.durationDays = Number(customDays);
       }
 
-      await apiClient.post('/admin/subscriptions/grant-manual', payload);
+      await apiClient.post('/admin/subscriptions/grant', payload);
       showToast('Membership plan successfully updated.');
       setChangePlanModalOpen(false);
       setPlanReason('');
@@ -2912,7 +2912,7 @@ function AdminDocumentLightbox({
         setLoading(true);
         setStatus('LOADING');
         // Fetch document through authenticated apiClient as a blob to preserve server authorization
-        const response = await apiClient.get(doc.url, {
+        const response = await apiClient.get(normalizeApiPath(doc.url), {
           responseType: 'blob',
         });
 

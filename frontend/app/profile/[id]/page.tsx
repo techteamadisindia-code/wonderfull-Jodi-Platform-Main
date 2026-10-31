@@ -134,11 +134,24 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
   } | null>(null);
 
   useEffect(() => {
+    let active = true;
+
     async function loadProfileAndStatus() {
+      if (!id) return;
+
+      // Reset contact access, action, and message states on id change to prevent cross-profile leakage
+      setContactMessage(null);
+      setContactActionLoading(false);
+      setContactAccess({
+        hasAccess: false,
+        status: 'NONE',
+      });
+
       setLoading(true);
       setError(null);
       try {
         const res = await apiClient.get(`/profiles/${id}`);
+        if (!active) return;
         const profileData = res.data?.data;
         if (!profileData) {
           throw new Error('Profile could not be loaded or was not found');
@@ -152,6 +165,7 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
         if (token) {
           try {
             const myProfile = await getMyProfile().catch(() => null);
+            if (!active) return;
             const myUserId = myProfile?.user?._id || myProfile?.user?.id || myProfile?.user;
             const targetUserId = profileData.user?._id || profileData.user?.id || profileData.user;
             const isOwn =
@@ -169,6 +183,7 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                 fetchMySubscription().catch(() => null),
                 getShortlisted().catch(() => []),
               ]);
+              if (!active) return;
               if (statusRes) setInterestStatus(statusRes);
               if (accessRes) {
                 setContactAccess(accessRes);
@@ -212,10 +227,13 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
           }
         }
       } catch (err: any) {
+        if (!active) return;
         console.error('Error fetching profile details:', err);
         setError(err.response?.data?.message || err.message || 'Unable to load profile.');
       } finally {
-        setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     }
 
@@ -225,11 +243,12 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
 
     // Auto-refresh when login status changes in another tab or window
     const handleAuthChange = () => {
-      if (id) loadProfileAndStatus();
+      if (id && active) loadProfileAndStatus();
     };
     window.addEventListener('storage', handleAuthChange);
     window.addEventListener('focus', handleAuthChange);
     return () => {
+      active = false;
       window.removeEventListener('storage', handleAuthChange);
       window.removeEventListener('focus', handleAuthChange);
     };
@@ -374,7 +393,12 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
     try {
       const res = await declineContactRequest(contactAccess.requestId);
       if (res.success) {
-        setContactAccess((prev) => ({ ...prev, status: 'DECLINED', hasAccess: false }));
+        setContactAccess((prev) => ({
+          ...prev,
+          status: 'DECLINED',
+          hasAccess: false,
+          contactDetails: undefined,
+        }));
         setContactMessage({ text: 'Contact request declined. No credits were deducted.', type: 'success' });
       }
     } catch (err: any) {

@@ -55,6 +55,29 @@ export function normalizeApiUrl(rawUrl: string): string {
 }
 
 /**
+ * Normalizes an API path by stripping leading duplicate /api prefixes.
+ * When Axios has baseURL configured with '/api' (or '.../api'), passing a path like
+ * '/api/verifications/document/key' results in a duplicate '/api/api/verifications/document/key' 404.
+ * This helper ensures that paths intended for apiClient are cleanly rooted without duplicate /api prefixes.
+ */
+export function normalizeApiPath(rawPath: string): string {
+  if (!rawPath || typeof rawPath !== 'string') return '';
+  const trimmed = rawPath.trim();
+  // Do not touch full URLs with schemes (http://, https://) or protocol-relative (//)
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) || trimmed.startsWith('//')) {
+    return trimmed;
+  }
+  let path = trimmed;
+  while (path.startsWith('/api/') || path === '/api') {
+    path = path.slice(4);
+    if (!path.startsWith('/')) {
+      path = '/' + path;
+    }
+  }
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
+/**
  * Dynamically resolves the API base URL:
  * 1. In browser (production): always returns same-origin '/api' to avoid CORS, cookie, and proxy loops
  * 2. In browser (LAN/dev mode): connects directly to host PC on port 5000 (e.g. http://192.168.1.102:5000/api)
@@ -262,6 +285,9 @@ export function isSafeApiOrigin(rawUrl: string | undefined, baseUrl?: string): b
 }
 
 apiClient.interceptors.request.use((config) => {
+  if (config.url) {
+    config.url = normalizeApiPath(config.url);
+  }
   if (typeof window !== 'undefined') {
     config.baseURL = getApiBaseUrl();
 

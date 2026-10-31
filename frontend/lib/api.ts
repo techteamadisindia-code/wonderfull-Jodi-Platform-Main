@@ -8,11 +8,12 @@ import {
   getApiBaseUrl,
   handleMemberSessionExpired,
   isSafeApiOrigin,
+  normalizeApiPath,
   normalizeApiUrl,
   refreshAuthSession,
 } from '../services/api';
 
-export { getApiBaseUrl, handleMemberSessionExpired, isSafeApiOrigin, normalizeApiUrl, refreshAuthSession };
+export { getApiBaseUrl, handleMemberSessionExpired, isSafeApiOrigin, normalizeApiPath, normalizeApiUrl, refreshAuthSession };
 
 const api = axios.create({
   baseURL: getApiBaseUrl(),
@@ -21,6 +22,9 @@ const api = axios.create({
 
 // Request interceptor: attach token from localStorage if available (backward compatibility + headers)
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  if (config.url) {
+    config.url = normalizeApiPath(config.url);
+  }
   if (typeof window !== 'undefined') {
     config.baseURL = getApiBaseUrl();
     const requestUrl = config.url || '';

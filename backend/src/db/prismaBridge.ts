@@ -494,6 +494,11 @@ export function cleanUnsupportedModelFields(data: any, modelName?: string): any 
     delete data.deletedAt;
     delete data.trashed;
     delete data.trashedAt;
+    delete data.referenceId;
+  } else if (mName === 'contactinquiry') {
+    delete data.adminNotes;
+  } else if (mName === 'contactrequest') {
+    delete data.contactUnlockedAt;
   }
   return data;
 }
@@ -506,6 +511,12 @@ export function cleanUnsupportedModelFields(data: any, modelName?: string): any 
 export function normalizeDelegateRecord(rec: any, delegateName?: string, fieldMap?: Record<string, string>): any {
   if (!rec || typeof rec !== 'object') return rec;
   const dName = String(delegateName || '').toLowerCase();
+  if (dName.includes('contactrequest')) {
+    if (rec.contactUnlockedAt) {
+      const parsed = new Date(rec.contactUnlockedAt);
+      rec.contactUnlockedAt = isNaN(parsed.getTime()) ? null : parsed;
+    }
+  }
 
   // Reverse mapping for delegates using fieldMap (e.g. user -> userId)
   if (fieldMap && typeof fieldMap === 'object') {
@@ -592,6 +603,16 @@ export function normalizeDelegateRecord(rec: any, delegateName?: string, fieldMa
     if (rec.user === undefined && rec.userId !== undefined) {
       rec.user = rec.userId;
     }
+  } else if (dName.includes('contactinquiry')) {
+    if (rec.user === undefined && rec.userId !== undefined) {
+      rec.user = rec.userId;
+    }
+    if (rec.adminReplies === undefined && rec.replies !== undefined) {
+      rec.adminReplies = rec.replies;
+    }
+    if (rec.replies === undefined && rec.adminReplies !== undefined) {
+      rec.replies = rec.adminReplies;
+    }
   } else if (dName === 'payment') {
     if (rec.user === undefined && rec.userId !== undefined) {
       rec.user = rec.userId;
@@ -621,6 +642,18 @@ export function normalizeDelegateRecord(rec: any, delegateName?: string, fieldMa
     }
     if (rec.relatedReport === undefined && rec.relatedReportId !== undefined) {
       rec.relatedReport = rec.relatedReportId;
+    }
+  } else if (dName === 'contactinquiry') {
+    if (rec.user === undefined && rec.userId !== undefined) {
+      rec.user = rec.userId;
+    }
+    if (!rec.adminNotes && Array.isArray(rec.statusHistory)) {
+      const noteEntries = rec.statusHistory.filter((h: any) => h && h.note && typeof h.note === 'string');
+      if (noteEntries.length > 0) {
+        rec.adminNotes = noteEntries
+          .map((h: any) => `[${new Date(h.timestamp || Date.now()).toISOString()} - ${h.changedByEmail || 'admin'}]: ${h.note}`)
+          .join('\n');
+      }
     }
   }
   return rec;
@@ -1024,7 +1057,40 @@ async function resolveVirtualPopulates(
     const selectStr = typeof pop === 'object' ? pop.select : undefined;
     const selectObj = parseSelectFields(selectStr);
 
-    // Generic user populate (for Profile, Admin, Payment, Subscription, etc.)
+    // Generic user / reviewedBy populate (for Profile, Admin, Payment, Subscription, Verification, etc.)
+    if (rawPath === 'reviewedBy') {
+      const userIds = new Set<string>();
+      for (const rec of records) {
+        if (!rec) continue;
+        const val =
+          rec.reviewedById ||
+          rec.reviewedBy_id ||
+          (typeof rec.reviewedBy === 'string' ? rec.reviewedBy : rec.reviewedBy?.id || rec.reviewedBy?._id);
+        if (val && typeof val === 'string') userIds.add(val);
+      }
+      if (userIds.size > 0) {
+        const users = await (prisma as any).user.findMany({
+          where: { id: { in: Array.from(userIds) } },
+          select: selectObj ? { id: true, ...selectObj } : undefined,
+        });
+        const userMap = new Map(users.map((u: any) => [u.id, toClient(u)]));
+        for (const rec of records) {
+          if (!rec) continue;
+          const val =
+            rec.reviewedById ||
+            rec.reviewedBy_id ||
+            (typeof rec.reviewedBy === 'string' ? rec.reviewedBy : rec.reviewedBy?.id || rec.reviewedBy?._id);
+          rec.reviewedBy = (val && userMap.get(val)) || null;
+        }
+      } else {
+        for (const rec of records) {
+          if (!rec) continue;
+          rec.reviewedBy = null;
+        }
+      }
+      continue;
+    }
+
     if (rawPath === 'user') {
       const userIds = new Set<string>();
       for (const rec of records) {
@@ -1672,7 +1738,8 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
       if (
         (this.delegateName === 'report' &&
           ['reporter', 'reportedUser', 'reportedProfile', 'moderator', 'handledByAdminId'].includes(targetPath)) ||
-        ((this.delegateName === 'profile' || this.delegateName === 'admin' || this.delegateName === 'payment' || this.delegateName === 'subscription') && targetPath === 'user') ||
+        ((this.delegateName === 'profile' || this.delegateName === 'admin' || this.delegateName === 'payment' || this.delegateName === 'subscription' || this.delegateName === 'verification') && targetPath === 'user') ||
+        (this.delegateName === 'verification' && targetPath === 'reviewedBy') ||
         (this.delegateName === 'interest' && ['sender', 'receiver', 'senderProfile', 'receiverProfile'].includes(targetPath)) ||
         (this.delegateName === 'contactRequest' && ['requester', 'recipient'].includes(targetPath))
       ) {
@@ -1906,8 +1973,9 @@ export class PrismaQueryBuilder<T = any> implements PromiseLike<T> {
       cleanInclude = {};
       for (const [k, v] of Object.entries(this.queryOptions.include)) {
         if (
-          this.delegateName === 'report' &&
-          ['reporter', 'reportedUser', 'reportedProfile', 'moderator', 'handledByAdminId'].includes(k)
+          (this.delegateName === 'report' &&
+            ['reporter', 'reportedUser', 'reportedProfile', 'moderator', 'handledByAdminId'].includes(k)) ||
+          (this.delegateName === 'verification' && ['user', 'reviewedBy'].includes(k))
         ) {
           const selectStr = (v as any)?.select ? Object.keys((v as any).select).join(' ') : undefined;
           this.virtualPopulates.push({ path: k, select: selectStr });
@@ -2834,7 +2902,7 @@ export function createPrismaModelAdapter<T = any>(
       }
     }
 
-    const cleanData = cleanPrismaData({ ...data, id }, fieldMap);
+    const cleanData = cleanUnsupportedModelFields(cleanPrismaData({ ...data, id }, fieldMap), String(delegateName));
     const mName = String(delegateName).toLowerCase();
     if (mName === 'contactinquiry') {
       cleanData.replies = cleanData.replies ?? [];

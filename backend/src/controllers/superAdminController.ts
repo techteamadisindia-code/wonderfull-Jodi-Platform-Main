@@ -15,7 +15,7 @@ import { Report } from '../models/Report';
 import { AuditLog } from '../models/AuditLog';
 import { ContactInquiry } from '../models/ContactInquiry';
 import { sendMail, getEmailConfig } from '../services/emailService';
-import { normalizeAdminPermissions, hasSuperAdminPermission } from '../utils/permissionUtils';
+import { normalizeAdminPermissions, hasSuperAdminPermission, isPrimarySuperAdminEmail } from '../utils/permissionUtils';
 
 /**
  * Helper to record Super Admin actions in AuditLog
@@ -531,9 +531,32 @@ export async function updateAdminPermissions(req: AuthRequest, res: Response, ne
       });
     }
 
+    const callerUser = callerId ? await User.findById(callerId) : null;
+    const isCallerPrimary = isPrimarySuperAdminEmail(callerUser?.email || req.user?.email);
+    const isTargetPrimary = isPrimarySuperAdminEmail(targetUser.email);
+
     const prevPermissions = normalizeAdminPermissions(admin.permissions);
     const wasSuperAdmin = prevPermissions.includes('all');
     const willBeSuperAdmin = cleanPermissions.includes('all');
+
+    // Primary Super Admin permissions cannot be modified by any other administrator
+    if (isTargetPrimary && !isCallerPrimary) {
+      return res.status(403).json({
+        success: false,
+        code: 'CANNOT_MODIFY_PRIMARY_SUPER_ADMIN',
+        message: 'Access denied: The primary super administrator permissions cannot be modified by other administrators.',
+      });
+    }
+
+    // Super admin privileges cannot be removed from the primary super admin
+    if (isTargetPrimary && !willBeSuperAdmin) {
+      return res.status(400).json({
+        success: false,
+        code: 'CANNOT_REVOKE_SUPER_ADMIN_PERMISSIONS',
+        message: 'Super administrator full access permissions cannot be removed from the primary super admin.',
+      });
+    }
+
 
     // 2. Safeguard against accidental loss of the last designated Super Admin
     if (wasSuperAdmin && !willBeSuperAdmin) {

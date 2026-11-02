@@ -250,6 +250,7 @@ router.get('/admins', getAdmins);
 router.get('/admins/:id', getAdminById);
 router.post('/admins', createAdmin);
 router.put('/admins/:id', updateAdmin);
+router.patch('/admins/:id', updateAdmin);
 router.delete('/admins/:id', deleteAdmin);
 
 // 11. Platform Settings & Maintenance Mode

@@ -23,7 +23,13 @@ import { RefreshToken } from '../models/RefreshToken';
 import { SecurityLog } from '../models/SecurityLog';
 import { escapeRegex, isValidObjectId } from '../utils/securityUtils';
 import { invalidateMaintenanceCache } from '../middleware/maintenanceMiddleware';
-import { normalizeAdminPermissions, hasSuperAdminPermission } from '../utils/permissionUtils';
+import {
+  normalizeAdminPermissions,
+  hasSuperAdminPermission,
+  PRIMARY_SUPER_ADMIN_EMAIL,
+  isPrimarySuperAdminEmail,
+  ALLOWED_ADMIN_PERMISSIONS,
+} from '../utils/permissionUtils';
 import {
   getRecipientCount as countRecipients,
   createAndDispatchBroadcast,
@@ -772,6 +778,14 @@ export async function updateUserStatus(req: AuthRequest, res: Response, next: Ne
 
     // Safeguards when deactivating an account
     if (!activeValue && existingUser.isActive) {
+      // 0. Protect Primary Super Admin account from deactivation
+      if (isPrimarySuperAdminEmail(existingUser.email)) {
+        return res.status(403).json({
+          success: false,
+          code: 'CANNOT_DEACTIVATE_PRIMARY_SUPER_ADMIN',
+          message: 'The primary super administrator account is protected and cannot be deactivated.',
+        });
+      }
       // 1. Cannot deactivate currently logged-in administrator
       if (String(existingUser._id) === callerId) {
         return res.status(400).json({
@@ -1104,8 +1118,8 @@ export async function bulkUpdateUserStatus(req: AuthRequest, res: Response, next
         continue;
       }
 
-      // Safeguard 2: Protect Super Admin accounts from deactivation
-      if (!targetActive && superAdminUserIds.has(id)) {
+      // Safeguard 2: Protect Super Admin accounts and Primary Super Admin from deactivation
+      if (!targetActive && (superAdminUserIds.has(id) || isPrimarySuperAdminEmail(userDoc.email))) {
         failed.push({
           id,
           reason: 'Super Admin accounts are protected and cannot be deactivated',
@@ -1384,6 +1398,15 @@ export async function updateUserRole(req: AuthRequest, res: Response, next: Next
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
+    // Protect Primary Super Admin from demotion or role change
+    if (isPrimarySuperAdminEmail(targetUser.email) && role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        code: 'CANNOT_DEMOTE_PRIMARY_SUPER_ADMIN',
+        message: 'The primary super administrator account cannot be demoted or have its role changed.',
+      });
+    }
+
     // Demoting an admin to regular user
     if (targetUser.role === 'admin' && role === 'user') {
       if (String(targetUser._id) === callerId) {
@@ -1547,6 +1570,15 @@ export async function deleteUser(req: AuthRequest, res: Response, next: NextFunc
     const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Primary Super Admin cannot be deleted by anyone under any circumstances
+    if (isPrimarySuperAdminEmail(user.email)) {
+      return res.status(403).json({
+        success: false,
+        code: 'CANNOT_DELETE_PRIMARY_SUPER_ADMIN',
+        message: 'The primary super administrator account is protected and cannot be deleted by anyone.',
+      });
     }
 
     // Protecting administrator accounts from deletion
@@ -6037,9 +6069,13 @@ export async function deleteAdmin(req: AuthRequest, res: Response, next: NextFun
     if (!isSuperAdmin) {
       return res.status(403).json({
         success: false,
+        code: 'INSUFFICIENT_PERMISSIONS',
         message: 'Access denied: Only Super Administrators can delete administrator accounts.',
       });
     }
+
+    const callerUser = await User.findById(callerId);
+    const isCallerPrimary = isPrimarySuperAdminEmail(callerUser?.email);
 
     const targetId = req.params.id;
 
@@ -6047,6 +6083,7 @@ export async function deleteAdmin(req: AuthRequest, res: Response, next: NextFun
     if (String(targetId) === String(callerId)) {
       return res.status(400).json({
         success: false,
+        code: 'SELF_DELETION_PROHIBITED',
         message: 'Self-deletion is prohibited. You cannot delete your own administrator account.',
       });
     }
@@ -6056,55 +6093,69 @@ export async function deleteAdmin(req: AuthRequest, res: Response, next: NextFun
     if (!targetUser || targetUser.isDeleted) {
       return res.status(404).json({
         success: false,
+        code: 'ADMIN_NOT_FOUND',
         message: 'Administrator account not found or already deleted.',
       });
     }
 
-    // 4. Check if target is a Super Admin and if they are the last active Super Admin
+    // 4. Primary Super Admin protection: cannot be deleted by anyone (fail-closed HTTP 403)
+    if (isPrimarySuperAdminEmail(targetUser.email)) {
+      return res.status(403).json({
+        success: false,
+        code: 'CANNOT_DELETE_PRIMARY_SUPER_ADMIN',
+        message: 'The primary super administrator account is protected and cannot be deleted by anyone.',
+      });
+    }
+
+    // 5. Check if target is a Super Admin
     const targetAdminDoc = await Admin.findOne({ user: targetUser._id });
     const isTargetSuperAdmin = hasSuperAdminPermission(targetAdminDoc?.permissions);
 
     if (isTargetSuperAdmin) {
-      const allActiveAdmins = await User.find({
-        role: 'admin',
-        isActive: true,
-        isDeleted: { $ne: true },
-        status: { $ne: 'Deleted' },
-      });
-
-      let superAdminCount = 0;
-      for (const adm of allActiveAdmins) {
-        const doc = await Admin.findOne({ user: adm._id });
-        if (hasSuperAdminPermission(doc?.permissions)) {
-          superAdminCount++;
-        }
-      }
-
-      if (superAdminCount <= 1) {
-        return res.status(400).json({
-          success: false,
-          message: 'Cannot delete the last active Super Administrator account.',
+      // If caller is NOT Primary Super Admin, enforce existing last active Super Admin safeguard
+      if (!isCallerPrimary) {
+        const allActiveAdmins = await User.find({
+          role: 'admin',
+          isActive: true,
+          isDeleted: { $ne: true },
+          status: { $ne: 'Deleted' },
         });
+
+        let superAdminCount = 0;
+        for (const adm of allActiveAdmins) {
+          const doc = await Admin.findOne({ user: adm._id });
+          if (hasSuperAdminPermission(doc?.permissions)) {
+            superAdminCount++;
+          }
+        }
+
+        if (superAdminCount <= 1) {
+          return res.status(400).json({
+            success: false,
+            code: 'LAST_SUPER_ADMIN_PROTECTION',
+            message: 'Cannot delete the last active Super Administrator account.',
+          });
+        }
       }
     }
 
-    // 5. Soft-delete the admin user
+    // 6. Soft-delete the admin user
     await User.findByIdAndUpdate(targetUser._id, {
       isDeleted: true,
       isActive: false,
       status: 'Deleted',
     });
 
-    // 6. Revoke all active sessions and refresh tokens for this admin
+    // 7. Revoke all active sessions and refresh tokens for this admin
     const { RefreshToken } = await import('../models/RefreshToken');
     await RefreshToken.updateMany(
       { user: targetUser._id },
       { isRevoked: true, isUsed: true }
     );
 
-    // 7. Audit log
+    // 8. Audit log
     await logAdminAction(
-      req.user?.email || 'admin@wonderfuljodi.com',
+      callerUser?.email || req.user?.email || 'admin@wonderfuljodi.com',
       'ADMIN_DELETED',
       `Soft-deleted administrator account for ${targetUser.email}`,
       'User',
@@ -6134,16 +6185,17 @@ export async function createAdmin(req: AuthRequest, res: Response, next: NextFun
       return res.status(400).json({ success: false, message: 'Full name, email, and password are required' });
     }
 
-    const existing = await User.findOne({ email: email.toLowerCase() });
+    const trimmedEmail = email.trim().toLowerCase();
+    const existing = await User.findOne({ email: trimmedEmail });
     if (existing) {
       return res.status(400).json({ success: false, message: 'User with this email already exists' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
     const user = await User.create({
-      fullName,
-      email: email.toLowerCase(),
-      mobile: mobile || `+9199${Math.floor(10000000 + Math.random() * 90000000)}`,
+      fullName: fullName.trim(),
+      email: trimmedEmail,
+      mobile: mobile?.trim() || `+9199${Math.floor(10000000 + Math.random() * 90000000)}`,
       password: hashedPassword,
       role: 'admin',
       verified: true,
@@ -6180,36 +6232,305 @@ export async function createAdmin(req: AuthRequest, res: Response, next: NextFun
 
 export async function updateAdmin(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const { permissions, fullName, mobile } = req.body;
-    const user = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'Admin user not found' });
+    const callerId = req.user?.userId;
+    if (!callerId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    if (fullName || mobile) {
-      await User.findByIdAndUpdate(user._id, {
-        ...(fullName && { fullName }),
-        ...(mobile && { mobile }),
+    // 1. Authorization: Only Super Admin (permissions contains 'all') can edit administrator accounts
+    const callerAdmin = await Admin.findOne({ user: callerId });
+    if (!hasSuperAdminPermission(callerAdmin?.permissions)) {
+      return res.status(403).json({
+        success: false,
+        code: 'INSUFFICIENT_PERMISSIONS',
+        message: 'Access denied: Only Super Administrators can edit administrator accounts.',
       });
     }
 
-    if (permissions) {
+    const callerUser = await User.findById(callerId);
+    const isCallerPrimary = isPrimarySuperAdminEmail(callerUser?.email);
+
+    // 2. Identify target administrator
+    const targetId = req.params.id;
+    const targetUser = await User.findOne({ _id: targetId, role: 'admin' });
+    if (!targetUser || targetUser.isDeleted) {
+      return res.status(404).json({
+        success: false,
+        code: 'ADMIN_NOT_FOUND',
+        message: 'Administrator account not found or already deleted.',
+      });
+    }
+
+    const targetAdmin = await Admin.findOne({ user: targetUser._id });
+    const isTargetPrimary = isPrimarySuperAdminEmail(targetUser.email);
+
+    // 3. Authorization check for modifying Primary Super Admin
+    if (isTargetPrimary && !isCallerPrimary) {
+      return res.status(403).json({
+        success: false,
+        code: 'CANNOT_MODIFY_PRIMARY_SUPER_ADMIN',
+        message: 'Access denied: The primary super administrator account cannot be modified by other administrators.',
+      });
+    }
+
+    const { fullName, email, mobile, permissions, status, isActive, role } = req.body;
+
+    // 4. Role validation
+    if (role !== undefined && role !== 'admin') {
+      if (isTargetPrimary) {
+        return res.status(400).json({
+          success: false,
+          code: 'CANNOT_DEMOTE_PRIMARY_SUPER_ADMIN',
+          message: 'The primary super administrator role cannot be demoted.',
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_ROLE',
+        message: 'Administrator role cannot be changed through this endpoint.',
+      });
+    }
+
+    // 5. Special rules when editing Primary Super Admin (by himself)
+    if (isTargetPrimary) {
+      if (email !== undefined && email.trim().toLowerCase() !== PRIMARY_SUPER_ADMIN_EMAIL) {
+        return res.status(400).json({
+          success: false,
+          code: 'PRIMARY_SUPER_ADMIN_EMAIL_IMMUTABLE',
+          message: 'The primary super administrator email address is immutable and cannot be changed.',
+        });
+      }
+
+      if (
+        isActive === false ||
+        status === 'Inactive' ||
+        status === 'Suspended' ||
+        status === 'Deleted'
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'CANNOT_DEACTIVATE_PRIMARY_SUPER_ADMIN',
+          message: 'The primary super administrator account cannot be deactivated.',
+        });
+      }
+
+      if (permissions !== undefined) {
+        if (!Array.isArray(permissions)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_PERMISSIONS_FORMAT',
+            message: 'Permissions must be an array of strings.',
+          });
+        }
+        const cleanPerms = normalizeAdminPermissions(permissions);
+        if (!cleanPerms.includes('all')) {
+          return res.status(400).json({
+            success: false,
+            code: 'CANNOT_REVOKE_SUPER_ADMIN_PERMISSIONS',
+            message: 'Super administrator full access permissions cannot be removed from the primary super admin.',
+          });
+        }
+      }
+    }
+
+    // 6. Rules when editing any administrator
+    const userUpdates: Record<string, any> = {};
+    const prevValues: Record<string, any> = {
+      fullName: targetUser.fullName,
+      email: targetUser.email,
+      mobile: targetUser.mobile,
+      status: targetUser.status,
+      isActive: targetUser.isActive,
+      permissions: targetAdmin?.permissions || [],
+    };
+
+    if (fullName !== undefined) {
+      const trimmedName = String(fullName).trim();
+      if (!trimmedName) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_FULL_NAME',
+          message: 'Full legal name cannot be empty.',
+        });
+      }
+      userUpdates.fullName = trimmedName;
+    }
+
+    if (mobile !== undefined) {
+      userUpdates.mobile = String(mobile).trim();
+    }
+
+    if (email !== undefined && !isTargetPrimary) {
+      const trimmedEmail = String(email).trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(trimmedEmail)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_EMAIL_FORMAT',
+          message: 'Please provide a valid email address.',
+        });
+      }
+
+      if (trimmedEmail === PRIMARY_SUPER_ADMIN_EMAIL) {
+        return res.status(400).json({
+          success: false,
+          code: 'CANNOT_USE_PROTECTED_EMAIL',
+          message: 'Cannot assign the protected primary super administrator email to another account.',
+        });
+      }
+
+      // Ensure uniqueness across all users
+      const existingUserWithEmail = await User.findOne({
+        email: trimmedEmail,
+        _id: { $ne: targetUser._id },
+      });
+      if (existingUserWithEmail) {
+        return res.status(400).json({
+          success: false,
+          code: 'DUPLICATE_EMAIL',
+          message: 'A user account with this email address already exists.',
+        });
+      }
+
+      userUpdates.email = trimmedEmail;
+    }
+
+    if (status !== undefined && !isTargetPrimary) {
+      userUpdates.status = status;
+      userUpdates.isActive = status === 'Active';
+    } else if (isActive !== undefined && !isTargetPrimary) {
+      userUpdates.isActive = Boolean(isActive);
+      userUpdates.status = Boolean(isActive) ? 'Active' : 'Inactive';
+    }
+
+    let newPermissions: string[] | undefined = undefined;
+    if (permissions !== undefined) {
+      if (!Array.isArray(permissions)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_PERMISSIONS_FORMAT',
+          message: 'Permissions must be an array of strings.',
+        });
+      }
+
+      for (const p of permissions) {
+        if (typeof p !== 'string') {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_PERMISSION_ITEM',
+            message: 'All permission entries must be valid strings.',
+          });
+        }
+        if (!ALLOWED_ADMIN_PERMISSIONS.includes(p as any)) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_PERMISSION_VALUE',
+            message: `Invalid permission value: '${p}'.`,
+          });
+        }
+      }
+
+      const cleanPerms = normalizeAdminPermissions(permissions);
+
+      // Elevation check: Only Primary Super Admin can grant or revoke 'all'
+      const targetPrevPermissions = normalizeAdminPermissions(targetAdmin?.permissions);
+      const prevHadAll = targetPrevPermissions.includes('all');
+      const willHaveAll = cleanPerms.includes('all');
+
+      if (!isTargetPrimary && prevHadAll !== willHaveAll) {
+        if (!isCallerPrimary) {
+          return res.status(403).json({
+            success: false,
+            code: 'SUPER_ADMIN_ELEVATION_PROHIBITED',
+            message: 'Only the Primary Super Administrator can assign or revoke Super Administrator privileges.',
+          });
+        }
+
+        // If revoking 'all' from an existing super admin, ensure last super admin safeguard
+        if (prevHadAll && !willHaveAll) {
+          const allActiveSuperAdmins = await Admin.find().populate('user', 'role status isActive isDeleted');
+          let otherSuperAdminCount = 0;
+          for (const other of allActiveSuperAdmins) {
+            const otherUserId = String(other.user?._id || other.user);
+            if (otherUserId === String(targetUser._id)) continue;
+            if (other.user?.isActive !== false && other.user?.status !== 'Deleted' && other.user?.role === 'admin') {
+              if (hasSuperAdminPermission(other.permissions)) {
+                otherSuperAdminCount++;
+              }
+            }
+          }
+          if (otherSuperAdminCount < 1) {
+            return res.status(400).json({
+              success: false,
+              code: 'LAST_SUPER_ADMIN_PROTECTION',
+              message: 'Cannot revoke Super Admin privileges from the last active Super Administrator.',
+            });
+          }
+        }
+      }
+
+      newPermissions = cleanPerms;
+    }
+
+    // 7. Apply updates to User
+    if (Object.keys(userUpdates).length > 0) {
+      await User.findByIdAndUpdate(targetUser._id, userUpdates);
+      Object.assign(targetUser, userUpdates);
+    }
+
+    // 8. Apply updates to Admin
+    if (newPermissions !== undefined) {
       await Admin.findOneAndUpdate(
-        { user: user._id },
-        { permissions },
+        { user: targetUser._id },
+        { permissions: newPermissions },
         { upsert: true, new: true }
       );
     }
 
+    // 9. Audit Logging
+    const newValues: Record<string, any> = {
+      fullName: targetUser.fullName,
+      email: targetUser.email,
+      mobile: targetUser.mobile,
+      status: targetUser.status,
+      isActive: targetUser.isActive,
+      permissions: newPermissions !== undefined ? newPermissions : targetAdmin?.permissions,
+    };
+
     await logAdminAction(
-      req.user?.role || 'admin',
+      callerUser?.email || req.user?.email || 'admin@wonderfuljodi.com',
       'ADMIN_UPDATED',
-      `Updated admin settings for ${user.email}`,
-      'Admin',
-      String(user._id)
+      `Updated administrator account for ${targetUser.email}`,
+      'User',
+      String(targetUser._id),
+      {
+        adminId: callerId,
+        targetUserId: targetUser._id,
+        metadata: {
+          targetEmail: targetUser.email,
+          previous: prevValues,
+          updated: newValues,
+        },
+      }
     );
 
-    res.json({ success: true, message: 'Admin permissions updated successfully' });
+    const updatedAdminDoc = await Admin.findOne({ user: targetUser._id });
+
+    return res.json({
+      success: true,
+      message: 'Administrator account updated successfully',
+      data: {
+        _id: targetUser._id,
+        id: targetUser._id,
+        fullName: targetUser.fullName,
+        email: targetUser.email,
+        mobile: targetUser.mobile,
+        role: targetUser.role,
+        isActive: targetUser.isActive ?? true,
+        status: targetUser.status || 'Active',
+        permissions: updatedAdminDoc?.permissions || [],
+      },
+    });
   } catch (error) {
     next(error);
   }

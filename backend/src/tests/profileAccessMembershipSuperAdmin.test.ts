@@ -39,6 +39,12 @@ import { Subscription } from '../models/Subscription';
 import { ContactAccessLog } from '../models/ContactAccessLog';
 import { ContactRequest } from '../models/ContactRequest';
 import { Block } from '../models/Block';
+import { MembershipPlan } from '../models/MembershipPlan';
+import { AuditLog } from '../models/AuditLog';
+import { Interest } from '../models/Interest';
+import { Notification } from '../models/Notification';
+import { serializeNotificationsForRecipient } from '../services/notificationSerializer';
+import { grantMembershipBySuperAdmin } from '../controllers/adminController';
 import { prisma, generateObjectId } from '../db/client';
 import * as profileController from '../controllers/profileController';
 
@@ -1341,6 +1347,641 @@ async function runAll() {
     await replyToSupportInquiry(req, res, () => {});
 
     assert.strictEqual(res.statusCode, 400);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Check 7: Super Admin Manual Membership Grant & Extension Semantics
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log('\nCheck 7: Super Admin Manual Membership Grant & Extension Semantics');
+
+  await it('7a. grantMembershipBySuperAdmin rejects unauthenticated or regular admin callers (403 SUPER_ADMIN_REQUIRED)', async () => {
+    const regularAdminId = '507f1f77bcf86cd799439088';
+    const req: any = {
+      headers: {},
+      user: { userId: regularAdminId, role: 'admin', email: 'ops@wonderfuljodi.com' },
+      body: {
+        userId: '507f1f77bcf86cd799439011',
+        planId: 'plan-doctor-connect',
+        grantReason: 'Valid test audit reason',
+      },
+    };
+    const res = createMockResponse();
+
+    const origAdminFind = Admin.findOne;
+    (Admin as any).findOne = async () => ({
+      user: regularAdminId,
+      permissions: ['support'],
+    });
+
+    try {
+      await grantMembershipBySuperAdmin(req, res, () => {});
+      assert.strictEqual(res.statusCode, 403);
+      assert.strictEqual(res.body?.code, 'SUPER_ADMIN_REQUIRED');
+    } finally {
+      (Admin as any).findOne = origAdminFind;
+    }
+  });
+
+  await it('7b. grantMembershipBySuperAdmin rejects audit grantReason shorter than 5 chars with 400', async () => {
+    const superAdminId = '507f1f77bcf86cd799439099';
+    const req: any = {
+      headers: {},
+      user: { userId: superAdminId, role: 'admin', email: 'superadmin@wonderfuljodi.com' },
+      body: {
+        userId: '507f1f77bcf86cd799439011',
+        planId: 'plan-doctor-connect',
+        grantReason: 'ok',
+      },
+    };
+    const res = createMockResponse();
+
+    const origAdminFind = Admin.findOne;
+    (Admin as any).findOne = async () => ({
+      user: superAdminId,
+      permissions: ['all'],
+    });
+
+    try {
+      await grantMembershipBySuperAdmin(req, res, () => {});
+      assert.strictEqual(res.statusCode, 400);
+      assert.ok(res.body?.message?.includes('minimum 5 characters'));
+    } finally {
+      (Admin as any).findOne = origAdminFind;
+    }
+  });
+
+  await it('7c. grantMembershipBySuperAdmin rejects extendExisting when user has no active subscription (400 NO_ACTIVE_SUBSCRIPTION_TO_EXTEND)', async () => {
+    const superAdminId = '507f1f77bcf86cd799439099';
+    const targetUserId = '507f1f77bcf86cd799439011';
+    const req: any = {
+      headers: {},
+      user: { userId: superAdminId, role: 'admin', email: 'superadmin@wonderfuljodi.com' },
+      body: {
+        userId: targetUserId,
+        planId: 'plan-doctor-connect',
+        grantReason: 'Promotional VIP extension',
+        extendExisting: true,
+      },
+    };
+    const res = createMockResponse();
+
+    const origAdminFind = Admin.findOne;
+    const origUserFind = User.findById;
+    const origPlanFind = MembershipPlan.findById;
+    const origPlanFindOne = MembershipPlan.findOne;
+    const origSubFindOne = Subscription.findOne;
+
+    (Admin as any).findOne = async () => ({ user: superAdminId, permissions: ['all'] });
+    (User as any).findById = async () => ({ _id: targetUserId, email: 'candidate@wonderfuljodi.com', isDeleted: false });
+    (MembershipPlan as any).findById = async () => null;
+    (MembershipPlan as any).findOne = async () => ({
+      _id: 'plan-doctor-connect-id',
+      slug: 'plan-doctor-connect',
+      name: 'Doctor Connect',
+      durationDays: 30,
+      contactLimit: 30,
+    });
+    (Subscription as any).findOne = async () => null;
+
+    try {
+      await grantMembershipBySuperAdmin(req, res, () => {});
+      assert.strictEqual(res.statusCode, 400);
+      assert.strictEqual(res.body?.code, 'NO_ACTIVE_SUBSCRIPTION_TO_EXTEND');
+    } finally {
+      (Admin as any).findOne = origAdminFind;
+      (User as any).findById = origUserFind;
+      (MembershipPlan as any).findById = origPlanFind;
+      (MembershipPlan as any).findOne = origPlanFindOne;
+      (Subscription as any).findOne = origSubFindOne;
+    }
+  });
+
+  await it('7d. grantMembershipBySuperAdmin rejects extendExisting when selected plan does not match active subscription plan (400 PLAN_MISMATCH_EXTENSION_NOT_PERMITTED)', async () => {
+    const superAdminId = '507f1f77bcf86cd799439099';
+    const targetUserId = '507f1f77bcf86cd799439011';
+    const req: any = {
+      headers: {},
+      user: { userId: superAdminId, role: 'admin', email: 'superadmin@wonderfuljodi.com' },
+      body: {
+        userId: targetUserId,
+        planId: 'plan-vvip',
+        grantReason: 'Attempting to extend different plan',
+        extendExisting: true,
+      },
+    };
+    const res = createMockResponse();
+
+    const origAdminFind = Admin.findOne;
+    const origUserFind = User.findById;
+    const origPlanFind = MembershipPlan.findById;
+    const origPlanFindOne = MembershipPlan.findOne;
+    const origSubFindOne = Subscription.findOne;
+
+    (Admin as any).findOne = async () => ({ user: superAdminId, permissions: ['all'] });
+    (User as any).findById = async () => ({ _id: targetUserId, email: 'candidate@wonderfuljodi.com', isDeleted: false });
+    (MembershipPlan as any).findById = async () => null;
+    (MembershipPlan as any).findOne = async () => ({
+      _id: 'plan-vvip-id',
+      slug: 'plan-vvip',
+      name: 'VVIP Exclusive',
+      durationDays: 90,
+      contactLimit: -1,
+    });
+    (Subscription as any).findOne = async () => ({
+      _id: 'sub-existing-1',
+      user: targetUserId,
+      plan: 'Doctor Connect',
+      planId: 'plan-doctor-connect',
+      status: 'ACTIVE',
+      expiryDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
+      contactRequestsRemaining: 15,
+    });
+
+    try {
+      await grantMembershipBySuperAdmin(req, res, () => {});
+      assert.strictEqual(res.statusCode, 400);
+      assert.strictEqual(res.body?.code, 'PLAN_MISMATCH_EXTENSION_NOT_PERMITTED');
+    } finally {
+      (Admin as any).findOne = origAdminFind;
+      (User as any).findById = origUserFind;
+      (MembershipPlan as any).findById = origPlanFind;
+      (MembershipPlan as any).findOne = origPlanFindOne;
+      (Subscription as any).findOne = origSubFindOne;
+    }
+  });
+
+  await it('7e. Same-plan extension extends existing subscription expiry date and contact credits', async () => {
+    const superAdminId = '507f1f77bcf86cd799439099';
+    const targetUserId = '507f1f77bcf86cd799439011';
+    const req: any = {
+      headers: {},
+      user: { userId: superAdminId, role: 'admin', email: 'superadmin@wonderfuljodi.com' },
+      body: {
+        userId: targetUserId,
+        planId: 'plan-doctor-connect',
+        durationDays: 30,
+        grantReason: 'Loyalty bonus 30 days extension',
+        extendExisting: true,
+      },
+    };
+    const res = createMockResponse();
+
+    const origAdminFind = Admin.findOne;
+    const origUserFind = User.findById;
+    const origPlanFind = MembershipPlan.findById;
+    const origPlanFindOne = MembershipPlan.findOne;
+    const origSubFindOne = Subscription.findOne;
+    const origAuditLogCreate = AuditLog.create;
+
+    let auditLogged = false;
+    (AuditLog as any).create = async () => {
+      auditLogged = true;
+      return {};
+    };
+
+    const initialExpiry = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+    let saved = false;
+    const mockExistingSub = {
+      _id: 'sub-existing-1',
+      user: targetUserId,
+      plan: 'Doctor Connect',
+      planId: 'plan-doctor-connect',
+      status: 'ACTIVE',
+      expiryDate: initialExpiry,
+      contactRequestsRemaining: 12,
+      save: async function () {
+        saved = true;
+        return this;
+      },
+    };
+
+    (Admin as any).findOne = async () => ({ user: superAdminId, permissions: ['all'] });
+    (User as any).findById = async () => ({ _id: targetUserId, email: 'candidate@wonderfuljodi.com', isDeleted: false });
+    (MembershipPlan as any).findById = async () => null;
+    (MembershipPlan as any).findOne = async () => ({
+      _id: 'plan-doctor-connect',
+      slug: 'plan-doctor-connect',
+      name: 'Doctor Connect',
+      durationDays: 30,
+      contactLimit: 30,
+    });
+    (Subscription as any).findOne = async () => mockExistingSub;
+
+    try {
+      await grantMembershipBySuperAdmin(req, res, () => {});
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(res.body?.success, true);
+      assert.strictEqual(res.body?.data?.isExtended, true);
+      assert.strictEqual(saved, true);
+      assert.strictEqual(mockExistingSub.contactRequestsRemaining, 42); // 12 + 30 = 42
+      const expectedMinExpiry = new Date(initialExpiry.getTime() + 29 * 24 * 60 * 60 * 1000);
+      assert.ok(mockExistingSub.expiryDate > expectedMinExpiry);
+      assert.strictEqual(auditLogged, true);
+    } finally {
+      (Admin as any).findOne = origAdminFind;
+      (User as any).findById = origUserFind;
+      (MembershipPlan as any).findById = origPlanFind;
+      (MembershipPlan as any).findOne = origPlanFindOne;
+      (Subscription as any).findOne = origSubFindOne;
+      (AuditLog as any).create = origAuditLogCreate;
+    }
+  });
+
+  await it('7f. Extension preserves unlimited -1 contact entitlement without arithmetic corruption', async () => {
+    const superAdminId = '507f1f77bcf86cd799439099';
+    const targetUserId = '507f1f77bcf86cd799439011';
+    const req: any = {
+      headers: {},
+      user: { userId: superAdminId, role: 'admin', email: 'superadmin@wonderfuljodi.com' },
+      body: {
+        userId: targetUserId,
+        planId: 'plan-vvip',
+        durationDays: 30,
+        grantReason: 'Concierge extension',
+        extendExisting: true,
+      },
+    };
+    const res = createMockResponse();
+
+    const origAdminFind = Admin.findOne;
+    const origUserFind = User.findById;
+    const origPlanFind = MembershipPlan.findById;
+    const origPlanFindOne = MembershipPlan.findOne;
+    const origSubFindOne = Subscription.findOne;
+    const origAuditLogCreate = AuditLog.create;
+
+    (AuditLog as any).create = async () => ({});
+
+    const mockExistingSub = {
+      _id: 'sub-existing-vvip',
+      user: targetUserId,
+      plan: 'VVIP Concierge',
+      planId: 'plan-vvip',
+      status: 'ACTIVE',
+      expiryDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000),
+      contactRequestsRemaining: -1,
+      save: async function () {
+        return this;
+      },
+    };
+
+    (Admin as any).findOne = async () => ({ user: superAdminId, permissions: ['all'] });
+    (User as any).findById = async () => ({ _id: targetUserId, email: 'candidate@wonderfuljodi.com', isDeleted: false });
+    (MembershipPlan as any).findById = async () => null;
+    (MembershipPlan as any).findOne = async () => ({
+      _id: 'plan-vvip',
+      slug: 'plan-vvip',
+      name: 'VVIP Concierge',
+      durationDays: 30,
+      isUnlimitedContact: true,
+    });
+    (Subscription as any).findOne = async () => mockExistingSub;
+
+    try {
+      await grantMembershipBySuperAdmin(req, res, () => {});
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(res.body?.success, true);
+      assert.strictEqual(mockExistingSub.contactRequestsRemaining, -1, 'Unlimited contact entitlement must remain -1');
+    } finally {
+      (Admin as any).findOne = origAdminFind;
+      (User as any).findById = origUserFind;
+      (MembershipPlan as any).findById = origPlanFind;
+      (MembershipPlan as any).findOne = origPlanFindOne;
+      (Subscription as any).findOne = origSubFindOne;
+      (AuditLog as any).create = origAuditLogCreate;
+    }
+  });
+
+  await it('7g. Expired active subscription calculates new expiry from now rather than past date', async () => {
+    const superAdminId = '507f1f77bcf86cd799439099';
+    const targetUserId = '507f1f77bcf86cd799439011';
+    const req: any = {
+      headers: {},
+      user: { userId: superAdminId, role: 'admin', email: 'superadmin@wonderfuljodi.com' },
+      body: {
+        userId: targetUserId,
+        planId: 'plan-doctor-connect',
+        durationDays: 30,
+        grantReason: 'Re-activation of expired plan',
+        extendExisting: true,
+      },
+    };
+    const res = createMockResponse();
+
+    const origAdminFind = Admin.findOne;
+    const origUserFind = User.findById;
+    const origPlanFind = MembershipPlan.findById;
+    const origPlanFindOne = MembershipPlan.findOne;
+    const origSubFindOne = Subscription.findOne;
+    const origAuditLogCreate = AuditLog.create;
+
+    (AuditLog as any).create = async () => ({});
+
+    const pastExpiry = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000); // expired 10 days ago
+    const mockExistingSub = {
+      _id: 'sub-existing-expired',
+      user: targetUserId,
+      plan: 'Doctor Connect',
+      planId: 'plan-doctor-connect',
+      status: 'ACTIVE',
+      expiryDate: pastExpiry,
+      contactRequestsRemaining: 0,
+      save: async function () {
+        return this;
+      },
+    };
+
+    (Admin as any).findOne = async () => ({ user: superAdminId, permissions: ['all'] });
+    (User as any).findById = async () => ({ _id: targetUserId, email: 'candidate@wonderfuljodi.com', isDeleted: false });
+    (MembershipPlan as any).findById = async () => null;
+    (MembershipPlan as any).findOne = async () => ({
+      _id: 'plan-doctor-connect',
+      slug: 'plan-doctor-connect',
+      name: 'Doctor Connect',
+      durationDays: 30,
+      contactLimit: 30,
+    });
+    (Subscription as any).findOne = async () => mockExistingSub;
+
+    const testStartTime = Date.now();
+    try {
+      await grantMembershipBySuperAdmin(req, res, () => {});
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(res.body?.success, true);
+      const expectedMinExpiry = new Date(testStartTime + 29 * 24 * 60 * 60 * 1000);
+      assert.ok(mockExistingSub.expiryDate > expectedMinExpiry, 'New expiry must be calculated from now, not past expiry');
+    } finally {
+      (Admin as any).findOne = origAdminFind;
+      (User as any).findById = origUserFind;
+      (MembershipPlan as any).findById = origPlanFind;
+      (MembershipPlan as any).findOne = origPlanFindOne;
+      (Subscription as any).findOne = origSubFindOne;
+      (AuditLog as any).create = origAuditLogCreate;
+    }
+  });
+
+  await it('7h. Switching plan without extendExisting cancels active subscription and creates new active subscription', async () => {
+    const superAdminId = '507f1f77bcf86cd799439099';
+    const targetUserId = '507f1f77bcf86cd799439011';
+    const req: any = {
+      headers: {},
+      user: { userId: superAdminId, role: 'admin', email: 'superadmin@wonderfuljodi.com' },
+      body: {
+        userId: targetUserId,
+        planId: 'plan-doctor-connect',
+        durationDays: 30,
+        grantReason: 'Switching user from basic to paid plan',
+        extendExisting: false,
+      },
+    };
+    const res = createMockResponse();
+
+    const origAdminFind = Admin.findOne;
+    const origUserFind = User.findById;
+    const origPlanFind = MembershipPlan.findById;
+    const origPlanFindOne = MembershipPlan.findOne;
+    const origSubFindOne = Subscription.findOne;
+    const origSubCreate = Subscription.create;
+    const origAuditLogCreate = AuditLog.create;
+
+    (AuditLog as any).create = async () => ({});
+
+    let oldCancelled = false;
+    const mockOldSub = {
+      _id: 'sub-old',
+      user: targetUserId,
+      plan: 'Old Plan',
+      status: 'ACTIVE',
+      save: async function () {
+        if (this.status === 'CANCELLED') oldCancelled = true;
+        return this;
+      },
+    };
+
+    let newSubCreated = false;
+    (Subscription as any).create = async (doc: any) => {
+      newSubCreated = true;
+      return {
+        _id: 'sub-new-id',
+        ...doc,
+      };
+    };
+
+    (Admin as any).findOne = async () => ({ user: superAdminId, permissions: ['all'] });
+    (User as any).findById = async () => ({ _id: targetUserId, email: 'candidate@wonderfuljodi.com', isDeleted: false });
+    (MembershipPlan as any).findById = async () => null;
+    (MembershipPlan as any).findOne = async () => ({
+      _id: 'plan-doctor-connect',
+      slug: 'plan-doctor-connect',
+      name: 'Doctor Connect',
+      durationDays: 30,
+      contactLimit: 30,
+    });
+    (Subscription as any).findOne = async () => mockOldSub;
+
+    try {
+      await grantMembershipBySuperAdmin(req, res, () => {});
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(res.body?.success, true);
+      assert.strictEqual(res.body?.data?.isExtended, false);
+      assert.strictEqual(oldCancelled, true, 'Old subscription must be cancelled');
+      assert.strictEqual(newSubCreated, true, 'New subscription must be created');
+    } finally {
+      (Admin as any).findOne = origAdminFind;
+      (User as any).findById = origUserFind;
+      (MembershipPlan as any).findById = origPlanFind;
+      (MembershipPlan as any).findOne = origPlanFindOne;
+      (Subscription as any).findOne = origSubFindOne;
+      (Subscription as any).create = origSubCreate;
+      (AuditLog as any).create = origAuditLogCreate;
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Check 8: Notification Serializer & Action Eligibility Invariants
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log('\nCheck 8: Notification Serializer & Action Eligibility Invariants');
+
+  await it('8a. serializeNotificationsForRecipient enriches metadata.interestStatus from live Interest record', async () => {
+    const recipientUserId = '507f1f77bcf86cd799439011';
+    const interestId = '507f1f77bcf86cd799439022';
+
+    const origInterestFind = Interest.find;
+    (Interest as any).find = async () => [
+      {
+        _id: interestId,
+        sender: '507f1f77bcf86cd799439033',
+        recipient: recipientUserId,
+        status: 'PENDING',
+      },
+    ];
+
+    try {
+      const notifications = [
+        {
+          _id: 'notif-1',
+          user: recipientUserId,
+          type: 'INTEREST',
+          title: 'New Interest Received',
+          message: 'A doctor has shown interest in your profile.',
+          metadata: { interestId },
+          createdAt: new Date(),
+        },
+      ];
+
+      const serialized = await serializeNotificationsForRecipient(notifications, recipientUserId, 'user');
+      assert.strictEqual(serialized.length, 1);
+      assert.strictEqual(serialized[0].metadata?.interestStatus, 'PENDING');
+    } finally {
+      (Interest as any).find = origInterestFind;
+    }
+  });
+
+  await it('8b. serializeNotificationsForRecipient maps fallback status when Interest record is missing', async () => {
+    const recipientUserId = '507f1f77bcf86cd799439011';
+    const interestId = '507f1f77bcf86cd799439044';
+
+    const origInterestFind = Interest.find;
+    (Interest as any).find = async () => [];
+
+    try {
+      const notifications = [
+        {
+          _id: 'notif-withdrawn',
+          user: recipientUserId,
+          type: 'INTEREST_WITHDRAWN',
+          title: 'Interest Withdrawn',
+          message: 'The interest was withdrawn.',
+          metadata: { interestId },
+          createdAt: new Date(),
+        },
+        {
+          _id: 'notif-accepted',
+          user: recipientUserId,
+          type: 'INTEREST_ACCEPTED',
+          title: 'Interest Accepted',
+          message: 'Your interest was accepted.',
+          metadata: { interestId },
+          createdAt: new Date(),
+        },
+        {
+          _id: 'notif-declined',
+          user: recipientUserId,
+          type: 'INTEREST_DECLINED',
+          title: 'Interest Declined',
+          message: 'Your interest was declined.',
+          metadata: { interestId },
+          createdAt: new Date(),
+        },
+      ];
+
+      const serialized = await serializeNotificationsForRecipient(notifications, recipientUserId, 'user');
+      assert.strictEqual(serialized[0].metadata?.interestStatus, 'REJECTED');
+      assert.strictEqual(serialized[1].metadata?.interestStatus, 'ACCEPTED');
+      assert.strictEqual(serialized[2].metadata?.interestStatus, 'DECLINED');
+    } finally {
+      (Interest as any).find = origInterestFind;
+    }
+  });
+
+  await it('8c. canActOnInterest fail-closed invariant: only PENDING incoming interest allows actions', () => {
+    function canActOnInterest(notification: any): boolean {
+      if (!notification || !notification.metadata) return false;
+      const type = notification.type;
+      const isInterestType = type === 'INTEREST' || type === 'INTEREST_RECEIVED';
+      if (!isInterestType) return false;
+      const status = notification.metadata.interestStatus;
+      return status === 'PENDING';
+    }
+
+    assert.strictEqual(canActOnInterest({ type: 'INTEREST', metadata: { interestStatus: 'PENDING' } }), true);
+    assert.strictEqual(canActOnInterest({ type: 'INTEREST_RECEIVED', metadata: { interestStatus: 'PENDING' } }), true);
+
+    assert.strictEqual(canActOnInterest({ type: 'INTEREST_WITHDRAWN', metadata: { interestStatus: 'REJECTED' } }), false);
+    assert.strictEqual(canActOnInterest({ type: 'INTEREST_WITHDRAWN', metadata: { interestStatus: 'PENDING' } }), false);
+
+    assert.strictEqual(canActOnInterest({ type: 'INTEREST_ACCEPTED', metadata: { interestStatus: 'ACCEPTED' } }), false);
+    assert.strictEqual(canActOnInterest({ type: 'INTEREST', metadata: { interestStatus: 'ACCEPTED' } }), false);
+
+    assert.strictEqual(canActOnInterest({ type: 'INTEREST', metadata: { interestStatus: 'REJECTED' } }), false);
+    assert.strictEqual(canActOnInterest({ type: 'INTEREST_DECLINED', metadata: { interestStatus: 'DECLINED' } }), false);
+
+    assert.strictEqual(canActOnInterest({ type: 'INTEREST', metadata: {} }), false);
+    assert.strictEqual(canActOnInterest({ type: 'INTEREST' }), false);
+    assert.strictEqual(canActOnInterest(null), false);
+    assert.strictEqual(canActOnInterest({ type: 'PROFILE_VIEW', metadata: { interestStatus: 'PENDING' } }), false);
+  });
+
+  await it('8d. serializeNotificationsForRecipient strips stale interestStatus when interest is missing in DB', async () => {
+    const recipientUserId = '507f1f77bcf86cd799439011';
+    const nonExistentInterestId = '507f1f77bcf86cd799439099';
+
+    const origInterestFind = Interest.find;
+    (Interest as any).find = async () => [];
+
+    try {
+      const notifications = [
+        {
+          _id: 'notif-stale-pending',
+          user: recipientUserId,
+          type: 'INTEREST',
+          title: 'Interest Received',
+          message: 'Someone sent interest',
+          metadata: {
+            interestId: nonExistentInterestId,
+            interestStatus: 'PENDING',
+          },
+          createdAt: new Date(),
+        },
+      ];
+
+      const serialized = await serializeNotificationsForRecipient(notifications, recipientUserId, 'user');
+      assert.strictEqual(serialized.length, 1);
+      assert.strictEqual(
+        serialized[0].metadata?.interestStatus,
+        undefined,
+        'Stale metadata.interestStatus must be stripped when interest is missing from DB'
+      );
+    } finally {
+      (Interest as any).find = origInterestFind;
+    }
+  });
+
+  await it('8e. serializeNotificationsForRecipient strips stale interestStatus on DB lookup failure (fail-closed)', async () => {
+    const recipientUserId = '507f1f77bcf86cd799439011';
+    const brokenInterestId = '507f1f77bcf86cd799439088';
+
+    const origInterestFind = Interest.find;
+    (Interest as any).find = async () => {
+      throw new Error('Database connection failed');
+    };
+
+    try {
+      const notifications = [
+        {
+          _id: 'notif-lookup-error',
+          user: recipientUserId,
+          type: 'INTEREST',
+          title: 'Interest Received',
+          message: 'Someone sent interest',
+          metadata: {
+            interestId: brokenInterestId,
+            interestStatus: 'PENDING',
+          },
+          createdAt: new Date(),
+        },
+      ];
+
+      const serialized = await serializeNotificationsForRecipient(notifications, recipientUserId, 'user');
+      assert.strictEqual(serialized.length, 1);
+      assert.strictEqual(
+        serialized[0].metadata?.interestStatus,
+        undefined,
+        'Database lookup failure must strip stale status and fail closed'
+      );
+    } finally {
+      (Interest as any).find = origInterestFind;
+    }
   });
 
   // Summary

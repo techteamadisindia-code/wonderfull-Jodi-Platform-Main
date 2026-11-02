@@ -3434,15 +3434,49 @@ export async function grantMembershipBySuperAdmin(req: AuthRequest, res: Respons
     let subscription: any = null;
     let isExtended = false;
 
-    if (existingActiveSub && (extendExisting === true || extendExisting === 'true')) {
-      const baseDate =
-        existingActiveSub.expiryDate && existingActiveSub.expiryDate > now
-          ? existingActiveSub.expiryDate
-          : now;
+    if (extendExisting === true || extendExisting === 'true') {
+      if (!existingActiveSub) {
+        return res.status(400).json({
+          success: false,
+          code: 'NO_ACTIVE_SUBSCRIPTION_TO_EXTEND',
+          message: 'Cannot extend subscription: User does not have an active subscription. Please grant a new membership.',
+        });
+      }
+
+      // Check whether selected plan matches existing active subscription plan
+      const existingPlanId = String(existingActiveSub.planId || '').toLowerCase().trim();
+      const existingPlanName = String(existingActiveSub.plan || '').toLowerCase().trim();
+      const selectedPlanId = String(plan._id || plan.planId || plan.slug || '').toLowerCase().trim();
+      const selectedPlanSlug = String(plan.slug || '').toLowerCase().trim();
+      const selectedPlanName = String(plan.name || '').toLowerCase().trim();
+
+      const isSamePlan =
+        (existingPlanId && (existingPlanId === selectedPlanId || existingPlanId === selectedPlanSlug)) ||
+        (existingPlanName && (existingPlanName === selectedPlanName || existingPlanName === selectedPlanSlug));
+
+      if (!isSamePlan) {
+        return res.status(400).json({
+          success: false,
+          code: 'PLAN_MISMATCH_EXTENSION_NOT_PERMITTED',
+          message: `Cannot extend plan: Selected plan "${plan.name}" does not match active subscription plan "${existingActiveSub.plan}". To switch plans, grant the new plan without the extension option.`,
+        });
+      }
+
+      // Base new expiry on remaining duration or now if already expired
+      const isAlreadyExpired = Boolean(existingActiveSub.expiryDate && existingActiveSub.expiryDate <= now);
+      const baseDate: Date = (existingActiveSub.expiryDate && existingActiveSub.expiryDate > now) ? existingActiveSub.expiryDate : now;
       const newExpiry = new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000);
 
       existingActiveSub.expiryDate = newExpiry;
-      existingActiveSub.contactRequestsRemaining = (existingActiveSub.contactRequestsRemaining || 0) + contactCredits;
+
+      // Safe contact entitlement addition (preserve unlimited -1 without corruption)
+      if (contactCredits === -1 || existingActiveSub.contactRequestsRemaining === -1) {
+        existingActiveSub.contactRequestsRemaining = -1;
+      } else {
+        const currentRemaining = Math.max(0, existingActiveSub.contactRequestsRemaining || 0);
+        existingActiveSub.contactRequestsRemaining = currentRemaining + contactCredits;
+      }
+
       existingActiveSub.paymentReference = `SUPERADMIN_MANUAL_GRANT_${req.user?.email || 'admin'}_${Date.now()}`;
       await existingActiveSub.save();
       subscription = existingActiveSub;

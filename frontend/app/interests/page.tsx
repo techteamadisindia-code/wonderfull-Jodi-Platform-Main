@@ -416,15 +416,12 @@ function InterestsContent() {
                         >
                           <div className="flex items-start gap-4">
                             <div className="w-16 h-16 rounded-2xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200/80">
-                              {profile?.primaryPhoto ? (
-                                <img
-                                  src={profile.primaryPhoto}
-                                  alt={name}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <DoctorAvatar name={name} className="w-full h-full rounded-none" />
-                              )}
+                              <DoctorAvatar
+                                photoUrl={profile?.primaryPhoto}
+                                name={name}
+                                gender={profile?.gender}
+                                className="w-full h-full rounded-none"
+                              />
                             </div>
 
                             <div className="flex-1 min-w-0">
@@ -553,15 +550,12 @@ function InterestsContent() {
                         >
                           <div className="flex items-start gap-4">
                             <div className="w-16 h-16 rounded-2xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200/80">
-                              {profile?.primaryPhoto ? (
-                                <img
-                                  src={profile.primaryPhoto}
-                                  alt={name}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <DoctorAvatar name={name} className="w-full h-full rounded-none" />
-                              )}
+                              <DoctorAvatar
+                                photoUrl={profile?.primaryPhoto}
+                                name={name}
+                                gender={profile?.gender}
+                                className="w-full h-full rounded-none"
+                              />
                             </div>
 
                             <div className="flex-1 min-w-0">
@@ -681,15 +675,12 @@ function InterestsContent() {
                         >
                           <div className="flex items-start gap-4">
                             <div className="w-16 h-16 rounded-2xl overflow-hidden bg-slate-100 shrink-0 border border-emerald-200">
-                              {otherProfile?.primaryPhoto ? (
-                                <img
-                                  src={otherProfile.primaryPhoto}
-                                  alt={name}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <DoctorAvatar name={name} className="w-full h-full rounded-none" />
-                              )}
+                              <DoctorAvatar
+                                photoUrl={otherProfile?.primaryPhoto}
+                                name={name}
+                                gender={otherProfile?.gender}
+                                className="w-full h-full rounded-none"
+                              />
                             </div>
 
                             <div className="flex-1 min-w-0">
@@ -814,15 +805,13 @@ function InterestsContent() {
                         >
                           <div className="flex items-center gap-3 min-w-0">
                             <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-100 shrink-0">
-                              {profile?.primaryPhoto ? (
-                                <img
-                                  src={profile.primaryPhoto}
-                                  alt={name}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <DoctorAvatar name={name} className="w-full h-full rounded-none" />
-                              )}
+                              <DoctorAvatar
+                                photoUrl={profile?.primaryPhoto}
+                                name={name}
+                                gender={profile?.gender}
+                                size="sm"
+                                className="w-full h-full rounded-none"
+                              />
                             </div>
                             <div className="min-w-0">
                               <h4 className="font-bold text-slate-800 text-xs sm:text-sm truncate">

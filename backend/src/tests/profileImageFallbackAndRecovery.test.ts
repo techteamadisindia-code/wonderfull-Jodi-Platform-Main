@@ -195,7 +195,13 @@ async function runAll() {
     // ──────────────────────────────────────────────────────────────────────────
     console.log('\nCheck 4: Automated Self-Healing of Target Missing Profile Photo');
 
-    const TARGET_FILENAME = 'IMG-20261027-1793182514247-a9883710b9198479484ae9e4213ddc3c.jpg';
+    const aishwaryaProfile = await prisma.profile.findFirst({
+      where: { candidateId: 'WJ-100092' },
+      select: { primaryPhoto: true },
+    });
+    const TARGET_FILENAME = aishwaryaProfile?.primaryPhoto
+      ? path.basename(aishwaryaProfile.primaryPhoto)
+      : 'IMG-20261027-1793532617953-00fa4e5e49f15a434f1636141e893eb5.jpg';
     const targetFilePath = path.join(getCanonicalUploadDir('profiles'), TARGET_FILENAME);
 
     await it('4a. Self-healing accurately identifies WJ-100092 (Dr Aishwarya R Pawar) and restores photo', async () => {
@@ -303,6 +309,368 @@ async function runAll() {
       });
       assert.ok(p92?.primaryPhoto?.includes('IMG-20261027'));
       assert.ok(!p92?.primaryPhoto?.includes('IMG_4800'));
+    });
+
+    await it('7b. Primary photo vs unrelated gallery photo: gallery photo never replaces missing primary photo', async () => {
+      const testCandidateId = 'WJ-TEST-GALLERY-ONLY';
+      const fakePrimaryFilename = 'IMG-TEST-PRIMARY-PHOTO-MISSING.jpg';
+
+      const origProfileFindFirst = prisma.profile.findFirst;
+      const origRegFindMany = prisma.registration.findMany;
+
+      const validJpegBase64 = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
+
+      (prisma.profile as any).findFirst = async () => ({
+        id: 'test-profile-id',
+        userId: 'test-user-id',
+        candidateId: testCandidateId,
+        primaryPhoto: `/uploads/profiles/${fakePrimaryFilename}`,
+        photos: [`/uploads/profiles/gallery-1.jpg`],
+      });
+
+      (prisma.registration as any).findMany = async () => [
+        {
+          id: 'test-reg-id',
+          profileId: 'test-profile-id',
+          userId: 'test-user-id',
+          stepData: {
+            photos: {
+              photos: [validJpegBase64],
+            },
+          },
+        },
+      ];
+
+      try {
+        const result = await selfHealProfilePhoto(fakePrimaryFilename);
+        assert.strictEqual(result, null, 'Gallery photo must NEVER be used to replace a missing primary photo');
+      } finally {
+        (prisma.profile as any).findFirst = origProfileFindFirst;
+        (prisma.registration as any).findMany = origRegFindMany;
+      }
+    });
+
+    await it('7c. Lookup when primaryPhoto contains base64 data correctly finds and heals the image', async () => {
+      const testCandidateId = 'WJ-TEST-BASE64-PRIMARY';
+      const validJpegBase64 = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
+
+      const origProfileFindFirst = prisma.profile.findFirst;
+      const origRegFindMany = prisma.registration.findMany;
+
+      (prisma.profile as any).findFirst = async () => ({
+        id: 'test-profile-base64-id',
+        userId: 'test-user-base64-id',
+        candidateId: testCandidateId,
+        primaryPhoto: validJpegBase64,
+        photos: [],
+      });
+
+      (prisma.registration as any).findMany = async () => [];
+
+      const targetPath = path.join(getCanonicalUploadDir('profiles'), `IMG-${testCandidateId}-primary.jpg`);
+      if (fs.existsSync(targetPath)) {
+        try { fs.unlinkSync(targetPath); } catch (_) {}
+      }
+
+      try {
+        const result = await selfHealProfilePhoto(validJpegBase64);
+        assert.ok(result, 'selfHealProfilePhoto must find profile by base64 primaryPhoto');
+        assert.strictEqual(fs.existsSync(result), true, 'Materialized file must exist on disk');
+        assert.strictEqual(path.basename(result), `IMG-${testCandidateId}-primary.jpg`);
+
+        if (fs.existsSync(result)) {
+          fs.unlinkSync(result);
+        }
+      } finally {
+        (prisma.profile as any).findFirst = origProfileFindFirst;
+        (prisma.registration as any).findMany = origRegFindMany;
+      }
+    });
+
+    await it('7d. Magic-byte validation alone is not enough: corrupt or invalid binaries are rejected', async () => {
+      const corruptBase64 = 'data:image/jpeg;base64,V29uZGVyZnVsSm9kaU5vdEFuSW1hZ2VCaW5hcnlUZXh0T25seQ==';
+      const origProfileFindFirst = prisma.profile.findFirst;
+
+      (prisma.profile as any).findFirst = async () => ({
+        id: 'test-corrupt-id',
+        userId: 'test-corrupt-user',
+        candidateId: 'WJ-TEST-CORRUPT',
+        primaryPhoto: corruptBase64,
+      });
+
+      try {
+        const result = await selfHealProfilePhoto(corruptBase64);
+        assert.strictEqual(result, null, 'Corrupt base64 without valid image magic bytes must fail closed');
+      } finally {
+        (prisma.profile as any).findFirst = origProfileFindFirst;
+      }
+    });
+
+    await it('7e. Missing primary photo: dynamically heals JPEG, PNG, and WebP with correct extensions', async () => {
+      const origProfileFindFirst = prisma.profile.findFirst;
+
+      const candidates = [
+        { ext: 'png', b64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' },
+        { ext: 'webp', b64: 'data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==' },
+        { ext: 'jpg', b64: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=' },
+      ];
+
+      try {
+        for (const item of candidates) {
+          const testId = `WJ-EXT-TEST-${item.ext.toUpperCase()}`;
+          (prisma.profile as any).findFirst = async () => ({
+            id: `profile-${item.ext}`,
+            userId: `user-${item.ext}`,
+            candidateId: testId,
+            primaryPhoto: item.b64,
+            photos: [],
+          });
+
+          const expectedFilename = `IMG-${testId}-primary.${item.ext}`;
+          const targetPath = path.join(getCanonicalUploadDir('profiles'), expectedFilename);
+          if (fs.existsSync(targetPath)) {
+            try { fs.unlinkSync(targetPath); } catch (_) {}
+          }
+
+          const result = await selfHealProfilePhoto(item.b64);
+          assert.ok(result, `Should restore photo for ${item.ext}`);
+          assert.strictEqual(path.basename(result), expectedFilename, `Must restore with .${item.ext} extension`);
+          assert.strictEqual(fs.existsSync(result), true);
+
+          if (fs.existsSync(result)) {
+            try { fs.unlinkSync(result); } catch (_) {}
+          }
+        }
+      } finally {
+        (prisma.profile as any).findFirst = origProfileFindFirst;
+      }
+    });
+
+    await it('7f. Missing gallery photo: correlates exact requested gallery index and restores the 2nd gallery image', async () => {
+      const testCandidateId = 'WJ-GALLERY-INDEX-TEST';
+      const fakeGallery0 = 'gallery-item-0.jpg';
+      const fakeGallery1 = 'gallery-item-1.jpg';
+
+      const b64Gallery0 = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
+      const b64Gallery1Png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+      const origProfileFindFirst = prisma.profile.findFirst;
+      const origRegFindMany = prisma.registration.findMany;
+
+      (prisma.profile as any).findFirst = async () => ({
+        id: 'test-profile-gallery-id',
+        userId: 'test-user-gallery-id',
+        candidateId: testCandidateId,
+        primaryPhoto: '/uploads/profiles/primary-pic.jpg',
+        photos: [
+          `/uploads/profiles/${fakeGallery0}`,
+          `/uploads/profiles/gallery-item-1.png`,
+        ],
+      });
+
+      (prisma.registration as any).findMany = async () => [
+        {
+          id: 'test-reg-gallery',
+          profileId: 'test-profile-gallery-id',
+          userId: 'test-user-gallery-id',
+          stepData: {
+            photos: {
+              photos: [b64Gallery0, b64Gallery1Png],
+            },
+          },
+        },
+      ];
+
+      const targetPngPath = path.join(getCanonicalUploadDir('profiles'), 'gallery-item-1.png');
+      if (fs.existsSync(targetPngPath)) {
+        try { fs.unlinkSync(targetPngPath); } catch (_) {}
+      }
+
+      try {
+        const result = await selfHealProfilePhoto('gallery-item-1.png');
+        assert.ok(result, 'Must restore exact 2nd gallery image');
+        assert.strictEqual(path.basename(result), 'gallery-item-1.png');
+        const buf = fs.readFileSync(result);
+        const check = validateImageBuffer(buf);
+        assert.strictEqual(check.detectedMime, 'image/png', 'Must be the 2nd gallery image (PNG), NOT the 1st (JPEG)');
+
+        if (fs.existsSync(result)) {
+          try { fs.unlinkSync(result); } catch (_) {}
+        }
+      } finally {
+        (prisma.profile as any).findFirst = origProfileFindFirst;
+        (prisma.registration as any).findMany = origRegFindMany;
+      }
+    });
+
+    await it('7g. Base64 primaryPhoto alongside unrelated gallery photo: base64 primary NEVER replaces gallery image', async () => {
+      const origProfileFindFirst = prisma.profile.findFirst;
+      const origRegFindMany = prisma.registration.findMany;
+
+      const validPrimaryBase64 = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
+
+      (prisma.profile as any).findFirst = async () => ({
+        id: 'test-profile-mixed',
+        userId: 'test-user-mixed',
+        candidateId: 'WJ-MIXED',
+        primaryPhoto: validPrimaryBase64,
+        photos: ['/uploads/profiles/gallery-missing-no-backup.jpg'],
+      });
+
+      (prisma.registration as any).findMany = async () => [];
+
+      try {
+        const result = await selfHealProfilePhoto('gallery-missing-no-backup.jpg');
+        assert.strictEqual(
+          result,
+          null,
+          'Base64 primary photo must never replace a missing gallery image with no backup'
+        );
+      } finally {
+        (prisma.profile as any).findFirst = origProfileFindFirst;
+        (prisma.registration as any).findMany = origRegFindMany;
+      }
+    });
+
+    await it('7h. Multiple registrations: uses most recent valid registration backup', async () => {
+      const origProfileFindFirst = prisma.profile.findFirst;
+      const origRegFindMany = prisma.registration.findMany;
+
+      const olderB64Png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+      const newerB64Jpeg = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
+
+      (prisma.profile as any).findFirst = async () => ({
+        id: 'test-multi-reg',
+        userId: 'test-multi-user',
+        candidateId: 'WJ-MULTI-REG',
+        primaryPhoto: '/uploads/profiles/multi-reg-primary.jpg',
+        photos: [],
+      });
+
+      (prisma.registration as any).findMany = async () => [
+        {
+          id: 'reg-newest',
+          createdAt: new Date('2026-10-30'),
+          stepData: { photos: { primaryPhoto: newerB64Jpeg } },
+        },
+        {
+          id: 'reg-older',
+          createdAt: new Date('2026-10-01'),
+          stepData: { photos: { primaryPhoto: olderB64Png } },
+        },
+      ];
+
+      const targetPath = path.join(getCanonicalUploadDir('profiles'), 'multi-reg-primary.jpg');
+      if (fs.existsSync(targetPath)) {
+        try { fs.unlinkSync(targetPath); } catch (_) {}
+      }
+
+      try {
+        const result = await selfHealProfilePhoto('multi-reg-primary.jpg');
+        assert.ok(result);
+        const buf = fs.readFileSync(result);
+        const check = validateImageBuffer(buf);
+        assert.strictEqual(check.detectedMime, 'image/jpeg', 'Must select the newest registration record data');
+
+        if (fs.existsSync(result)) {
+          try { fs.unlinkSync(result); } catch (_) {}
+        }
+      } finally {
+        (prisma.profile as any).findFirst = origProfileFindFirst;
+        (prisma.registration as any).findMany = origRegFindMany;
+      }
+    });
+
+    await it('7i. Unverified backup: corrupt or truncated backup data fails closed and returns null', async () => {
+      const origProfileFindFirst = prisma.profile.findFirst;
+      const origRegFindMany = prisma.registration.findMany;
+
+      (prisma.profile as any).findFirst = async () => ({
+        id: 'test-corrupt-backup',
+        userId: 'test-corrupt-user',
+        candidateId: 'WJ-CORRUPT-BACKUP',
+        primaryPhoto: '/uploads/profiles/corrupt-backup.jpg',
+        photos: [],
+      });
+
+      (prisma.registration as any).findMany = async () => [
+        {
+          id: 'reg-corrupt',
+          stepData: { photos: { primaryPhoto: 'data:image/jpeg;base64,SGVsbG9Xb3JsZA==' } },
+        },
+      ];
+
+      try {
+        const result = await selfHealProfilePhoto('corrupt-backup.jpg');
+        assert.strictEqual(result, null, 'Unverified backup must fail closed with null');
+      } finally {
+        (prisma.profile as any).findFirst = origProfileFindFirst;
+        (prisma.registration as any).findMany = origRegFindMany;
+      }
+    });
+
+    await it('7j. HTTP route auto-healing: GET /uploads/profiles/... heals missing photo and returns HTTP 200', async () => {
+      const testFilename = 'http-auto-heal-test.jpg';
+      const validJpegBase64 = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
+
+      const origProfileFindFirst = prisma.profile.findFirst;
+      const origRegFindMany = prisma.registration.findMany;
+
+      (prisma.profile as any).findFirst = async () => ({
+        id: 'test-http-profile',
+        userId: 'test-http-user',
+        candidateId: 'WJ-HTTP-TEST',
+        primaryPhoto: `/uploads/profiles/${testFilename}`,
+        photos: [],
+      });
+
+      (prisma.registration as any).findMany = async () => [
+        {
+          id: 'reg-http',
+          stepData: { photos: { primaryPhoto: validJpegBase64 } },
+        },
+      ];
+
+      const targetPath = path.join(getCanonicalUploadDir('profiles'), testFilename);
+      if (fs.existsSync(targetPath)) {
+        try { fs.unlinkSync(targetPath); } catch (_) {}
+      }
+
+      try {
+        const res = await makeRequest(testServer!, `/uploads/profiles/${testFilename}`);
+        assert.strictEqual(res.statusCode, 200, 'HTTP GET must return 200 after self-healing');
+        assert.ok(res.headers['content-type']?.includes('image/jpeg'));
+        assert.strictEqual(fs.existsSync(targetPath), true, 'File must be written to disk');
+
+        if (fs.existsSync(targetPath)) {
+          try { fs.unlinkSync(targetPath); } catch (_) {}
+        }
+      } finally {
+        (prisma.profile as any).findFirst = origProfileFindFirst;
+        (prisma.registration as any).findMany = origRegFindMany;
+      }
+    });
+
+    await it('7k. Valid file protection: existing files on disk are never overwritten', async () => {
+      const testFilename = 'existing-file-protection.jpg';
+      const targetPath = path.join(getCanonicalUploadDir('profiles'), testFilename);
+      const originalContent = Buffer.from('ORIGINAL_EXISTING_FILE_CONTENT_DO_NOT_OVERWRITE');
+      fs.writeFileSync(targetPath, originalContent);
+
+      try {
+        const result = await selfHealProfilePhoto(testFilename);
+        assert.strictEqual(result, targetPath);
+        const currentContent = fs.readFileSync(targetPath);
+        assert.strictEqual(
+          currentContent.toString('utf8'),
+          originalContent.toString('utf8'),
+          'Existing file content must remain unaltered'
+        );
+      } finally {
+        if (fs.existsSync(targetPath)) {
+          try { fs.unlinkSync(targetPath); } catch (_) {}
+        }
+      }
     });
 
     // ──────────────────────────────────────────────────────────────────────────

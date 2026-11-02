@@ -1,4 +1,6 @@
 import { Profile } from '../models/Profile';
+import { Interest } from '../models/Interest';
+import { isValidObjectId } from '../utils/securityUtils';
 import { hasActivePaidMembership } from './entitlementService';
 
 export interface SerializedNotification {
@@ -41,15 +43,43 @@ export async function serializeNotificationsForRecipient(
   // 1. Server-side entitlement check
   const isEntitled = await hasActivePaidMembership(recipientUserId, recipientRole);
 
-  // 2. Identify all PROFILE_VIEW notifications
-  const hasProfileViews = notifications.some((n) => n?.type === 'PROFILE_VIEW');
-  if (!hasProfileViews) {
-    return notifications.map((n) => (n.toObject ? n.toObject() : { ...n }));
+  // 2. Preload authoritative Interest records for any notifications containing an interestId
+  const interestMap = new Map<string, any>();
+  const interestIds: string[] = [];
+
+  for (const n of notifications) {
+    let meta = n?.metadata;
+    if (typeof meta === 'string') {
+      try {
+        meta = JSON.parse(meta);
+      } catch {
+        meta = {};
+      }
+    }
+    const candidateId = meta?.interestId;
+    if (candidateId && typeof candidateId === 'string' && isValidObjectId(candidateId)) {
+      interestIds.push(candidateId);
+    }
   }
+
+  if (interestIds.length > 0) {
+    try {
+      const uniqueInterestIds = Array.from(new Set(interestIds));
+      const interests = await Interest.find({ _id: { $in: uniqueInterestIds } });
+      for (const inst of interests) {
+        interestMap.set(String(inst._id), inst);
+      }
+    } catch (err) {
+      console.error('[NotificationSerializer] Error preloading interests:', err);
+    }
+  }
+
+  // 3. Identify all PROFILE_VIEW notifications
+  const hasProfileViews = notifications.some((n) => n?.type === 'PROFILE_VIEW');
 
   // If entitled, preload viewer profiles in a single query
   const viewerProfileMap = new Map<string, any>();
-  if (isEntitled) {
+  if (isEntitled && hasProfileViews) {
     const viewerUserIds: string[] = [];
     for (const n of notifications) {
       if (n?.type === 'PROFILE_VIEW') {
@@ -87,13 +117,9 @@ export async function serializeNotificationsForRecipient(
     }
   }
 
-  // 3. Serialize each notification
+  // 4. Serialize each notification
   return notifications.map((n) => {
     const raw = n.toObject ? n.toObject() : { ...n };
-
-    if (raw.type !== 'PROFILE_VIEW') {
-      return raw;
-    }
 
     let meta = raw.metadata;
     if (typeof meta === 'string') {
@@ -104,6 +130,32 @@ export async function serializeNotificationsForRecipient(
       }
     } else if (!meta || typeof meta !== 'object') {
       meta = {};
+    } else {
+      meta = { ...meta };
+    }
+
+    // Fail-closed interest status enforcement:
+    // Strip/delete any stale metadata.interestStatus before applying live lookup results
+    delete meta.interestStatus;
+
+    // Attach authoritative interest status if an interestId is present
+    if (meta.interestId) {
+      const matchedInterest = interestMap.get(String(meta.interestId));
+      if (matchedInterest && matchedInterest.status) {
+        meta.interestStatus = matchedInterest.status;
+      } else if (raw.type === 'INTEREST_WITHDRAWN') {
+        meta.interestStatus = 'REJECTED';
+      } else if (raw.type === 'INTEREST_ACCEPTED') {
+        meta.interestStatus = 'ACCEPTED';
+      } else if (raw.type === 'INTEREST_DECLINED') {
+        meta.interestStatus = 'DECLINED';
+      }
+      // If interest is missing from DB or lookup fails, interestStatus remains unset/deleted
+    }
+    raw.metadata = meta;
+
+    if (raw.type !== 'PROFILE_VIEW') {
+      return raw;
     }
 
     const viewedAt = meta.viewedAt || raw.createdAt;

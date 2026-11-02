@@ -886,20 +886,12 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
             {/* Primary Photo Section */}
             <div className="w-full sm:w-80 lg:w-72 shrink-0 space-y-3">
               <div className="relative w-full h-80 sm:h-84 rounded-2xl sm:rounded-3xl overflow-hidden bg-slate-100 shadow-xs border-2 border-rose-100/60">
-                {selectedPhoto ? (
-                  <img
-                    src={selectedPhoto}
-                    alt={displayName}
-                    className="h-full w-full object-cover object-center"
-                  />
-                ) : (
-                  <DoctorAvatar
-                    photoUrl={null}
-                    name={displayName}
-                    gender={profile.gender}
-                    className="w-full h-full rounded-none"
-                  />
-                )}
+                <DoctorAvatar
+                  photoUrl={selectedPhoto}
+                  name={displayName}
+                  gender={profile.gender}
+                  className="w-full h-full rounded-none"
+                />
                 <span
                   className={`absolute top-3 left-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold text-white shadow-xs ${
                     isVerified ? 'bg-[#0BAA70]' : 'bg-slate-900/85 backdrop-blur-xs'
@@ -924,7 +916,13 @@ export default function ProfileDetailsPage({ params }: { params: Promise<{ id: s
                           : 'border-slate-200 opacity-70 hover:opacity-100'
                       }`}
                     >
-                      <img src={photo} alt="Thumbnail" className="w-full h-full object-cover" />
+                      <DoctorAvatar
+                        photoUrl={photo}
+                        name={displayName}
+                        gender={profile.gender}
+                        size="sm"
+                        className="w-full h-full rounded-none"
+                      />
                     </button>
                   ))}
                 </div>

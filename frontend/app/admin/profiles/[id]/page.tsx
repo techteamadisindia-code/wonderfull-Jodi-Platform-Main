@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, Suspense } from 'react';
+import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -74,6 +74,7 @@ import {
 import { AdminEditProfileModal } from '../../../../components/admin/AdminEditProfileModal';
 import { getAdminUser } from '../../../../services/authApi';
 import apiClient, { normalizeApiPath } from '../../../../services/api';
+import { fetchAdminMembershipPlans, MembershipPlanData } from '../../../../services/membershipApi';
 
 function calculateAge(dob?: string | Date): number | null {
   if (!dob) return null;
@@ -141,11 +142,53 @@ function AdminProfileDetailsContent() {
 
   // Manual Membership Plan Change Modal (Super Admin)
   const [changePlanModalOpen, setChangePlanModalOpen] = useState(false);
-  const [selectedPlanSlug, setSelectedPlanSlug] = useState('premium-match');
+  const [availablePlans, setAvailablePlans] = useState<MembershipPlanData[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [plansError, setPlansError] = useState<string | null>(null);
+  const [selectedPlanId, setSelectedPlanId] = useState('');
   const [planReason, setPlanReason] = useState('');
+  const [customDurationEnabled, setCustomDurationEnabled] = useState(false);
   const [customDays, setCustomDays] = useState('');
+  const [extendExisting, setExtendExisting] = useState(false);
   const [planChangeSubmitting, setPlanChangeSubmitting] = useState(false);
   const [planChangeError, setPlanChangeError] = useState<string | null>(null);
+
+  const plansLoadingRef = useRef(false);
+
+  const loadMembershipPlans = useCallback(async () => {
+    if (plansLoadingRef.current) return;
+    plansLoadingRef.current = true;
+    setPlansLoading(true);
+    setPlansError(null);
+    try {
+      // Directly consume returned MembershipPlanData[] array and filter active plans
+      const plans = await fetchAdminMembershipPlans();
+      const rawList = Array.isArray(plans) ? plans : [];
+      const activePlans = rawList.filter((p) => p && p.isActive !== false);
+      setAvailablePlans(activePlans);
+
+      if (activePlans.length > 0) {
+        setSelectedPlanId((prev) => {
+          const stillValid = activePlans.some((p) => (p._id || p.slug) === prev);
+          return stillValid ? prev : (activePlans[0]._id || activePlans[0].slug || '');
+        });
+      } else {
+        setSelectedPlanId('');
+      }
+    } catch (err: any) {
+      console.error('Failed to load membership plans for admin modal:', err);
+      setPlansError(err?.response?.data?.message || err?.message || 'Failed to load configured membership plans.');
+    } finally {
+      plansLoadingRef.current = false;
+      setPlansLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (changePlanModalOpen) {
+      loadMembershipPlans();
+    }
+  }, [changePlanModalOpen, loadMembershipPlans]);
 
   // Admin Note Input
   const [newNote, setNewNote] = useState('');
@@ -302,10 +345,22 @@ function AdminProfileDetailsContent() {
   // Handler: Confirm Manual Membership Plan Change (Super Admin)
   const handleConfirmPlanChange = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedPlanId) {
+      setPlanChangeError('Please select a valid configured membership plan.');
+      return;
+    }
     if (!planReason.trim() || planReason.trim().length < 5) {
       setPlanChangeError('Please provide an audit reason of at least 5 characters.');
       return;
     }
+    if (customDurationEnabled) {
+      const daysNum = Number(customDays);
+      if (!daysNum || isNaN(daysNum) || daysNum < 1 || daysNum > 1825) {
+        setPlanChangeError('Please specify a valid custom duration between 1 and 1825 days.');
+        return;
+      }
+    }
+
     setPlanChangeSubmitting(true);
     setPlanChangeError(null);
 
@@ -313,11 +368,14 @@ function AdminProfileDetailsContent() {
       const targetUserId = data?.user?._id || (data?.user as any)?.id || (data as any)?.userId || profileId;
       const payload: any = {
         userId: targetUserId,
-        planId: selectedPlanSlug,
+        planId: selectedPlanId,
         grantReason: planReason.trim(),
       };
-      if (customDays && Number(customDays) > 0) {
+      if (customDurationEnabled && customDays && Number(customDays) > 0) {
         payload.durationDays = Number(customDays);
+      }
+      if (extendExisting && isMatchingPlan) {
+        payload.extendExisting = true;
       }
 
       await apiClient.post('/admin/subscriptions/grant', payload);
@@ -325,6 +383,7 @@ function AdminProfileDetailsContent() {
       setChangePlanModalOpen(false);
       setPlanReason('');
       setCustomDays('');
+      setCustomDurationEnabled(false);
       await loadProfile();
     } catch (err: any) {
       setPlanChangeError(err?.response?.data?.message || 'Failed to update membership plan.');
@@ -657,6 +716,15 @@ function AdminProfileDetailsContent() {
       </span>
     );
   };
+
+  const activePlanName = data?.subscription?.status === 'ACTIVE' ? data?.subscription?.plan : null;
+  const selectedPlanObj = availablePlans.find((p) => (p._id || p.slug) === selectedPlanId);
+  const isMatchingPlan = Boolean(
+    activePlanName &&
+    selectedPlanObj &&
+    (selectedPlanObj.name?.toLowerCase().trim() === activePlanName.toLowerCase().trim() ||
+     selectedPlanObj.slug?.toLowerCase().trim() === activePlanName.toLowerCase().trim())
+  );
 
   return (
     <div className="space-y-5 pb-16">
@@ -2069,6 +2137,7 @@ function AdminProfileDetailsContent() {
                   onClick={() => {
                     setPlanChangeError(null);
                     setChangePlanModalOpen(true);
+                    loadMembershipPlans();
                   }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
                 >
@@ -2801,32 +2870,97 @@ function AdminProfileDetailsContent() {
             <div className="space-y-4 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Select New Plan *</label>
-                <select
-                  value={selectedPlanSlug}
-                  onChange={(e) => setSelectedPlanSlug(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-rose-500 font-medium"
-                >
-                  <option value="free">Free / Basic Profile (0 Contacts)</option>
-                  <option value="silver">Silver Doctor Plan (25 Contacts, 90 Days)</option>
-                  <option value="gold">Gold Doctor Plan (50 Contacts, 180 Days)</option>
-                  <option value="diamond">Diamond Super Plan (100 Contacts, 365 Days)</option>
-                  <option value="custom">Custom Plan</option>
-                </select>
+                {plansLoading ? (
+                  <div className="flex items-center gap-2 py-3 px-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 font-medium">
+                    <RefreshCw className="w-4 h-4 animate-spin text-[#E51F3E]" />
+                    <span>Loading configured membership plans...</span>
+                  </div>
+                ) : plansError ? (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 space-y-2">
+                    <p>{plansError}</p>
+                    <button
+                      type="button"
+                      onClick={loadMembershipPlans}
+                      className="px-2.5 py-1 bg-white border border-rose-300 text-rose-700 rounded-lg font-bold hover:bg-rose-100 transition"
+                    >
+                      Retry Loading Plans
+                    </button>
+                  </div>
+                ) : availablePlans.length === 0 ? (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 font-medium">
+                    No active configured membership plans found. Please configure and activate plans in Membership Plans management first.
+                  </div>
+                ) : (
+                  <select
+                    value={selectedPlanId}
+                    onChange={(e) => setSelectedPlanId(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-rose-500 font-medium bg-white"
+                  >
+                    {availablePlans.map((plan) => {
+                      const idVal = plan._id || plan.slug;
+                      const contactText = plan.isUnlimitedContact
+                        ? 'Unlimited Contacts'
+                        : `${plan.contactRequestLimit ?? 0} Contacts`;
+                      const durationText = plan.durationDays ? `${plan.durationDays} Days` : (plan.billingPeriod || 'N/A');
+                      const priceText = `₹${plan.discountedPrice ?? plan.price ?? 0}`;
+                      const label = `${plan.name} (${contactText}, ${durationText}, ${priceText})`;
+                      return (
+                        <option key={idVal} value={idVal}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                )}
               </div>
 
-              {selectedPlanSlug === 'custom' && (
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Custom Duration (Days)</label>
+              {/* Custom Duration Override Option */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 select-none">
                   <input
-                    type="number"
-                    min="1"
-                    max="1825"
-                    value={customDays}
-                    onChange={(e) => setCustomDays(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-rose-500 font-medium"
+                    type="checkbox"
+                    checked={customDurationEnabled}
+                    onChange={(e) => setCustomDurationEnabled(e.target.checked)}
+                    className="w-4 h-4 rounded text-[#E51F3E] focus:ring-rose-500"
                   />
-                </div>
-              )}
+                  <span>Override Plan Duration (Custom Days)</span>
+                </label>
+                {customDurationEnabled && (
+                  <div className="pt-1">
+                    <input
+                      type="number"
+                      min="1"
+                      max="1825"
+                      value={customDays}
+                      onChange={(e) => setCustomDays(e.target.value)}
+                      placeholder="e.g. 30, 90, 180, 365 days"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-rose-500 font-medium bg-white"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Overrides the plan duration while retaining all plan features and contact entitlements.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Extend Current Plan Option */}
+              <div className={`px-3 py-2 rounded-xl border ${isMatchingPlan ? 'bg-slate-50 border-slate-200' : 'bg-slate-100/60 border-slate-200/60 opacity-80'}`}>
+                <label className={`flex items-center gap-2 select-none ${isMatchingPlan ? 'cursor-pointer font-semibold text-slate-700' : 'cursor-not-allowed text-slate-400 font-medium'}`}>
+                  <input
+                    type="checkbox"
+                    disabled={!isMatchingPlan}
+                    checked={extendExisting && isMatchingPlan}
+                    onChange={(e) => setExtendExisting(e.target.checked)}
+                    className="w-4 h-4 rounded text-[#E51F3E] focus:ring-rose-500 disabled:opacity-40"
+                  />
+                  <span>Extend Current Plan {activePlanName ? `(adds duration & contacts to active ${activePlanName})` : '(requires active subscription)'}</span>
+                </label>
+                {!isMatchingPlan && activePlanName && (
+                  <p className="text-[10.5px] text-slate-400 mt-1 pl-6">
+                    Extension is only available when renewing the active plan ({activePlanName}). Selecting a different plan will replace the existing subscription.
+                  </p>
+                )}
+              </div>
 
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Audit Reason / Justification *</label>
@@ -2861,9 +2995,9 @@ function AdminProfileDetailsContent() {
               </button>
               <button
                 type="button"
-                disabled={planChangeSubmitting}
+                disabled={planChangeSubmitting || plansLoading || availablePlans.length === 0 || !selectedPlanId}
                 onClick={handleConfirmPlanChange}
-                className="px-4 py-2 rounded-xl bg-[#E51F3E] hover:bg-rose-700 text-white text-xs font-bold shadow-md transition cursor-pointer flex items-center gap-1.5"
+                className="px-4 py-2 rounded-xl bg-[#E51F3E] hover:bg-rose-700 text-white text-xs font-bold shadow-md transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {planChangeSubmitting ? (
                   <>

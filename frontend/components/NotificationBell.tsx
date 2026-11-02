@@ -133,8 +133,23 @@ export function NotificationBell() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const canActOnInterest = (item?: UserNotificationItem | null): boolean => {
+    if (!item || !item.metadata?.interestId) return false;
+
+    const type = (item.type || '').toUpperCase();
+    const allowedTypes = ['INTEREST', 'INTEREST_RECEIVED'];
+
+    if (!allowedTypes.includes(type)) return false;
+
+    const status = item.metadata?.interestStatus?.toUpperCase();
+
+    // Fail closed when status is missing or not pending
+    return status === 'PENDING';
+  };
+
   const handleNotificationAccept = async (e: React.MouseEvent, notif: UserNotificationItem) => {
     e.stopPropagation();
+    if (actionLoadingId) return;
     const interestId = notif.metadata?.interestId;
     if (!interestId) return;
 
@@ -153,6 +168,7 @@ export function NotificationBell() {
 
   const handleNotificationReject = async (e: React.MouseEvent, notif: UserNotificationItem) => {
     e.stopPropagation();
+    if (actionLoadingId) return;
     const interestId = notif.metadata?.interestId;
     if (!interestId) return;
 
@@ -361,33 +377,21 @@ export function NotificationBell() {
                         </div>
                       ) : isProfileView ? (
                         <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 mt-0.5 border border-rose-100 bg-slate-100 shadow-2xs">
-                          {item.metadata?.visitorPhoto ? (
-                            <img
-                              src={item.metadata.visitorPhoto}
-                              alt={item.metadata?.visitorName || 'Doctor'}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <DoctorAvatar
-                              name={item.metadata?.visitorName || 'Doctor'}
-                              className="w-full h-full rounded-full"
-                            />
-                          )}
+                          <DoctorAvatar
+                            photoUrl={item.metadata?.visitorPhoto}
+                            name={item.metadata?.visitorName || 'Doctor'}
+                            gender={item.metadata?.gender}
+                            className="w-full h-full rounded-full"
+                          />
                         </div>
                       ) : isInterestReceived ? (
                         <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-100 shrink-0 border border-rose-100 mt-0.5">
-                          {item.metadata?.senderPhoto ? (
-                            <img
-                              src={item.metadata.senderPhoto}
-                              alt={item.metadata?.senderName || 'Doctor'}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <DoctorAvatar
-                              name={item.metadata?.senderName || 'Doctor'}
-                              className="w-full h-full rounded-none"
-                            />
-                          )}
+                          <DoctorAvatar
+                            photoUrl={item.metadata?.senderPhoto}
+                            name={item.metadata?.senderName || 'Doctor'}
+                            gender={item.metadata?.gender}
+                            className="w-full h-full rounded-xl"
+                          />
                         </div>
                       ) : (
                         <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -432,18 +436,18 @@ export function NotificationBell() {
                         </p>
 
                         {/* Interactive Accept / Reject Actions for Interest Notifications */}
-                        {isInterestReceived && item.metadata?.interestId && (
+                        {item.metadata?.interestId && (
                           <div className="mt-2 pt-1 flex items-center gap-2">
-                            {feedbackStatus === 'ACCEPTED' ? (
+                            {feedbackStatus === 'ACCEPTED' || item.metadata?.interestStatus === 'ACCEPTED' || item.type === 'INTEREST_ACCEPTED' ? (
                               <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
                                 <CheckCircle2 className="w-3.5 h-3.5" />
                                 <span>Accepted ✓</span>
                               </span>
-                            ) : feedbackStatus === 'REJECTED' ? (
+                            ) : feedbackStatus === 'REJECTED' || item.metadata?.interestStatus === 'REJECTED' || item.metadata?.interestStatus === 'DECLINED' || item.type === 'INTEREST_WITHDRAWN' || item.type === 'INTEREST_DECLINED' || item.type === 'INTEREST_REJECTED' ? (
                               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
-                                <span>Declined</span>
+                                <span>{item.type === 'INTEREST_WITHDRAWN' ? 'Withdrawn' : 'Declined'}</span>
                               </span>
-                            ) : (
+                            ) : canActOnInterest(item) ? (
                               <>
                                 {item.metadata?.senderProfileId && (
                                   <Link
@@ -476,7 +480,15 @@ export function NotificationBell() {
                                   Reject
                                 </button>
                               </>
-                            )}
+                            ) : item.metadata?.senderProfileId ? (
+                              <Link
+                                href={`/profile/${item.metadata.senderProfileId}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="px-2.5 py-1 rounded-lg text-[10.5px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition"
+                              >
+                                View Profile
+                              </Link>
+                            ) : null}
                           </div>
                         )}
                       </div>

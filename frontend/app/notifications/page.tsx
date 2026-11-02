@@ -194,8 +194,23 @@ export default function UserNotificationsPage() {
     }
   };
 
+  const canActOnInterest = (notif?: UserNotificationItem | null): boolean => {
+    if (!notif || !notif.metadata?.interestId) return false;
+
+    const type = (notif.type || '').toUpperCase();
+    const allowedTypes = ['INTEREST', 'INTEREST_RECEIVED'];
+
+    if (!allowedTypes.includes(type)) return false;
+
+    const status = notif.metadata?.interestStatus?.toUpperCase();
+
+    // Fail closed when status is missing or not pending
+    return status === 'PENDING';
+  };
+
   const handleNotificationAccept = async (e: React.MouseEvent, notif: UserNotificationItem) => {
     e.stopPropagation();
+    if (actionLoadingId) return;
     const interestId = notif.metadata?.interestId;
     if (!interestId) return;
 
@@ -205,8 +220,11 @@ export default function UserNotificationsPage() {
       setActionFeedback((prev) => ({ ...prev, [notif._id]: 'ACCEPTED' }));
       await markNotificationAsRead(notif._id).catch(() => null);
       setUnreadCount((c) => Math.max(0, c - 1));
+      showToast('success', 'Interest accepted successfully');
     } catch (err: any) {
       console.error('Failed to accept:', err);
+      const msg = err?.response?.data?.message || err?.message || 'Failed to accept interest';
+      showToast('error', msg);
     } finally {
       setActionLoadingId(null);
     }
@@ -214,6 +232,7 @@ export default function UserNotificationsPage() {
 
   const handleNotificationReject = async (e: React.MouseEvent, notif: UserNotificationItem) => {
     e.stopPropagation();
+    if (actionLoadingId) return;
     const interestId = notif.metadata?.interestId;
     if (!interestId) return;
 
@@ -223,8 +242,11 @@ export default function UserNotificationsPage() {
       setActionFeedback((prev) => ({ ...prev, [notif._id]: 'REJECTED' }));
       await markNotificationAsRead(notif._id).catch(() => null);
       setUnreadCount((c) => Math.max(0, c - 1));
+      showToast('success', 'Interest declined');
     } catch (err: any) {
       console.error('Failed to reject:', err);
+      const msg = err?.response?.data?.message || err?.message || 'Failed to decline interest';
+      showToast('error', msg);
     } finally {
       setActionLoadingId(null);
     }
@@ -533,33 +555,21 @@ export default function UserNotificationsPage() {
                         </div>
                       ) : isProfileView ? (
                         <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full overflow-hidden shrink-0 mt-0.5 border border-rose-100 bg-slate-100 shadow-xs">
-                          {notif.metadata?.visitorPhoto ? (
-                            <img
-                              src={notif.metadata.visitorPhoto}
-                              alt={notif.metadata?.visitorName || 'Doctor'}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <DoctorAvatar
-                              name={notif.metadata?.visitorName || 'Doctor'}
-                              className="w-full h-full rounded-full"
-                            />
-                          )}
+                          <DoctorAvatar
+                            photoUrl={notif.metadata?.visitorPhoto}
+                            name={notif.metadata?.visitorName || 'Doctor'}
+                            gender={notif.metadata?.gender}
+                            className="w-full h-full rounded-full"
+                          />
                         </div>
                       ) : isInterestReceived ? (
                         <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl overflow-hidden bg-slate-100 shrink-0 border border-rose-100 mt-0.5">
-                          {notif.metadata?.senderPhoto ? (
-                            <img
-                              src={notif.metadata.senderPhoto}
-                              alt={notif.metadata?.senderName || 'Doctor'}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <DoctorAvatar
-                              name={notif.metadata?.senderName || 'Doctor'}
-                              className="w-full h-full rounded-none"
-                            />
-                          )}
+                          <DoctorAvatar
+                            photoUrl={notif.metadata?.senderPhoto}
+                            name={notif.metadata?.senderName || 'Doctor'}
+                            gender={notif.metadata?.gender}
+                            className="w-full h-full rounded-2xl"
+                          />
                         </div>
                       ) : (
                         <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200/60 flex items-center justify-center shrink-0 mt-0.5">
@@ -609,16 +619,16 @@ export default function UserNotificationsPage() {
                             </div>
 
                             <div className="flex items-center gap-2">
-                              {actionFeedback[notif._id] === 'ACCEPTED' ? (
+                              {actionFeedback[notif._id] === 'ACCEPTED' || notif.metadata?.interestStatus === 'ACCEPTED' || notif.type === 'INTEREST_ACCEPTED' ? (
                                 <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
                                   <CheckCircle2 className="w-3.5 h-3.5" />
                                   <span>Connected ✓</span>
                                 </span>
-                              ) : actionFeedback[notif._id] === 'REJECTED' ? (
+                              ) : actionFeedback[notif._id] === 'REJECTED' || notif.metadata?.interestStatus === 'REJECTED' || notif.metadata?.interestStatus === 'DECLINED' || notif.type === 'INTEREST_WITHDRAWN' || notif.type === 'INTEREST_DECLINED' || notif.type === 'INTEREST_REJECTED' ? (
                                 <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-semibold">
-                                  <span>Declined</span>
+                                  <span>{notif.type === 'INTEREST_WITHDRAWN' ? 'Withdrawn' : 'Declined'}</span>
                                 </span>
-                              ) : (
+                              ) : canActOnInterest(notif) ? (
                                 <>
                                   <button
                                     type="button"
@@ -642,7 +652,7 @@ export default function UserNotificationsPage() {
                                     <span>Reject</span>
                                   </button>
                                 </>
-                              )}
+                              ) : null}
 
                               {notif.metadata?.profileId && (
                                 <Link

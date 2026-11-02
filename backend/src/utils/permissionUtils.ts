@@ -6,6 +6,41 @@
  */
 
 /**
+ * The permanent protected Primary Super Admin identity.
+ * Immutable and protected against deletion, demotion, deactivation, or permission revocation.
+ */
+export const PRIMARY_SUPER_ADMIN_EMAIL = 'shubhamchaudante@gmail.com';
+
+/**
+ * Case-insensitively checks if an email matches the protected Primary Super Admin identity.
+ * Trims leading/trailing whitespace and fails closed on empty or invalid inputs.
+ */
+export function isPrimarySuperAdminEmail(email?: string | null): boolean {
+  if (!email || typeof email !== 'string') {
+    return false;
+  }
+  return email.trim().toLowerCase() === PRIMARY_SUPER_ADMIN_EMAIL;
+}
+
+/**
+ * Authoritative set of permissible administrator module keys.
+ */
+export const ALLOWED_ADMIN_PERMISSIONS = [
+  'all',
+  'users',
+  'profiles',
+  'privateInfo.view',
+  'privateInfo.edit',
+  'verifications',
+  'memberships',
+  'payments',
+  'reports',
+  'settings',
+] as const;
+
+export type AdminPermission = (typeof ALLOWED_ADMIN_PERMISSIONS)[number];
+
+/**
  * Normalizes unknown permission input into a clean string array.
  * Accepts:
  * - string[] (e.g. from Prisma Json or Mongoose)

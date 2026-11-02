@@ -214,6 +214,27 @@ export async function createAdminAccount(data: { fullName: string; email: string
   return response.data;
 }
 
+export interface UpdateAdminData {
+  fullName?: string;
+  email?: string;
+  mobile?: string;
+  permissions?: string[];
+  status?: string;
+  isActive?: boolean;
+  role?: string;
+}
+
+export async function updateAdminAccount(
+  id: string,
+  data: UpdateAdminData
+): Promise<{ success: boolean; message: string; data?: any }> {
+  const response = await apiClient.put<{ success: boolean; message: string; data?: any }>(
+    `/admin/admins/${encodeURIComponent(id)}`,
+    data
+  );
+  return response.data;
+}
+
 export async function updateAdminPermissions(id: string, permissions: string[]) {
   const response = await apiClient.put<{ success: boolean; message: string }>(`/admin/admins/${id}`, { permissions });
   return response.data;

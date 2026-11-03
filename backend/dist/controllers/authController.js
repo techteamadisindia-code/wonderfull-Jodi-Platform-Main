@@ -335,6 +335,8 @@ async function registerUser(req, res, next) {
 async function loginUser(req, res, next) {
     try {
         const data = loginSchema.parse(req.body);
+        // Ensure JWT secret is validly configured before validating credentials or issuing sessions
+        (0, permissionUtils_1.getJwtSecret)();
         const identifier = (data.emailOrMobile || data.email || data.mobile || '').trim();
         if (!identifier) {
             return res.status(400).json({ success: false, message: 'Email or mobile number is required' });

@@ -324,6 +324,8 @@ export async function registerUser(req: Request, res: Response, next: NextFuncti
 export async function loginUser(req: Request, res: Response, next: NextFunction) {
   try {
     const data = loginSchema.parse(req.body);
+    // Ensure JWT secret is validly configured before validating credentials or issuing sessions
+    getJwtSecret();
     const identifier = (data.emailOrMobile || data.email || data.mobile || '').trim();
 
     if (!identifier) {

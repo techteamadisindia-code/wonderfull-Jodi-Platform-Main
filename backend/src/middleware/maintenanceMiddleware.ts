@@ -103,8 +103,16 @@ function extractAndVerifyToken(req: Request): { userId?: string; role?: string; 
  * Express middleware to enforce platform-level maintenance mode on API requests.
  */
 export async function checkMaintenanceMode(req: Request, res: Response, next: NextFunction) {
-  const rawPath = req.originalUrl ? req.originalUrl.split('?')[0] : req.path || '';
+  let rawPath = req.originalUrl ? req.originalUrl.split('?')[0] : req.path || '';
+  if (!rawPath.startsWith('/api') && req.baseUrl === '/api') {
+    rawPath = '/api' + rawPath;
+  }
   const path = rawPath.toLowerCase();
+
+  // Non-API routes (e.g. document/page requests or Next.js SSR/assets) bypass API maintenance block
+  if (!path.startsWith('/api') && path !== '/health') {
+    return next();
+  }
 
   // 1. Always allowed health, status, and static assets
   if (

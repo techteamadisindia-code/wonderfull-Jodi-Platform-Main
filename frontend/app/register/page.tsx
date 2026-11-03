@@ -33,6 +33,7 @@ import {
   CityItem,
 } from '../../services/masterDataApi';
 import api from '../../lib/api';
+import { useMaintenance } from '../../context/MaintenanceContext';
 import { Logo } from '../../components/Logo';
 import {
   ShieldCheck,
@@ -182,6 +183,8 @@ export type RegistrationStep = 1 | 2 | 3 | 4 | 5 | 'review' | 'complete';
 
 function RegisterForm() {
   const router = useRouter();
+  const { maintenance } = useMaintenance();
+  const isRegistrationsPaused = maintenance?.allowNewRegistrations === false;
   const searchParams = useSearchParams();
 
   // Multi-step State (1: Account, 2: Personal & Family, 3: Education & Career, 4: Photo & Preferences, 'review': Review, 'complete': Complete)
@@ -1264,6 +1267,11 @@ function RegisterForm() {
     setStep1Errors(errors);
     if (Object.keys(errors).length > 0) return;
 
+    if (isRegistrationsPaused) {
+      setGlobalError('New candidate registrations are temporarily paused. Please check back shortly.');
+      return;
+    }
+
     setLoading(true);
     try {
       let session: any = null;
@@ -1995,6 +2003,17 @@ function RegisterForm() {
 
         {/* Form Body Container */}
         <div className="p-5 sm:p-8 bg-[#FAF7F4]">
+          {isRegistrationsPaused && (
+            <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-3 shadow-xs animate-fade-in">
+              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+              <div>
+                <p className="font-bold text-sm text-amber-950">New Registrations Temporarily Paused</p>
+                <p className="text-amber-800 mt-0.5 leading-relaxed">
+                  We are currently performing scheduled platform maintenance. Candidate registration submissions are temporarily paused. Please check back shortly or contact our support team.
+                </p>
+              </div>
+            </div>
+          )}
           {/* Status / Resume Bar */}
           <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>

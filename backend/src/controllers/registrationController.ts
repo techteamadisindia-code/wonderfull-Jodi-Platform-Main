@@ -12,6 +12,7 @@ import { State, City } from '../models/Location';
 import { getNextCandidateId } from '../models/Counter';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { escapeRegex, isValidObjectId } from '../utils/securityUtils';
+import { getJwtSecret } from '../utils/permissionUtils';
 import jwt from 'jsonwebtoken';
 import {
   validateDateOfBirth,
@@ -1467,6 +1468,10 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
       });
     }
 
+    // Validate JWT secret configuration upfront before creating persistent database records
+    // to prevent partially completed registrations in production
+    const jwtSecret = getJwtSecret();
+
     // 1. Create User
     const newUser = await User.create({
       fullName: candidateFullName,
@@ -1649,7 +1654,7 @@ export async function completeRegistration(req: Request, res: Response, next: Ne
     }
 
     // 4. Generate Auth JWT Token for immediate login
-    const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+    const secret = jwtSecret;
     const accessToken = jwt.sign(
       { userId: String(newUser._id || (newUser as any).id), role: newUser.role },
       secret,

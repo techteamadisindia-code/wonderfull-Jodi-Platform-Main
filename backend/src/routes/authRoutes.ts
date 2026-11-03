@@ -15,11 +15,12 @@ import {
 } from '../controllers/authController';
 import { authLimiter, passwordResetLimiter } from '../middleware/rateLimiters';
 import { requireAuth } from '../middleware/authMiddleware';
+import { checkRegistrationEnabled } from '../middleware/maintenanceMiddleware';
 
 const router = Router();
 
 // Public Authentication Endpoints (Strict Rate Limited)
-router.post('/register', authLimiter, registerUser);
+router.post('/register', authLimiter, checkRegistrationEnabled, registerUser);
 router.post('/login', authLimiter, loginUser);
 router.post('/refresh', refreshSession);
 router.post('/logout', logoutUser);

@@ -62,6 +62,7 @@ const AuditLog_1 = require("../models/AuditLog");
 const Location_1 = require("../models/Location");
 const Counter_1 = require("../models/Counter");
 const securityUtils_1 = require("../utils/securityUtils");
+const permissionUtils_1 = require("../utils/permissionUtils");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const doctorValidation_1 = require("../utils/doctorValidation");
 const termsConfig_1 = require("../config/termsConfig");
@@ -1395,6 +1396,9 @@ async function completeRegistration(req, res, next) {
                 message: 'You must agree to the Terms of Service and Privacy Policy to complete registration.',
             });
         }
+        // Validate JWT secret configuration upfront before creating persistent database records
+        // to prevent partially completed registrations in production
+        const jwtSecret = (0, permissionUtils_1.getJwtSecret)();
         // 1. Create User
         const newUser = await User_1.User.create({
             fullName: candidateFullName,
@@ -1565,7 +1569,7 @@ async function completeRegistration(req, res, next) {
             }
         }
         // 4. Generate Auth JWT Token for immediate login
-        const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+        const secret = jwtSecret;
         const accessToken = jsonwebtoken_1.default.sign({ userId: String(newUser._id || newUser.id), role: newUser.role }, secret, { expiresIn: '7d' });
         return res.status(201).json({
             success: true,

@@ -107,3 +107,98 @@ export function hasSuperAdminPermission(permissions: unknown): boolean {
   const normalized = normalizeAdminPermissions(permissions);
   return normalized.includes('all');
 }
+
+
+/**
+ * Authoritatively resolves the JWT secret for token creation and cryptographic verification.
+ *
+ * Production Rules:
+ * - In production (process.env.NODE_ENV === 'production'):
+ *   process.env.JWT_SECRET MUST be set and non-empty.
+ *   If missing or whitespace-only, fails closed and returns null.
+ *   Never falls back to development secrets in production.
+ *
+ * Non-Production Rules:
+ * - In development, test, or local inspection:
+ *   Falls back to 'supersecret_wonderfuljodi_dev_key_2026' only when process.env.JWT_SECRET is unset.
+ */
+export function getSafeJwtSecret(): string | null {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || typeof secret !== 'string' || secret.trim().length === 0) {
+    if (process.env.NODE_ENV === 'production') {
+      return null;
+    }
+    return 'supersecret_wonderfuljodi_dev_key_2026';
+  }
+  return secret.trim();
+}
+
+/**
+ * Throws an explicit error in production if JWT_SECRET is unconfigured.
+ */
+export function getJwtSecret(): string {
+  const secret = getSafeJwtSecret();
+  if (!secret) {
+    throw new Error('[Security] CRITICAL: JWT_SECRET environment variable is missing or empty in production.');
+  }
+  return secret;
+}
+
+/**
+ * Cryptographically and authoritatively verifies whether a user ID belongs to the active,
+ * genuine Primary Super Admin in the database.
+ *
+ * Strict 6-Point Verification:
+ * 1. Requires valid non-empty user ID from a cryptographically verified token.
+ * 2. Resolves the user record from the database.
+ * 3. Confirms the user record exists.
+ * 4. Confirms the account is active, not deleted, suspended, or blocked:
+ *    (!user.isDeleted && user.isActive !== false && user.status !== 'Deleted' && user.status !== 'Suspended' && user.status !== 'Blocked' && !user.isBlocked)
+ * 5. Confirms the database email strictly matches PRIMARY_SUPER_ADMIN_EMAIL ('shubhamchaudante@gmail.com').
+ * 6. Confirms user.role === 'admin' and Admin record has super-admin authorization (permissions include 'all').
+ *
+ * Fails closed on any failure, mismatch, or database error.
+ */
+export async function verifyPrimarySuperAdminInDatabase(userId?: string | null): Promise<boolean> {
+  if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
+    return false;
+  }
+
+  try {
+    const { User } = await import('../models/User');
+    const userDoc = await User.findById(userId.trim());
+    if (!userDoc) {
+      return false;
+    }
+
+    if (
+      userDoc.isDeleted ||
+      userDoc.isActive === false ||
+      userDoc.status === 'Deleted' ||
+      userDoc.status === 'Suspended' ||
+      userDoc.status === 'Blocked' ||
+      userDoc.isBlocked
+    ) {
+      return false;
+    }
+
+    if (!isPrimarySuperAdminEmail(userDoc.email)) {
+      return false;
+    }
+
+    if (userDoc.role !== 'admin') {
+      return false;
+    }
+
+    const { Admin } = await import('../models/Admin');
+    const adminDoc = await Admin.findOne({ user: userDoc._id || userDoc.id });
+    if (!adminDoc || !hasSuperAdminPermission(adminDoc.permissions)) {
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('[Security] Failed to verify Primary Super Admin in database:', error);
+    return false;
+  }
+}

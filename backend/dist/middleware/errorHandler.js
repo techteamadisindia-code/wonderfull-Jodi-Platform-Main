@@ -10,10 +10,20 @@ function errorHandler(err, _req, res, _next) {
         return res.status(400).json({
             success: false,
             message,
-            errors: err.issues?.map((i) => ({ field: i.path.join('.'), message: i.message })),
+            errors: err.issues?.slice(0, 50).map((i) => ({
+                field: i.path && i.path.length > 0 ? i.path.join('.') : 'payload',
+                message: i.message,
+            })),
         });
     }
-    // 2. MongoDB Duplicate Key (E11000)
+    // 2. Payload Too Large (Express body-parser limit)
+    if (err?.type === 'entity.too.large' || err?.status === 413) {
+        return res.status(413).json({
+            success: false,
+            message: 'Request payload exceeds maximum allowed size limit.',
+        });
+    }
+    // 3. MongoDB Duplicate Key (E11000)
     if (err?.code === 11000) {
         const field = Object.keys(err.keyPattern || {})[0] || 'field';
         return res.status(400).json({

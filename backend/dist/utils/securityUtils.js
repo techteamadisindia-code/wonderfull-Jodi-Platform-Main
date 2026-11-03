@@ -10,6 +10,7 @@ exports.escapeRegex = escapeRegex;
 exports.isValidObjectId = isValidObjectId;
 exports.validateImageBuffer = validateImageBuffer;
 exports.validateDocumentBuffer = validateDocumentBuffer;
+exports.isSafePublicPhotoUrl = isSafePublicPhotoUrl;
 exports.resolveProfilePhotoUrl = resolveProfilePhotoUrl;
 exports.getAccessTokenCookieOptions = getAccessTokenCookieOptions;
 exports.getRefreshTokenCookieOptions = getRefreshTokenCookieOptions;
@@ -110,18 +111,44 @@ function validateDocumentBuffer(buffer) {
     return { valid: false };
 }
 /**
+ * Validates whether a given string is a safe public web photo URL.
+ * Strictly rejects:
+ * - Internal server filesystem paths (/home/, /var/, /tmp/, /etc/, C:\, etc.)
+ * - Path traversal sequences (..)
+ * - Null-byte injection (\0)
+ * - Backslashes
+ * - Strings like "null", "undefined", "[object Object]"
+ */
+function isSafePublicPhotoUrl(str) {
+    if (!str || typeof str !== 'string')
+        return false;
+    const t = str.trim();
+    if (!t || t === 'null' || t === 'undefined' || t === '[object Object]' || t === 'NaN')
+        return false;
+    if (t.includes('..') || t.includes('\\') || t.includes('\0'))
+        return false;
+    // Disallow internal server filesystem paths
+    if (/^\/(home|var|tmp|etc|proc|sys|dev|root|usr|opt)\b/i.test(t))
+        return false;
+    if (/^[a-zA-Z]:/i.test(t))
+        return false;
+    // Root-relative public assets or full web URLs
+    if (t.startsWith('/uploads/') || t.startsWith('/images/') || t.startsWith('/assets/') || t.startsWith('/static/'))
+        return true;
+    if (t.startsWith('https://') || t.startsWith('http://'))
+        return true;
+    return false;
+}
+/**
  * Safely resolves and materializes profile photos to disk.
  * If photo data is an absolute URL or local path (/uploads/...), returns it directly.
  * If photo data is base64, validates magic bytes and writes it to disk under uploads/profiles/
  * to ensure fast static delivery and avoid multi-megabyte JSON API responses.
  */
 function resolveProfilePhotoUrl(candidateId, primaryPhoto, photos) {
-    // 1. If primaryPhoto is already an upload or web URL
-    if (primaryPhoto && typeof primaryPhoto === 'string') {
-        const trimmed = primaryPhoto.trim();
-        if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-            return trimmed;
-        }
+    // 1. If primaryPhoto is already an approved safe upload or web URL
+    if (isSafePublicPhotoUrl(primaryPhoto)) {
+        return primaryPhoto.trim();
     }
     // 2. Gather candidates to inspect (excluding truncated 65535 strings)
     const candidateStrings = [];
@@ -134,12 +161,11 @@ function resolveProfilePhotoUrl(candidateId, primaryPhoto, photos) {
     if (Array.isArray(photos)) {
         for (const p of photos) {
             if (typeof p === 'string') {
-                const trimmed = p.trim();
-                if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-                    return trimmed;
+                if (isSafePublicPhotoUrl(p)) {
+                    return p.trim();
                 }
-                if (trimmed.startsWith('data:image/')) {
-                    candidateStrings.push(trimmed);
+                if (p.startsWith('data:image/')) {
+                    candidateStrings.push(p);
                 }
             }
         }
@@ -266,9 +292,7 @@ function serializePublicProfile(profile, options) {
     let safePhotos = [];
     if (Array.isArray(p.photos)) {
         safePhotos = p.photos.filter((photoItem) => typeof photoItem === 'string' &&
-            (photoItem.startsWith('/') ||
-                photoItem.startsWith('http://') ||
-                photoItem.startsWith('https://')));
+            isSafePublicPhotoUrl(photoItem));
     }
     if (resolvedPhoto && !safePhotos.includes(resolvedPhoto)) {
         safePhotos.unshift(resolvedPhoto);
@@ -469,7 +493,7 @@ function serializePublicProfile(profile, options) {
         additionalQualification: p.additionalQualification,
         currentRole: p.currentRole,
         workType: p.workType,
-        currentlyPracticing: p.currentlyPracticing ?? true,
+        currentlyPracticing: p.currentlyPracticing !== undefined ? p.currentlyPracticing : undefined,
         familyStatus: isAuthenticatedViewer ? p.familyStatus : undefined,
         familyValues: isAuthenticatedViewer ? p.familyValues : undefined,
         nativePlace: isAuthenticatedViewer ? p.nativePlace : undefined,
@@ -480,23 +504,15 @@ function serializePublicProfile(profile, options) {
         communityDetails: p.communityDetails || null,
         languageDetails: p.languageDetails || null,
         horoscope: safeHoroscope,
-        lifestyleInterests: p.lifestyleInterests || {
-            diet: p.foodPreference || 'Vegetarian',
-            smoking: p.smoking || 'Non-Smoker',
-            alcohol: p.drinking || 'Non-Drinker',
-            exercise: 'Regular',
+        lifestyleInterests: p.lifestyleInterests || (p.foodPreference || p.smoking || p.drinking ? {
+            diet: p.foodPreference || undefined,
+            smoking: p.smoking || undefined,
+            alcohol: p.drinking || undefined,
+            exercise: undefined,
             hobbies: p.hobbies || [],
-            languages: [p.motherTongue, 'English'].filter(Boolean),
-        },
-        partnerPreferences: p.partnerPreferences || {
-            preferredAgeMin: 24,
-            preferredAgeMax: 36,
-            preferredLocation: 'Anywhere in India',
-            preferredQualification: 'MBBS / MD / MS / Medical Specialist',
-            preferredSpecialization: 'Any Medical Specialization',
-            preferredMaritalStatus: 'Never Married',
-            otherPreferences: '',
-        },
+            languages: p.motherTongue ? [p.motherTongue] : [],
+        } : undefined),
+        partnerPreferences: p.partnerPreferences || undefined,
         privacySettings: p.privacySettings || {
             profileVisibility: 'all',
             photoVisibility: 'all',
@@ -610,7 +626,7 @@ function serializePrivateProfile(profile, user, subscription) {
         additionalQualification: p.additionalQualification,
         currentRole: p.currentRole,
         workType: p.workType,
-        currentlyPracticing: p.currentlyPracticing ?? true,
+        currentlyPracticing: p.currentlyPracticing !== undefined ? p.currentlyPracticing : undefined,
         familyStatus: p.familyStatus,
         familyValues: p.familyValues,
         nativePlace: p.nativePlace,
@@ -621,23 +637,15 @@ function serializePrivateProfile(profile, user, subscription) {
         communityDetails: p.communityDetails || null,
         languageDetails: p.languageDetails || null,
         horoscope: p.horoscope || null,
-        lifestyleInterests: p.lifestyleInterests || {
-            diet: p.foodPreference || 'Vegetarian',
-            smoking: p.smoking || 'Non-Smoker',
-            alcohol: p.drinking || 'Non-Drinker',
-            exercise: 'Regular',
+        lifestyleInterests: p.lifestyleInterests || (p.foodPreference || p.smoking || p.drinking ? {
+            diet: p.foodPreference || undefined,
+            smoking: p.smoking || undefined,
+            alcohol: p.drinking || undefined,
+            exercise: undefined,
             hobbies: p.hobbies || [],
-            languages: [p.motherTongue, 'English'].filter(Boolean),
-        },
-        partnerPreferences: p.partnerPreferences || {
-            preferredAgeMin: 24,
-            preferredAgeMax: 36,
-            preferredLocation: 'Anywhere in India',
-            preferredQualification: 'MBBS / MD / MS / Medical Specialist',
-            preferredSpecialization: 'Any Medical Specialization',
-            preferredMaritalStatus: 'Never Married',
-            otherPreferences: '',
-        },
+            languages: p.motherTongue ? [p.motherTongue] : [],
+        } : undefined),
+        partnerPreferences: p.partnerPreferences || undefined,
         privacySettings: p.privacySettings || {
             profileVisibility: 'all',
             photoVisibility: 'all',
@@ -663,8 +671,10 @@ function serializePrivateProfile(profile, user, subscription) {
         medicalQualifications: p.medicalQualifications,
         previousMarriageDetails: p.previousMarriageDetails || undefined,
         partnerExpectations: p.partnerExpectations,
-        photos: p.photos || [],
-        primaryPhoto: p.primaryPhoto,
+        photos: Array.isArray(p.photos)
+            ? p.photos.filter((photoItem) => typeof photoItem === 'string' && isSafePublicPhotoUrl(photoItem))
+            : [],
+        primaryPhoto: isSafePublicPhotoUrl(p.primaryPhoto) ? p.primaryPhoto : null,
         verificationStatus: p.verificationStatus,
         completionPercentage: completionResult.score,
         completionScore: completionResult.score,

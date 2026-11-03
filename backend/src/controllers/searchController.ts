@@ -5,6 +5,7 @@ import { Profile } from '../models/Profile';
 import { User } from '../models/User';
 import { Block } from '../models/Block';
 import { escapeRegex, serializePublicProfile } from '../utils/securityUtils';
+import { getSafeJwtSecret } from '../utils/permissionUtils';
 import { findCanonicalProfile } from './profileController';
 
 export async function searchProfiles(req: Request, res: Response, next: NextFunction) {
@@ -58,10 +59,11 @@ export async function searchProfiles(req: Request, res: Response, next: NextFunc
 
     if (token) {
       try {
-        const decoded: any = jwt.verify(
+        const secret = getSafeJwtSecret();
+        const decoded: any = secret ? jwt.verify(
           token,
-          process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026'
-        );
+          secret
+        ) : null;
         if (decoded?.userId || decoded?.id) {
           currentUserId = decoded.userId || decoded.id;
 

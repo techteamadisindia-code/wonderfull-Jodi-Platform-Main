@@ -46,6 +46,7 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const client_1 = require("./db/client");
 const emailService_1 = require("./services/emailService");
+const profilePhotoRecoveryService_1 = require("./services/profilePhotoRecoveryService");
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const server = (0, http_1.createServer)(app_1.default);
@@ -187,21 +188,37 @@ async function startServer() {
         }
         console.log('API Health:');
         console.log(`  http://localhost:${PORT}/api/health`);
-        console.log('Email / SMTP:');
+        console.log('Email / SMTP Diagnostics:');
         try {
+            const diag = (0, emailService_1.getEmailConfigDiagnostics)();
+            console.log(`  EMAIL_HOST:    ${diag.hostPresent ? '[CONFIGURED]' : '[MISSING]'}`);
+            console.log(`  EMAIL_PORT:    ${diag.port} (secure: ${diag.secure})`);
+            console.log(`  EMAIL_USER:    ${diag.userPresent ? '[CONFIGURED]' : '[MISSING]'}`);
+            console.log(`  EMAIL_PASS:    ${diag.passPresent ? '[CONFIGURED]' : '[MISSING]'}`);
+            console.log(`  EMAIL_FROM:    ${diag.senderStatus}`);
             const smtpStatus = await (0, emailService_1.verifyEmailTransporter)();
             if (smtpStatus.success) {
-                console.log(`  Status: ACTIVE (${smtpStatus.message})`);
+                console.log(`  Status:        ACTIVE (${smtpStatus.message})`);
             }
             else {
-                console.log(`  Status: NOT CONFIGURED (${smtpStatus.message})`);
+                console.log(`  Status:        NOT CONFIGURED / FAILED (${smtpStatus.message})`);
             }
         }
         catch (error) {
-            console.log(`  Status: NOT CONFIGURED (${error?.message || 'SMTP unavailable'})`);
+            console.log(`  Status:        ERROR (${error?.message || 'SMTP unavailable'})`);
         }
         console.log('==================================================');
         console.log('');
+        // Asynchronously self-heal missing profile photos to canonical persistent storage
+        (0, profilePhotoRecoveryService_1.restoreAllMissingProfilePhotos)()
+            .then((res) => {
+            if (res.restoredCount > 0) {
+                console.log(`[Startup] Self-healed ${res.restoredCount} missing profile photos to persistent storage.`);
+            }
+        })
+            .catch((err) => {
+            console.error('[Startup] Profile photo self-healing encountered an error:', err);
+        });
     });
 }
 startServer();

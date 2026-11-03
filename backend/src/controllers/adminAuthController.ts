@@ -18,7 +18,7 @@ import {
 } from '../utils/securityUtils';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { evaluatePasswordResetTokenDoc } from './authController';
-import { normalizeAdminPermissions } from '../utils/permissionUtils';
+import { normalizeAdminPermissions, getJwtSecret } from '../utils/permissionUtils';
 
 // Dummy hash to perform constant-time verification when user or admin does not exist
 // This prevents timing-based email enumeration attacks.
@@ -81,7 +81,7 @@ const adminChangePasswordSchema = z
   });
 
 function signAdminAccessToken(userId: string, role: string, email: string, sessionId?: string): string {
-  const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+  const secret = getJwtSecret();
   // Admin access token has 15 minute lifetime
   return jwt.sign(
     {
@@ -225,6 +225,9 @@ export async function adminLogin(req: Request, res: Response, next: NextFunction
         message: 'Your administrator account is currently inactive. Please contact system management.',
       });
     }
+
+    // Ensure JWT secret is validly configured in production before issuing tokens or sessions
+    getJwtSecret();
 
     // Issue unique session & refresh token
     const rawRefreshToken = generateRandomToken(40);

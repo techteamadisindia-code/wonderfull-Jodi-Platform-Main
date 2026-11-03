@@ -283,27 +283,36 @@ function findUploadedFile(urlOrPath) {
     for (const baseDir of getUploadBaseDirectories()) {
         if (!fs_1.default.existsSync(baseDir))
             continue;
-        const candidatePath = path_1.default.resolve(baseDir, clean);
-        // Initial check: lexical containment
-        if (!isStrictlyInside(candidatePath, baseDir)) {
-            continue;
+        const candidatePaths = [path_1.default.resolve(baseDir, clean)];
+        // If clean has no subfolder specified (e.g. pure filename "photo.jpg"),
+        // also check approved public subdirectories
+        if (!clean.includes('/')) {
+            for (const sub of ['profiles', 'blogs', 'awards']) {
+                candidatePaths.push(path_1.default.resolve(baseDir, sub, clean));
+            }
         }
-        if (fs_1.default.existsSync(candidatePath)) {
-            try {
-                // Resolve symlinks to verify physical destination is within approved upload base
-                const realCandidate = fs_1.default.realpathSync(candidatePath);
-                const realBase = fs_1.default.realpathSync(baseDir);
-                if (!isStrictlyInside(realCandidate, realBase)) {
-                    // Symlink escapes approved upload directory!
+        for (const candidatePath of candidatePaths) {
+            // Initial check: lexical containment
+            if (!isStrictlyInside(candidatePath, baseDir)) {
+                continue;
+            }
+            if (fs_1.default.existsSync(candidatePath)) {
+                try {
+                    // Resolve symlinks to verify physical destination is within approved upload base
+                    const realCandidate = fs_1.default.realpathSync(candidatePath);
+                    const realBase = fs_1.default.realpathSync(baseDir);
+                    if (!isStrictlyInside(realCandidate, realBase)) {
+                        // Symlink escapes approved upload directory!
+                        continue;
+                    }
+                    const stats = fs_1.default.statSync(realCandidate);
+                    if (stats.isFile() && stats.size > 0) {
+                        return candidatePath;
+                    }
+                }
+                catch {
                     continue;
                 }
-                const stats = fs_1.default.statSync(realCandidate);
-                if (stats.isFile() && stats.size > 0) {
-                    return candidatePath;
-                }
-            }
-            catch {
-                continue;
             }
         }
     }

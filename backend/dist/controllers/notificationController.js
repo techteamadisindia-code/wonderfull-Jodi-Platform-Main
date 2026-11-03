@@ -8,6 +8,7 @@ exports.deleteNotification = deleteNotification;
 const Notification_1 = require("../models/Notification");
 const Broadcast_1 = require("../models/Broadcast");
 const securityUtils_1 = require("../utils/securityUtils");
+const notificationSerializer_1 = require("../services/notificationSerializer");
 /**
  * Get paginated notifications for the authenticated user (excludes trashed notifications)
  */
@@ -74,10 +75,11 @@ async function getNotifications(req, res, next) {
         const isTruncated = Boolean(allNotifications?.isTruncated ||
             allNotifications?.scanBudgetExceeded ||
             isTotalCapped);
+        const serializedNotifications = await (0, notificationSerializer_1.serializeNotificationsForRecipient)(activeNotifications, userId, req.user?.role);
         res.json({
             success: true,
             data: {
-                notifications: activeNotifications,
+                notifications: serializedNotifications,
                 total,
                 unreadCount,
                 page: pageNumber,
@@ -160,7 +162,8 @@ async function markNotificationRead(req, res, next) {
                 }).catch(() => null);
             }
         }
-        res.json({ success: true, data: notification });
+        const serialized = await (0, notificationSerializer_1.serializeNotificationForRecipient)(notification, userId, req.user?.role);
+        res.json({ success: true, data: serialized });
     }
     catch (error) {
         next(error);

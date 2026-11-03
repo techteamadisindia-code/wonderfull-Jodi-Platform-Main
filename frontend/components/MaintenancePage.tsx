@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Heart, Wrench, Clock, Phone, Mail, ShieldCheck, Sparkles, RefreshCw } from 'lucide-react';
+import { Heart, Wrench, Clock, Phone, Mail, Sparkles, RefreshCw } from 'lucide-react';
 import { useMaintenance } from '../context/MaintenanceContext';
 import { Logo } from './Logo';
 
@@ -20,12 +20,20 @@ export function MaintenancePage() {
   const message =
     maintenance?.message ||
     'Wonderful Jodi is currently undergoing scheduled maintenance to improve your matchmaking experience. Please check back shortly.';
-  const estimatedEndTime = maintenance?.estimatedEndTime
-    ? new Date(maintenance.estimatedEndTime).toLocaleString('en-IN', {
+
+  const estimatedEndTime = React.useMemo(() => {
+    if (!maintenance?.estimatedEndTime) return null;
+    try {
+      const d = new Date(maintenance.estimatedEndTime);
+      if (isNaN(d.getTime())) return null;
+      return d.toLocaleString('en-IN', {
         dateStyle: 'medium',
         timeStyle: 'short',
-      })
-    : null;
+      });
+    } catch {
+      return null;
+    }
+  }, [maintenance?.estimatedEndTime]);
 
   return (
     <div
@@ -106,7 +114,7 @@ export function MaintenancePage() {
             <button
               onClick={handleRefresh}
               disabled={isChecking}
-              className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3 rounded-full bg-[#E51F3E] hover:bg-[#ce102f] text-white font-bold text-xs shadow-md shadow-red-500/20 transition disabled:opacity-75"
+              className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3 rounded-full bg-[#E51F3E] hover:bg-[#ce102f] text-white font-bold text-xs shadow-md shadow-red-500/20 transition disabled:opacity-75 cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isChecking ? 'animate-spin' : ''}`} />
               <span>{isChecking ? 'Checking Status...' : 'Check Status Again'}</span>

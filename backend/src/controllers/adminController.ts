@@ -6606,19 +6606,39 @@ export async function updateMaintenanceSettings(req: AuthRequest, res: Response,
       maintenanceMessage,
       maintenanceEstimatedEndTime,
       allowAdminAccess,
+      allowNewRegistrations,
     } = req.body;
 
     const updatePayload: any = {};
     if (typeof maintenanceMode === 'boolean') updatePayload.maintenanceMode = maintenanceMode;
     if (typeof maintenanceBanner === 'boolean') updatePayload.maintenanceBanner = maintenanceBanner;
-    if (typeof maintenanceTitle === 'string') updatePayload.maintenanceTitle = maintenanceTitle.trim();
-    if (typeof maintenanceMessage === 'string') updatePayload.maintenanceMessage = maintenanceMessage.trim();
+    if (typeof maintenanceTitle === 'string') {
+      const trimmed = maintenanceTitle.trim();
+      if (trimmed.length === 0 || trimmed.length > 200) {
+        return res.status(400).json({ success: false, message: 'Maintenance title must be between 1 and 200 characters.' });
+      }
+      updatePayload.maintenanceTitle = trimmed;
+    }
+    if (typeof maintenanceMessage === 'string') {
+      const trimmed = maintenanceMessage.trim();
+      if (trimmed.length === 0 || trimmed.length > 2000) {
+        return res.status(400).json({ success: false, message: 'Maintenance message must be between 1 and 2000 characters.' });
+      }
+      updatePayload.maintenanceMessage = trimmed;
+    }
     if (maintenanceEstimatedEndTime !== undefined) {
-      updatePayload.maintenanceEstimatedEndTime = maintenanceEstimatedEndTime
-        ? new Date(maintenanceEstimatedEndTime)
-        : null;
+      if (maintenanceEstimatedEndTime === null || maintenanceEstimatedEndTime === '') {
+        updatePayload.maintenanceEstimatedEndTime = null;
+      } else {
+        const d = new Date(maintenanceEstimatedEndTime);
+        if (isNaN(d.getTime())) {
+          return res.status(400).json({ success: false, message: 'Invalid estimated completion date and time.' });
+        }
+        updatePayload.maintenanceEstimatedEndTime = d;
+      }
     }
     if (typeof allowAdminAccess === 'boolean') updatePayload.allowAdminAccess = allowAdminAccess;
+    if (typeof allowNewRegistrations === 'boolean') updatePayload.allowNewRegistrations = allowNewRegistrations;
 
     const adminEmail = (req as any).user?.email || 'admin@wonderfuljodi.com';
     updatePayload.maintenanceUpdatedBy = adminEmail;

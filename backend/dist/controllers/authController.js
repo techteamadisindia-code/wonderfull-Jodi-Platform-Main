@@ -36,6 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.PASSWORD_RESET_EXPIRY_MS = exports.PASSWORD_RESET_EXPIRY_MINUTES = void 0;
 exports.parseDeviceDescription = parseDeviceDescription;
 exports.sanitizeIpAddress = sanitizeIpAddress;
 exports.issueRefreshToken = issueRefreshToken;
@@ -46,6 +47,8 @@ exports.logoutUser = logoutUser;
 exports.logoutAllDevices = logoutAllDevices;
 exports.logoutOtherSessions = logoutOtherSessions;
 exports.getActiveSessions = getActiveSessions;
+exports.calculatePasswordResetExpiry = calculatePasswordResetExpiry;
+exports.evaluatePasswordResetTokenDoc = evaluatePasswordResetTokenDoc;
 exports.forgotPassword = forgotPassword;
 exports.validateResetToken = validateResetToken;
 exports.resetPassword = resetPassword;
@@ -62,6 +65,7 @@ const PasswordResetToken_1 = require("../models/PasswordResetToken");
 const Notification_1 = require("../models/Notification");
 const emailService_1 = require("../services/emailService");
 const securityUtils_1 = require("../utils/securityUtils");
+const permissionUtils_1 = require("../utils/permissionUtils");
 const termsConfig_1 = require("../config/termsConfig");
 const doctorValidation_1 = require("../utils/doctorValidation");
 /**
@@ -168,7 +172,7 @@ const changePasswordSchema = zod_1.z
  * Sign short-lived Access Token (15m)
  */
 function signAccessToken(userId, role) {
-    const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+    const secret = (0, permissionUtils_1.getJwtSecret)();
     return jsonwebtoken_1.default.sign({ userId, role }, secret, { expiresIn: '15m' });
 }
 /**
@@ -218,6 +222,8 @@ function clearAuthCookies(res) {
 async function registerUser(req, res, next) {
     try {
         const data = registerSchema.parse(req.body);
+        // Validate JWT configuration upfront before database operations to prevent partial registrations
+        (0, permissionUtils_1.getJwtSecret)();
         const normalizedEmail = data.email.toLowerCase().trim();
         const cleanMobile = data.mobile.replace(/\D/g, '');
         const existingUser = await User_1.User.findOne({
@@ -732,6 +738,31 @@ async function getActiveSessions(req, res, next) {
         next(error);
     }
 }
+exports.PASSWORD_RESET_EXPIRY_MINUTES = 30;
+exports.PASSWORD_RESET_EXPIRY_MS = exports.PASSWORD_RESET_EXPIRY_MINUTES * 60 * 1000;
+function calculatePasswordResetExpiry(now = new Date()) {
+    return new Date(now.getTime() + exports.PASSWORD_RESET_EXPIRY_MS);
+}
+function evaluatePasswordResetTokenDoc(tokenDoc, now = new Date()) {
+    if (!tokenDoc || tokenDoc.isUsed || Boolean(tokenDoc.usedAt)) {
+        return {
+            isValid: false,
+            errorReason: 'NOT_FOUND_OR_USED',
+            message: 'This reset link is invalid or has already been used.',
+        };
+    }
+    if (!tokenDoc.expiresAt || now >= tokenDoc.expiresAt) {
+        return {
+            isValid: false,
+            errorReason: 'EXPIRED',
+            message: 'This reset link has expired. Please request a new one.',
+        };
+    }
+    return {
+        isValid: true,
+        message: 'Token is valid.',
+    };
+}
 async function forgotPassword(req, res, next) {
     try {
         const data = forgotPasswordSchema.parse(req.body);
@@ -743,7 +774,7 @@ async function forgotPassword(req, res, next) {
             // Generate cryptographically secure random 32-byte token
             const rawToken = (0, securityUtils_1.generateRandomToken)(32);
             const tokenHash = (0, securityUtils_1.hashToken)(rawToken);
-            const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+            const expiresAt = calculatePasswordResetExpiry(); // 30 minutes
             await PasswordResetToken_1.PasswordResetToken.create({
                 user: user._id,
                 tokenHash,
@@ -787,17 +818,13 @@ async function validateResetToken(req, res, next) {
         }
         const tokenHash = (0, securityUtils_1.hashToken)(rawToken.trim());
         const tokenDoc = await PasswordResetToken_1.PasswordResetToken.findOne({ tokenHash });
-        if (!tokenDoc || tokenDoc.isUsed || tokenDoc.usedAt) {
-            return res.status(400).json({ success: false, message: 'This reset link is invalid or has already been used.' });
-        }
-        if (new Date() > tokenDoc.expiresAt) {
-            return res
-                .status(400)
-                .json({ success: false, message: 'This reset link has expired. Please request a new one.' });
+        const evaluation = evaluatePasswordResetTokenDoc(tokenDoc);
+        if (!evaluation.isValid) {
+            return res.status(400).json({ success: false, message: evaluation.message });
         }
         return res.json({
             success: true,
-            message: 'Token is valid.',
+            message: evaluation.message,
         });
     }
     catch (error) {
@@ -810,13 +837,9 @@ async function resetPassword(req, res, next) {
         const rawToken = data.token.trim();
         const tokenHash = (0, securityUtils_1.hashToken)(rawToken);
         const tokenDoc = await PasswordResetToken_1.PasswordResetToken.findOne({ tokenHash });
-        if (!tokenDoc || tokenDoc.isUsed || tokenDoc.usedAt) {
-            return res.status(400).json({ success: false, message: 'This reset link is invalid or has already been used.' });
-        }
-        if (new Date() > tokenDoc.expiresAt) {
-            return res
-                .status(400)
-                .json({ success: false, message: 'This reset link has expired. Please request a new one.' });
+        const evaluation = evaluatePasswordResetTokenDoc(tokenDoc);
+        if (!tokenDoc || !evaluation.isValid) {
+            return res.status(400).json({ success: false, message: evaluation.message });
         }
         const user = await User_1.User.findById(tokenDoc.user);
         if (!user) {

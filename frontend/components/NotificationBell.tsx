@@ -452,7 +452,7 @@ export function NotificationBell() {
                                 {item.metadata?.senderProfileId && (
                                   <Link
                                     href={`/profile/${item.metadata.senderProfileId}`}
-                                    onClick={(e) => e.stopPropagation()}
+                                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                     className="px-2.5 py-1 rounded-lg text-[10.5px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition"
                                   >
                                     View Profile
@@ -483,7 +483,7 @@ export function NotificationBell() {
                             ) : item.metadata?.senderProfileId ? (
                               <Link
                                 href={`/profile/${item.metadata.senderProfileId}`}
-                                onClick={(e) => e.stopPropagation()}
+                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                 className="px-2.5 py-1 rounded-lg text-[10.5px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition"
                               >
                                 View Profile

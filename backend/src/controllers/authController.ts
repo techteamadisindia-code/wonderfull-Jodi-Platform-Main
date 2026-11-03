@@ -18,6 +18,7 @@ import {
   recordSecurityEvent,
 } from '../utils/securityUtils';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { getJwtSecret } from '../utils/permissionUtils';
 
 import { CURRENT_TERMS_VERSION } from '../config/termsConfig';
 import { validateDateOfBirth } from '../utils/doctorValidation';
@@ -137,7 +138,7 @@ const changePasswordSchema = z
  * Sign short-lived Access Token (15m)
  */
 function signAccessToken(userId: string, role: string): string {
-  const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+  const secret = getJwtSecret();
   return jwt.sign({ userId, role }, secret, { expiresIn: '15m' });
 }
 
@@ -199,6 +200,8 @@ function clearAuthCookies(res: Response) {
 export async function registerUser(req: Request, res: Response, next: NextFunction) {
   try {
     const data = registerSchema.parse(req.body);
+    // Validate JWT configuration upfront before database operations to prevent partial registrations
+    getJwtSecret();
     const normalizedEmail = data.email.toLowerCase().trim();
     const cleanMobile = data.mobile.replace(/\D/g, '');
 

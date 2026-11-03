@@ -1394,6 +1394,175 @@ async function main() {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
+  // GROUP 8: EXPRESS-TO-NEXT INTEGRATION & ROUTE SCOPING (SECTION 8)
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log('\n--- Group 8: Express-to-Next Integration & Route Scoping ---');
+
+  const http = require('http');
+  const { default: expressApp, registerNextHandler } = require('./dist/app.js');
+
+  const capturedNextRequests = [];
+  registerNextHandler((req, res) => {
+    capturedNextRequests.push({ method: req.method, url: req.url });
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.end('<!DOCTYPE html><html><body><h1>Next.js Handled</h1></body></html>');
+  });
+
+  const testServer = http.createServer(expressApp);
+  await new Promise((resolve) => testServer.listen(0, '127.0.0.1', resolve));
+  const { port: testServerPort } = testServer.address();
+
+  function makeIntegrationRequest(options) {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: '127.0.0.1',
+          port: testServerPort,
+          path: options.path,
+          method: options.method || 'GET',
+          headers: options.headers || {},
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => {
+            let parsedJson = null;
+            try {
+              parsedJson = JSON.parse(data);
+            } catch (_) {}
+            resolve({
+              statusCode: res.statusCode,
+              headers: res.headers,
+              body: data,
+              json: parsedJson,
+            });
+          });
+        }
+      );
+      req.on('error', reject);
+      if (options.body) {
+        req.write(typeof options.body === 'string' ? options.body : JSON.stringify(options.body));
+      }
+      req.end();
+    });
+  }
+
+  try {
+    await runAsyncTest('8.1 GET / during maintenance reaches Next.js handler (not blocked with 503)', async () => {
+      setSystemState({ maintenanceMode: true, allowAdminAccess: false, allowNewRegistrations: false });
+      capturedNextRequests.length = 0;
+      const res = await makeIntegrationRequest({ path: '/' });
+      assert.strictEqual(res.statusCode, 200);
+      assert(res.body.includes('Next.js Handled'), 'GET / must be rendered by Next.js');
+      assert.strictEqual(capturedNextRequests.length, 1);
+      assert.strictEqual(capturedNextRequests[0].url, '/');
+    });
+
+    await runAsyncTest('8.2 GET /admin/login during maintenance reaches Next.js handler', async () => {
+      setSystemState({ maintenanceMode: true, allowAdminAccess: false, allowNewRegistrations: false });
+      capturedNextRequests.length = 0;
+      const res = await makeIntegrationRequest({ path: '/admin/login' });
+      assert.strictEqual(res.statusCode, 200);
+      assert(res.body.includes('Next.js Handled'), 'GET /admin/login must be rendered by Next.js');
+      assert.strictEqual(capturedNextRequests.length, 1);
+      assert.strictEqual(capturedNextRequests[0].url, '/admin/login');
+    });
+
+    await runAsyncTest('8.3 GET /admin/settings during maintenance reaches Next.js handler', async () => {
+      setSystemState({ maintenanceMode: true, allowAdminAccess: false, allowNewRegistrations: false });
+      capturedNextRequests.length = 0;
+      const res = await makeIntegrationRequest({ path: '/admin/settings' });
+      assert.strictEqual(res.statusCode, 200);
+      assert(res.body.includes('Next.js Handled'), 'GET /admin/settings must be rendered by Next.js');
+      assert.strictEqual(capturedNextRequests.length, 1);
+      assert.strictEqual(capturedNextRequests[0].url, '/admin/settings');
+    });
+
+    await runAsyncTest('8.4 GET /api/health during maintenance returns health status JSON', async () => {
+      setSystemState({ maintenanceMode: true });
+      const res = await makeIntegrationRequest({ path: '/api/health' });
+      assert(res.json && res.json.status, 'GET /api/health must return health status JSON');
+    });
+
+    await runAsyncTest('8.5 GET /api/config/maintenance returns HTTP 200 with maintenance config', async () => {
+      setSystemState({ maintenanceMode: true, maintenanceTitle: 'Scheduled Maintenance' });
+      const res = await makeIntegrationRequest({ path: '/api/config/maintenance' });
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(res.json?.success, true);
+      assert.strictEqual(res.json?.data?.enabled, true);
+      assert.strictEqual(res.json?.data?.title, 'Scheduled Maintenance');
+    });
+
+    await runAsyncTest('8.6 GET /api/profiles during maintenance returns HTTP 503', async () => {
+      setSystemState({ maintenanceMode: true, allowAdminAccess: false });
+      const res = await makeIntegrationRequest({ path: '/api/profiles' });
+      assert.strictEqual(res.statusCode, 503);
+      assert.strictEqual(res.json?.maintenance, true);
+    });
+
+    await runAsyncTest('8.7 POST /api/auth/register when registrations paused returns HTTP 403 REGISTRATIONS_PAUSED', async () => {
+      setSystemState({ maintenanceMode: false, allowNewRegistrations: false });
+      const res = await makeIntegrationRequest({
+        method: 'POST',
+        path: '/api/auth/register',
+        headers: { 'Content-Type': 'application/json' },
+        body: { email: 'new.reg@example.com' },
+      });
+      assert.strictEqual(res.statusCode, 403);
+      assert.strictEqual(res.json?.code, 'REGISTRATIONS_PAUSED');
+    });
+
+    await runAsyncTest('8.8 Admin API with valid admin session and allowAdminAccess enabled is permitted', async () => {
+      setSystemState({ maintenanceMode: true, allowAdminAccess: true });
+      const ordinaryAdminToken = jwt.sign(
+        { userId: ORDINARY_ADMIN_USER_ID, role: 'admin', email: 'staff.moderator@wonderfuljodi.com' },
+        TEST_JWT_SECRET,
+        { expiresIn: '15m' }
+      );
+      const res = await makeIntegrationRequest({
+        method: 'GET',
+        path: '/api/admin/auth/sessions',
+        headers: { authorization: `Bearer ${ordinaryAdminToken}` },
+      });
+      assert.notStrictEqual(res.statusCode, 503, 'Admin API must NOT be blocked when allowAdminAccess is true');
+    });
+
+    await runAsyncTest('8.9 Admin API with ordinary admin session when allowAdminAccess is false returns HTTP 503', async () => {
+      setSystemState({ maintenanceMode: true, allowAdminAccess: false });
+      const ordinaryAdminToken = jwt.sign(
+        { userId: ORDINARY_ADMIN_USER_ID, role: 'admin', email: 'staff.moderator@wonderfuljodi.com' },
+        TEST_JWT_SECRET,
+        { expiresIn: '15m' }
+      );
+      const res = await makeIntegrationRequest({
+        method: 'GET',
+        path: '/api/admin/auth/sessions',
+        headers: { authorization: `Bearer ${ordinaryAdminToken}` },
+      });
+      assert.strictEqual(res.statusCode, 503);
+      assert.strictEqual(res.json?.code, 'ADMIN_ACCESS_RESTRICTED');
+    });
+
+    await runAsyncTest('8.10 Admin API with Primary Super Admin session when allowAdminAccess is false is permitted', async () => {
+      setSystemState({ maintenanceMode: true, allowAdminAccess: false });
+      const primarySuperAdminToken = jwt.sign(
+        { userId: PRIMARY_ADMIN_USER_ID, role: 'admin', email: PRIMARY_SUPER_ADMIN_EMAIL },
+        TEST_JWT_SECRET,
+        { expiresIn: '15m' }
+      );
+      const res = await makeIntegrationRequest({
+        method: 'GET',
+        path: '/api/admin/auth/sessions',
+        headers: { authorization: `Bearer ${primarySuperAdminToken}` },
+      });
+      assert.notStrictEqual(res.statusCode, 503, 'Primary Super Admin must be allowed emergency recovery');
+    });
+  } finally {
+    await new Promise((resolve) => testServer.close(resolve));
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
   // SUMMARY
   // ──────────────────────────────────────────────────────────────────────────
   console.log('\n========================================================================');

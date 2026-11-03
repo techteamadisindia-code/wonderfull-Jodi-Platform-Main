@@ -415,7 +415,7 @@ app.use('/api/config', configRoutes_1.default);
 | MAINTENANCE MODE
 |--------------------------------------------------------------------------
 */
-app.use(maintenanceMiddleware_1.checkMaintenanceMode);
+app.use('/api', maintenanceMiddleware_1.checkMaintenanceMode);
 /*
 |--------------------------------------------------------------------------
 | APPLICATION API ROUTES

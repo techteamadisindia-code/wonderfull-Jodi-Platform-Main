@@ -9,7 +9,7 @@ import { Navbar } from './Navbar';
 import { Footer } from './Footer';
 
 function LayoutContent({ children }: { children: React.ReactNode }) {
-  const { maintenance } = useMaintenance();
+  const { maintenance, loading } = useMaintenance();
   const pathname = usePathname() || '';
 
   // 1. Identify Route Types
@@ -19,6 +19,15 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
     '/admin/forgot-password',
     '/admin/reset-password',
   ].some((r) => pathname === r || pathname.startsWith(`${r}/`));
+
+  // Prevent protected public content from flashing before initial maintenance status is loaded
+  if (loading && !maintenance && !isAdminRoute) {
+    return (
+      <div className="min-h-screen min-h-[100dvh] bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
+        <div className="w-8 h-8 border-3 border-rose-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   const isPublicAuthRoute = [
     '/login',

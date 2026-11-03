@@ -73,7 +73,7 @@ const adminChangePasswordSchema = zod_1.z
     path: ['confirmNewPassword'],
 });
 function signAdminAccessToken(userId, role, email, sessionId) {
-    const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
+    const secret = (0, permissionUtils_1.getJwtSecret)();
     // Admin access token has 15 minute lifetime
     return jsonwebtoken_1.default.sign({
         userId,
@@ -175,6 +175,8 @@ async function adminLogin(req, res, next) {
                 message: 'Your administrator account is currently inactive. Please contact system management.',
             });
         }
+        // Ensure JWT secret is validly configured in production before issuing tokens or sessions
+        (0, permissionUtils_1.getJwtSecret)();
         // Issue unique session & refresh token
         const rawRefreshToken = (0, securityUtils_1.generateRandomToken)(40);
         const tokenHash = (0, securityUtils_1.hashToken)(rawRefreshToken);

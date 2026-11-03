@@ -21,6 +21,7 @@ exports.normalizeHostname = normalizeHostname;
 exports.validateStagingDatabaseUrl = validateStagingDatabaseUrl;
 exports.assertStagingIsolation = assertStagingIsolation;
 exports.verifyServerIdentity = verifyServerIdentity;
+const uploadPaths_1 = require("./uploadPaths");
 /**
  * Safely normalizes a hostname:
  * - Decodes percent-encoding safely.
@@ -146,36 +147,47 @@ function validateStagingDatabaseUrl(rawUrl, options) {
             sanitizedDetails,
         };
     }
-    // 4. Known Production Blacklist Checks
-    const PROD_HOST_PATTERNS = [
-        'srv1646.hstgr.io',
-        'hstgr.io',
+    // 4. Known Production Blacklist Checks (NEVER WEAKEN)
+    // 4a. Production Domain Hostnames (Cannot use production web domains as DB host)
+    const PROD_DOMAIN_PATTERNS = [
         'wonderfuljodi.com',
     ];
-    for (const pattern of PROD_HOST_PATTERNS) {
+    for (const pattern of PROD_DOMAIN_PATTERNS) {
         if (normalizedHost === pattern || normalizedHost.endsWith(`.${pattern}`)) {
             return {
                 isValid: false,
-                error: `SECURITY INTERCEPT: Connection to production host '${normalizedHost}' is strictly forbidden in staging.`,
+                error: `SECURITY INTERCEPT: Connection to production domain host '${normalizedHost}' is strictly forbidden in staging.`,
                 sanitizedDetails,
             };
         }
     }
-    if (decodedDatabase.toLowerCase().includes('u625755214')) {
+    // 4b. Production Database Name Blacklist
+    const isProdDb = decodedDatabase.toLowerCase() === 'u625755214_wonderfuljodi' ||
+        decodedDatabase.toLowerCase() === 'wonderfuljodi' ||
+        decodedDatabase.toLowerCase() === 'wonderfuljodi_prod' ||
+        decodedDatabase.toLowerCase() === 'wonderfuljodi_production' ||
+        /^(?:u625755214_)?wonderfuljodi(?:_prod(?:uction)?)?$/i.test(decodedDatabase);
+    if (isProdDb) {
         return {
             isValid: false,
-            error: 'SECURITY INTERCEPT: Production database identifier detected in database name.',
+            error: `SECURITY INTERCEPT: Connection to production database '${decodedDatabase}' is strictly forbidden in staging.`,
             sanitizedDetails,
         };
     }
-    if (decodedUsername.toLowerCase().includes('u625755214')) {
+    // 4c. Production User Account Blacklist
+    const isProdUser = decodedUsername.toLowerCase() === 'u625755214_wonderfuljodi' ||
+        decodedUsername.toLowerCase() === 'root' ||
+        decodedUsername.toLowerCase() === 'admin' ||
+        decodedUsername.toLowerCase() === 'wonderfuljodi';
+    if (isProdUser) {
         return {
             isValid: false,
-            error: 'SECURITY INTERCEPT: Production user account detected in database connection URL.',
+            error: `SECURITY INTERCEPT: Production user account '${decodedUsername}' is strictly forbidden in staging.`,
             sanitizedDetails,
         };
     }
-    // 5. Developer-Supplied Explicit Hostname Allowlist Check (Fail-Closed)
+    // 5. Administrator-Supplied Explicit Hostname Allowlist Check (Fail-Closed)
+    // Shared database server (e.g. srv1646.hstgr.io or localhost) is ONLY accepted if explicitly in STAGING_DB_HOST_ALLOWLIST.
     const rawAllowlist = options?.allowlist ?? (process.env.STAGING_DB_HOST_ALLOWLIST
         ? process.env.STAGING_DB_HOST_ALLOWLIST.split(',').map((h) => h.trim()).filter(Boolean)
         : []);
@@ -197,8 +209,10 @@ function validateStagingDatabaseUrl(rawUrl, options) {
             sanitizedDetails,
         };
     }
-    // 6. Exact Staging Database Name Check
-    const expectedDb = (options?.expectedDbName || process.env.STAGING_DB_NAME || 'wonderfuljodi_staging').trim();
+    // 6. Exact Staging Database Name Check (Fail-Closed)
+    const expectedDb = (options?.expectedDbName ||
+        process.env.STAGING_DB_NAME ||
+        'u625755214_staging').trim();
     if (decodedDatabase.toLowerCase() !== expectedDb.toLowerCase()) {
         return {
             isValid: false,
@@ -206,8 +220,10 @@ function validateStagingDatabaseUrl(rawUrl, options) {
             sanitizedDetails,
         };
     }
-    // 7. Dedicated Staging Account Check
-    const expectedUser = (options?.expectedDbUser || process.env.STAGING_DB_USER || 'wj_staging_user').trim();
+    // 7. Dedicated Staging Account Check (Fail-Closed)
+    const expectedUser = (options?.expectedDbUser ||
+        process.env.STAGING_DB_USER ||
+        'u625755214_staging_user').trim();
     if (decodedUsername.toLowerCase() !== expectedUser.toLowerCase()) {
         return {
             isValid: false,
@@ -221,7 +237,7 @@ function validateStagingDatabaseUrl(rawUrl, options) {
     };
 }
 /**
- * Asserts staging database isolation.
+ * Asserts staging database and storage isolation.
  * Throws an Error and terminates the process if isolation cannot be verified.
  */
 function assertStagingIsolation(options) {
@@ -250,7 +266,24 @@ function assertStagingIsolation(options) {
         }
         throw new Error(errorMsg);
     }
-    console.log(`[STAGING GUARD] Verified isolated staging database: host=${result.sanitizedDetails?.hostname}, db=${result.sanitizedDetails?.database}`);
+    // Storage Isolation: Verify upload storage does not point to production directory
+    const resolvedUploadRoot = (options?.uploadRoot || (0, uploadPaths_1.getCanonicalUploadRootDir)()).replace(/\\/g, '/').toLowerCase();
+    const isProdUpload = resolvedUploadRoot.includes('domains/wonderfuljodi.com/uploads') ||
+        resolvedUploadRoot.includes('domains/wonderfuljodi.com/public_html') ||
+        (resolvedUploadRoot.includes('wonderfuljodi.com') && !resolvedUploadRoot.includes('staging.wonderfuljodi.com'));
+    if (isProdUpload) {
+        const errorMsg = `[STAGING GUARD] ABORTING STARTUP: Upload storage points to production path '${resolvedUploadRoot}'. Staging must use isolated storage.`;
+        console.error('\n════════════════════════════════════════════════════════════════');
+        console.error('  🛑 STAGING STORAGE ISOLATION GUARD ACTIVATED');
+        console.error('════════════════════════════════════════════════════════════════');
+        console.error(errorMsg);
+        console.error('════════════════════════════════════════════════════════════════\n');
+        if (options?.exitOnError !== false) {
+            process.exit(1);
+        }
+        throw new Error(errorMsg);
+    }
+    console.log(`[STAGING GUARD] Verified isolated staging database and storage: host=${result.sanitizedDetails?.hostname}, db=${result.sanitizedDetails?.database}`);
 }
 /**
  * Pure verification function that validates live database identity attributes
@@ -269,21 +302,30 @@ function verifyServerIdentity(info, options) {
     const liveUserRaw = (info.db_user || '').trim().toLowerCase();
     const liveAccount = liveUserRaw.split('@')[0].trim().replace(/^['"`]+|['"`]+$/g, '');
     // 1. Production Account Signatures
-    if (liveUserRaw.includes('u625755214')) {
+    const isProdUser = liveAccount === 'u625755214_wonderfuljodi' ||
+        liveAccount === 'root' ||
+        liveAccount === 'admin' ||
+        liveAccount === 'wonderfuljodi';
+    if (isProdUser) {
         return {
             isValid: false,
             error: `CRITICAL INTERCEPT: Connected user account '${info.db_user}' matches production account signature.`,
         };
     }
     // 2. Production Database Signatures
-    if (liveDb.includes('u625755214')) {
+    const isProdDb = liveDb === 'u625755214_wonderfuljodi' ||
+        liveDb === 'wonderfuljodi' ||
+        liveDb === 'wonderfuljodi_prod' ||
+        liveDb === 'wonderfuljodi_production' ||
+        /^(?:u625755214_)?wonderfuljodi(?:_prod(?:uction)?)?$/i.test(liveDb);
+    if (isProdDb) {
         return {
             isValid: false,
             error: `CRITICAL INTERCEPT: Connected database name '${info.db_name}' matches production database signature.`,
         };
     }
     // 3. Production Server Host Signatures
-    const PROD_HOSTS = ['srv1646.hstgr.io', 'hstgr.io', 'wonderfuljodi.com'];
+    const PROD_HOSTS = ['wonderfuljodi.com'];
     for (const pattern of PROD_HOSTS) {
         if (liveHost === pattern || liveHost.endsWith(`.${pattern}`)) {
             return {
@@ -295,7 +337,7 @@ function verifyServerIdentity(info, options) {
     // 4. Exact Staging Database Match
     const expectedDb = (options?.expectedDbName ||
         process.env.STAGING_DB_NAME ||
-        'wonderfuljodi_staging').trim().toLowerCase();
+        'u625755214_staging').trim().toLowerCase();
     if (liveDb !== expectedDb) {
         return {
             isValid: false,
@@ -305,7 +347,7 @@ function verifyServerIdentity(info, options) {
     // 5. Explicit Staging Account Match (CURRENT_USER username component)
     const expectedUser = (options?.expectedDbUser ||
         process.env.STAGING_DB_USER ||
-        'wj_staging_user').trim().toLowerCase();
+        'u625755214_staging_user').trim().toLowerCase();
     if (liveAccount !== expectedUser) {
         return {
             isValid: false,

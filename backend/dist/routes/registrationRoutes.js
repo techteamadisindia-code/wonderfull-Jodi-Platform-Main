@@ -2,22 +2,23 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const authMiddleware_1 = require("../middleware/authMiddleware");
+const maintenanceMiddleware_1 = require("../middleware/maintenanceMiddleware");
 const registrationController_1 = require("../controllers/registrationController");
 const router = (0, express_1.Router)();
-// Public registration progress endpoints
-router.post('/start', registrationController_1.startRegistration);
-router.post('/save-step', registrationController_1.saveStep);
-router.post('/step', registrationController_1.saveStep);
-router.post('/save', registrationController_1.saveStep);
-router.post('/auto-save', registrationController_1.autoSave);
+// Public registration progress endpoints (Gated by platform availability)
+router.post('/start', maintenanceMiddleware_1.checkRegistrationEnabled, registrationController_1.startRegistration);
+router.post('/save-step', maintenanceMiddleware_1.checkRegistrationEnabled, registrationController_1.saveStep);
+router.post('/step', maintenanceMiddleware_1.checkRegistrationEnabled, registrationController_1.saveStep);
+router.post('/save', maintenanceMiddleware_1.checkRegistrationEnabled, registrationController_1.saveStep);
+router.post('/auto-save', maintenanceMiddleware_1.checkRegistrationEnabled, registrationController_1.autoSave);
 router.get('/check-availability', registrationController_1.checkAvailability);
 router.get('/incomplete/count', authMiddleware_1.requireAuth, (0, authMiddleware_1.requireRole)('admin'), registrationController_1.getIncompleteRegistrationsCount);
 router.post('/validate', registrationController_1.validateRegistrationDraft);
 router.get('/:registrationId/validate', registrationController_1.validateRegistrationDraft);
 router.post('/:registrationId/validate', registrationController_1.validateRegistrationDraft);
-router.post('/complete', registrationController_1.completeRegistration);
-router.post('/:registrationId/step', registrationController_1.saveStep);
-router.post('/:registrationId/complete', registrationController_1.completeRegistration);
+router.post('/complete', maintenanceMiddleware_1.checkRegistrationEnabled, registrationController_1.completeRegistration);
+router.post('/:registrationId/step', maintenanceMiddleware_1.checkRegistrationEnabled, registrationController_1.saveStep);
+router.post('/:registrationId/complete', maintenanceMiddleware_1.checkRegistrationEnabled, registrationController_1.completeRegistration);
 router.get('/:registrationId', registrationController_1.getRegistrationById);
 router.get('/session/:registrationId', registrationController_1.getRegistrationById);
 exports.default = router;

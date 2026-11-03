@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { hasSuperAdminPermission } from '../utils/permissionUtils';
+import { hasSuperAdminPermission, getSafeJwtSecret } from '../utils/permissionUtils';
 
 interface JwtPayloadWithRole {
   userId: string;
@@ -30,8 +30,13 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
     return res.status(401).json({ success: false, message: 'Authentication required' });
   }
 
+  const secret = getSafeJwtSecret();
+  if (!secret) {
+    console.error('[AuthMiddleware] CRITICAL: JWT_SECRET environment variable is missing in production. Failing closed.');
+    return res.status(500).json({ success: false, message: 'Authentication service configuration error' });
+  }
+
   try {
-    const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
     const payload = jwt.verify(token, secret) as JwtPayloadWithRole;
     req.user = payload;
 
@@ -175,8 +180,12 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
     return next();
   }
 
+  const secret = getSafeJwtSecret();
+  if (!secret) {
+    return next();
+  }
+
   try {
-    const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
     const payload = jwt.verify(token, secret) as any;
     req.user = payload;
   } catch {

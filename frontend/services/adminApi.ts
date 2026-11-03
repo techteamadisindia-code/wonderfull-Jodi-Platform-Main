@@ -137,6 +137,8 @@ export interface PublicMaintenanceData {
   title: string;
   message: string;
   estimatedEndTime: string | null;
+  allowAdminAccess?: boolean;
+  allowNewRegistrations?: boolean;
 }
 
 export interface AdminAccount {

@@ -8,9 +8,11 @@ const router = (0, express_1.Router)();
  * Safe for public consumption - does NOT expose sensitive admin or database information.
  */
 router.get('/maintenance', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     try {
         const config = await (0, maintenanceMiddleware_1.getCachedMaintenanceConfig)();
-        res.setHeader('Cache-Control', 'public, max-age=10, s-maxage=10');
         return res.json({
             success: true,
             data: {
@@ -19,6 +21,8 @@ router.get('/maintenance', async (req, res) => {
                 title: config.title,
                 message: config.message,
                 estimatedEndTime: config.estimatedEndTime,
+                allowAdminAccess: config.allowAdminAccess,
+                allowNewRegistrations: config.allowNewRegistrations,
             },
         });
     }
@@ -31,6 +35,8 @@ router.get('/maintenance', async (req, res) => {
                 title: "We'll Be Back Soon",
                 message: 'Wonderful Jodi is currently undergoing scheduled maintenance. Please check back shortly.',
                 estimatedEndTime: null,
+                allowAdminAccess: true,
+                allowNewRegistrations: true,
             },
         });
     }

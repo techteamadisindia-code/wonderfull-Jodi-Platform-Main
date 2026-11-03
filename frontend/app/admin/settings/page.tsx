@@ -40,6 +40,7 @@ import {
   ContactInquiryItem,
   AuditLogItem,
 } from '../../../services/adminApi';
+import { useMaintenance } from '../../../context/MaintenanceContext';
 import {
   adminChangePassword,
   fetchAdminSessions,
@@ -49,6 +50,8 @@ import {
 } from '../../../services/authApi';
 
 export default function AdminSettingsPage() {
+  const { refreshMaintenance } = useMaintenance();
+  const [savingBanner, setSavingBanner] = useState(false);
   const [settings, setSettings] = useState<PlatformSettings>({
     siteName: 'Wonderful Jodi',
     supportEmail: 'support@wonderfuljodi.com',
@@ -123,6 +126,7 @@ export default function AdminSettingsPage() {
     try {
       const updated = await updatePlatformSettings(settings);
       setSettings(updated);
+      await refreshMaintenance();
       setNotice({ type: 'success', message: 'Platform configuration settings saved successfully!' });
       setTimeout(() => setNotice(null), 4000);
     } catch (err: any) {
@@ -132,6 +136,41 @@ export default function AdminSettingsPage() {
       setTimeout(() => setNotice(null), 5000);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleMaintenanceBanner = async (targetState: boolean) => {
+    setSavingBanner(true);
+    try {
+      const updated = await updateMaintenanceSettings({
+        maintenanceMode: settings.maintenanceMode,
+        maintenanceBanner: targetState,
+        maintenanceTitle: settings.maintenanceTitle,
+        maintenanceMessage: settings.maintenanceMessage,
+        maintenanceEstimatedEndTime: settings.maintenanceEstimatedEndTime,
+        allowAdminAccess: settings.allowAdminAccess,
+      });
+
+      setSettings((prev) => ({
+        ...prev,
+        maintenanceBanner: updated.maintenanceBanner,
+      }));
+
+      await refreshMaintenance();
+
+      setNotice({
+        type: 'success',
+        message: targetState ? 'Platform maintenance banner is now live.' : 'Platform maintenance banner hidden.',
+      });
+      setTimeout(() => setNotice(null), 4000);
+    } catch (err: any) {
+      console.error('Failed to toggle maintenance banner:', err);
+      setNotice({
+        type: 'error',
+        message: err?.response?.data?.message || 'Failed to update maintenance banner.',
+      });
+    } finally {
+      setSavingBanner(false);
     }
   };
 
@@ -164,6 +203,7 @@ export default function AdminSettingsPage() {
       }));
 
       setShowMaintenanceModal(null);
+      await refreshMaintenance();
       setNotice({
         type: 'success',
         message: targetState ? 'Maintenance mode enabled.' : 'Maintenance mode disabled.',
@@ -182,6 +222,31 @@ export default function AdminSettingsPage() {
 
   const handleSaveMaintenanceDetails = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!settings.maintenanceTitle?.trim()) {
+      setNotice({ type: 'error', message: 'Maintenance title cannot be empty.' });
+      return;
+    }
+    if (settings.maintenanceTitle.length > 200) {
+      setNotice({ type: 'error', message: 'Maintenance title cannot exceed 200 characters.' });
+      return;
+    }
+    if (!settings.maintenanceMessage?.trim()) {
+      setNotice({ type: 'error', message: 'Maintenance message cannot be empty.' });
+      return;
+    }
+    if (settings.maintenanceMessage.length > 2000) {
+      setNotice({ type: 'error', message: 'Maintenance message cannot exceed 2000 characters.' });
+      return;
+    }
+    if (settings.maintenanceEstimatedEndTime) {
+      const d = new Date(settings.maintenanceEstimatedEndTime);
+      if (isNaN(d.getTime())) {
+        setNotice({ type: 'error', message: 'Please enter a valid estimated completion date and time.' });
+        return;
+      }
+    }
+
     setSavingMaintenance(true);
     try {
       const updated = await updateMaintenanceSettings({
@@ -203,6 +268,7 @@ export default function AdminSettingsPage() {
         allowAdminAccess: updated.allowAdminAccess,
       }));
 
+      await refreshMaintenance();
       setNotice({ type: 'success', message: 'Maintenance configuration saved successfully!' });
       setTimeout(() => setNotice(null), 4000);
     } catch (err: any) {
@@ -422,14 +488,14 @@ export default function AdminSettingsPage() {
               {/* Toggle Switch */}
               <button
                 type="button"
-                onClick={() =>
-                  setSettings({ ...settings, maintenanceBanner: !settings.maintenanceBanner })
-                }
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/40 ${
+                disabled={savingBanner || savingMaintenance}
+                onClick={() => handleToggleMaintenanceBanner(!settings.maintenanceBanner)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#E51F3E]/40 disabled:opacity-60 ${
                   settings.maintenanceBanner ? 'bg-[#E51F3E]' : 'bg-slate-300'
                 }`}
                 role="switch"
                 aria-checked={settings.maintenanceBanner}
+                title="Toggle platform maintenance banner"
               >
                 <span
                   className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${

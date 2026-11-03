@@ -4,9 +4,10 @@ const express_1 = require("express");
 const authController_1 = require("../controllers/authController");
 const rateLimiters_1 = require("../middleware/rateLimiters");
 const authMiddleware_1 = require("../middleware/authMiddleware");
+const maintenanceMiddleware_1 = require("../middleware/maintenanceMiddleware");
 const router = (0, express_1.Router)();
 // Public Authentication Endpoints (Strict Rate Limited)
-router.post('/register', rateLimiters_1.authLimiter, authController_1.registerUser);
+router.post('/register', rateLimiters_1.authLimiter, maintenanceMiddleware_1.checkRegistrationEnabled, authController_1.registerUser);
 router.post('/login', rateLimiters_1.authLimiter, authController_1.loginUser);
 router.post('/refresh', authController_1.refreshSession);
 router.post('/logout', authController_1.logoutUser);

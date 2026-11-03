@@ -1,5 +1,9 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.inFlightReplies = void 0;
 exports.getMonetizationSummary = getMonetizationSummary;
 exports.getMembershipPlans = getMembershipPlans;
 exports.updateMembershipPlan = updateMembershipPlan;
@@ -15,8 +19,12 @@ exports.getAuditLogs = getAuditLogs;
 exports.getSupportInquiries = getSupportInquiries;
 exports.getSupportInquiryDetails = getSupportInquiryDetails;
 exports.addInquiryNote = addInquiryNote;
+exports.computeReplyPayloadHash = computeReplyPayloadHash;
+exports.classifySmtpOutcome = classifySmtpOutcome;
 exports.replyToSupportInquiry = replyToSupportInquiry;
 exports.retrySupportInquiryEmail = retrySupportInquiryEmail;
+const crypto_1 = __importDefault(require("crypto"));
+const client_1 = require("../db/client");
 const Admin_1 = require("../models/Admin");
 const User_1 = require("../models/User");
 const MembershipPlan_1 = require("../models/MembershipPlan");
@@ -483,9 +491,28 @@ async function updateAdminPermissions(req, res, next) {
                 message: 'Linked administrator user account does not exist.',
             });
         }
+        const callerUser = callerId ? await User_1.User.findById(callerId) : null;
+        const isCallerPrimary = (0, permissionUtils_1.isPrimarySuperAdminEmail)(callerUser?.email || req.user?.email);
+        const isTargetPrimary = (0, permissionUtils_1.isPrimarySuperAdminEmail)(targetUser.email);
         const prevPermissions = (0, permissionUtils_1.normalizeAdminPermissions)(admin.permissions);
         const wasSuperAdmin = prevPermissions.includes('all');
         const willBeSuperAdmin = cleanPermissions.includes('all');
+        // Primary Super Admin permissions cannot be modified by any other administrator
+        if (isTargetPrimary && !isCallerPrimary) {
+            return res.status(403).json({
+                success: false,
+                code: 'CANNOT_MODIFY_PRIMARY_SUPER_ADMIN',
+                message: 'Access denied: The primary super administrator permissions cannot be modified by other administrators.',
+            });
+        }
+        // Super admin privileges cannot be removed from the primary super admin
+        if (isTargetPrimary && !willBeSuperAdmin) {
+            return res.status(400).json({
+                success: false,
+                code: 'CANNOT_REVOKE_SUPER_ADMIN_PERMISSIONS',
+                message: 'Super administrator full access permissions cannot be removed from the primary super admin.',
+            });
+        }
         // 2. Safeguard against accidental loss of the last designated Super Admin
         if (wasSuperAdmin && !willBeSuperAdmin) {
             const allAdmins = await Admin_1.Admin.find().populate('user', 'role status isActive isDeleted');
@@ -664,17 +691,19 @@ async function addInquiryNote(req, res, next) {
         if (!inquiry) {
             return res.status(404).json({ success: false, message: 'Inquiry not found' });
         }
-        const formattedNote = `[${new Date().toISOString()} - ${callerEmail}]: ${note.trim()}`;
-        inquiry.adminNotes = inquiry.adminNotes ? `${inquiry.adminNotes}\n${formattedNote}` : formattedNote;
-        const history = Array.isArray(inquiry.statusHistory) ? inquiry.statusHistory : [];
+        const history = Array.isArray(inquiry.statusHistory) ? [...inquiry.statusHistory] : [];
         history.push({
             status: inquiry.status,
             changedBy: callerId,
             changedByEmail: callerEmail,
             note: note.trim(),
+            eventType: 'NOTE_ADDED',
             timestamp: new Date(),
         });
         inquiry.statusHistory = history;
+        const formattedNote = `[${new Date().toISOString()} - ${callerEmail}]: ${note.trim()}`;
+        inquiry.adminNotes = inquiry.adminNotes ? `${inquiry.adminNotes}\n${formattedNote}` : formattedNote;
+        // Persist note into statusHistory via database save
         await inquiry.save();
         await recordSuperAdminAudit({
             adminUser: callerId,
@@ -695,133 +724,772 @@ async function addInquiryNote(req, res, next) {
         next(error);
     }
 }
+exports.inFlightReplies = new Set();
+/**
+ * Computes canonical payload hash binding inquiry ID, recipient email, email subject, and normalized body.
+ */
+function computeReplyPayloadHash(inquiryId, recipientEmail, emailSubject, normalizedBody) {
+    const canonical = [
+        `inquiry:${String(inquiryId).trim()}`,
+        `recipient:${String(recipientEmail).toLowerCase().trim()}`,
+        `subject:${String(emailSubject).trim()}`,
+        `body:${String(normalizedBody).trim()}`,
+    ].join('\n');
+    return crypto_1.default.createHash('sha256').update(canonical).digest('hex');
+}
+/**
+ * Distinguishes definitive permanent SMTP rejections (5xx) from ambiguous network/connection failures.
+ */
+function classifySmtpOutcome(err) {
+    if (!err) {
+        return { isDefinitiveFailure: false, isUncertain: false, message: '' };
+    }
+    const responseCode = Number(err.responseCode || err.status || 0);
+    const errMsg = String(err.message || '').toLowerCase();
+    // Permanent SMTP 5xx rejections are definitive rejections
+    if (responseCode >= 500 && responseCode < 600) {
+        return {
+            isDefinitiveFailure: true,
+            isUncertain: false,
+            message: err.message || `SMTP Permanent Rejection (${responseCode})`,
+        };
+    }
+    // Known mailbox/recipient definitive rejections
+    if (errMsg.includes('recipient rejected') ||
+        errMsg.includes('mailbox unavailable') ||
+        errMsg.includes('user not found') ||
+        errMsg.includes('does not exist') ||
+        errMsg.includes('550 ') ||
+        errMsg.includes('551 ') ||
+        errMsg.includes('552 ') ||
+        errMsg.includes('553 ') ||
+        errMsg.includes('554 ')) {
+        return {
+            isDefinitiveFailure: true,
+            isUncertain: false,
+            message: err.message,
+        };
+    }
+    // All network errors, timeouts, connection drops, resets, or unclassified exceptions are UNCERTAIN
+    return {
+        isDefinitiveFailure: false,
+        isUncertain: true,
+        message: err.message || 'Ambiguous SMTP network or connection error',
+    };
+}
 async function replyToSupportInquiry(req, res, next) {
+    let activeIdempKey = null;
     try {
         const { id } = req.params;
-        const { replyText, newStatus } = req.body;
+        const { replyText, newStatus, idempotencyKey: bodyIdempKey } = req.body;
         const callerId = req.user?.userId;
         const callerEmail = req.user?.email || 'support@wonderfuljodi.com';
         if (!replyText || typeof replyText !== 'string' || !replyText.trim()) {
             return res.status(400).json({ success: false, message: 'Reply text is required' });
         }
+        const cleanReplyText = replyText.trim().replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
         const inquiry = await ContactInquiry_1.ContactInquiry.findById(id);
         if (!inquiry) {
             return res.status(404).json({ success: false, message: 'Inquiry not found' });
         }
-        // Sanitize reply text
-        const cleanReplyText = replyText.trim().replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-        // Send email using system mail service
-        let emailSent = false;
-        let emailError;
-        try {
-            const emailResult = await (0, emailService_1.sendMail)({
-                to: inquiry.email,
-                subject: `Re: Your Inquiry ${inquiry.inquiryId || id} - Wonderful Jodi Support`,
-                text: `Dear ${inquiry.name},\n\n${cleanReplyText}\n\nBest regards,\nWonderful Jodi Support Team`,
-                html: `<p>Dear ${inquiry.name},</p><p>${cleanReplyText.replace(/\n/g, '<br/>')}</p><p>Best regards,<br/><strong>Wonderful Jodi Support Team</strong></p>`,
+        // 1. Determine canonical payload hash bound to complete request: inquiry ID, recipient email, subject, and normalized body
+        const emailSubject = `Re: Your Inquiry ${inquiry.inquiryId || id} - Wonderful Jodi Support`;
+        const payloadHash = computeReplyPayloadHash(id, inquiry.email || '', emailSubject, cleanReplyText);
+        const rawKey = (bodyIdempKey || req.headers?.['idempotency-key'] || req.body?.replyId || '').toString().trim();
+        const idempotencyKey = rawKey && rawKey.length >= 8 && rawKey.length <= 128
+            ? rawKey
+            : 'auto_' + crypto_1.default.createHash('sha256').update(`${id}:${callerId || 'admin'}:${cleanReplyText}`).digest('hex').substring(0, 27);
+        // Fast in-process concurrency guard
+        if (exports.inFlightReplies.has(idempotencyKey)) {
+            return res.status(409).json({
+                success: false,
+                code: 'REPLY_IN_PROGRESS',
+                message: 'This reply is currently being transmitted to the SMTP server.',
             });
-            emailSent = emailResult.success;
-            if (!emailResult.success) {
-                emailError = emailResult.messageId || 'Email delivery failed';
+        }
+        exports.inFlightReplies.add(idempotencyKey);
+        activeIdempKey = idempotencyKey;
+        const rawReplies = inquiry.adminReplies || inquiry.replies;
+        const replies = Array.isArray(rawReplies) ? [...rawReplies] : [];
+        // Idempotency check with Complete Request Payload Binding:
+        const existingReply = replies.find((r) => r.idempotencyKey === idempotencyKey || r.replyId === idempotencyKey);
+        if (existingReply) {
+            const existingHash = existingReply.payloadHash ||
+                computeReplyPayloadHash(id, inquiry.email || '', emailSubject, existingReply.replyText || '');
+            if (existingHash !== payloadHash) {
+                return res.status(409).json({
+                    success: false,
+                    code: 'IDEMPOTENCY_KEY_PAYLOAD_MISMATCH',
+                    message: 'The provided idempotency key has already been used with a different reply payload.',
+                    data: inquiry,
+                });
+            }
+            if (existingReply.deliveryStatus === 'SENT' || existingReply.emailSent) {
+                return res.status(200).json({
+                    success: true,
+                    duplicate: true,
+                    message: 'This reply was already processed and accepted by SMTP.',
+                    data: inquiry,
+                });
+            }
+            if (existingReply.deliveryStatus === 'SENDING') {
+                return res.status(409).json({
+                    success: false,
+                    code: 'REPLY_IN_PROGRESS',
+                    message: 'This reply is currently being transmitted to the SMTP server.',
+                    data: inquiry,
+                });
+            }
+            if (existingReply.deliveryStatus === 'DELIVERY_UNKNOWN') {
+                return res.status(409).json({
+                    success: false,
+                    code: 'DELIVERY_STATUS_UNCERTAIN',
+                    message: 'Email delivery status is uncertain. Please reconcile delivery before retrying.',
+                    data: inquiry,
+                });
             }
         }
-        catch (mailErr) {
-            emailSent = false;
-            emailError = mailErr?.message || 'SMTP delivery error';
+        // 2. Distributed database-backed unique claim with Durable State Machine & Ownership Fencing:
+        // Mandatory database AuditLog capability check: missing capabilities must produce a safe server error, not a successful check.
+        if (!client_1.prisma?.auditLog?.create || !client_1.prisma?.auditLog?.findUnique) {
+            return res.status(500).json({
+                success: false,
+                code: 'DATABASE_ERROR',
+                message: 'Audit log database capability is required for durable reply claiming.',
+            });
         }
-        const replies = Array.isArray(inquiry.adminReplies) ? inquiry.adminReplies : [];
-        replies.push({
+        const claimAuditId = 'c_' + crypto_1.default.createHash('sha256').update(idempotencyKey).digest('hex').substring(0, 22);
+        if (claimAuditId.length !== 24) {
+            throw new Error(`AuditLog claim ID length mismatch: expected 24, got ${claimAuditId.length}`);
+        }
+        const initialOwnerToken = crypto_1.default.randomBytes(12).toString('hex');
+        let currentOwnerToken = initialOwnerToken;
+        let fencingVersion = 1;
+        let claimCreated = false;
+        // Helper to verify that current worker still owns the durable claim lease in AuditLog
+        // Mandatory check: if findUnique is unavailable or throws, fails closed with error.
+        const checkClaimOwnership = async (expectedToken) => {
+            if (!client_1.prisma?.auditLog?.findUnique) {
+                throw new Error('Database auditLog capability is unavailable.');
+            }
+            const claim = await client_1.prisma.auditLog.findUnique({
+                where: { id: claimAuditId },
+            });
+            if (!claim)
+                return false;
+            let p = null;
+            if (claim.details) {
+                try {
+                    p = typeof claim.details === 'string' ? JSON.parse(claim.details) : claim.details;
+                }
+                catch (e) {
+                    p = null;
+                }
+            }
+            const tokenInDb = claim.reason || p?.o;
+            return tokenInDb === expectedToken;
+        };
+        try {
+            await client_1.prisma.auditLog.create({
+                data: {
+                    id: claimAuditId,
+                    adminEmail: callerEmail,
+                    action: 'INQUIRY_REPLY_CLAIM',
+                    targetModel: 'ContactInquiry',
+                    targetId: id,
+                    reason: initialOwnerToken,
+                    details: JSON.stringify({
+                        k: idempotencyKey,
+                        h: payloadHash,
+                        exp: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+                        st: 'CLAIMED',
+                        o: initialOwnerToken,
+                        v: 1,
+                    }),
+                },
+            });
+            claimCreated = true;
+        }
+        catch (claimErr) {
+            if (claimErr?.code === 'P2002' ||
+                claimErr?.message?.includes('Unique constraint') ||
+                claimErr?.message?.includes('Duplicate entry')) {
+                // Inspect existing claim in AuditLog to check payload binding & lease expiration
+                let existingClaim = null;
+                try {
+                    existingClaim = await client_1.prisma.auditLog.findUnique({
+                        where: { id: claimAuditId },
+                    });
+                }
+                catch (inspectErr) {
+                    // Fall through
+                }
+                let parsed = null;
+                if (existingClaim?.details) {
+                    try {
+                        parsed = typeof existingClaim.details === 'string'
+                            ? JSON.parse(existingClaim.details)
+                            : existingClaim.details;
+                    }
+                    catch (e) {
+                        parsed = null;
+                    }
+                }
+                const existingHash = parsed?.h || parsed?.payloadHash;
+                const existingExpiry = parsed?.exp || parsed?.leaseExpiresAt;
+                const claimState = parsed?.st || '';
+                // Payload-hash mismatch protection across complete canonical request
+                if (existingHash && existingHash !== payloadHash) {
+                    return res.status(409).json({
+                        success: false,
+                        code: 'IDEMPOTENCY_KEY_PAYLOAD_MISMATCH',
+                        message: 'The provided idempotency key has already been used with a different reply payload.',
+                    });
+                }
+                // Check if a reply was committed in ContactInquiry
+                let dbReplies = [];
+                try {
+                    if (client_1.prisma?.contactInquiry?.findUnique) {
+                        const dbInq = await client_1.prisma.contactInquiry.findUnique({ where: { id } });
+                        dbReplies = Array.isArray(dbInq?.replies) ? dbInq.replies : [];
+                    }
+                }
+                catch (dbErr) {
+                    dbReplies = [];
+                }
+                const existingReplyInDb = dbReplies.find((r) => r.idempotencyKey === idempotencyKey || r.replyId === idempotencyKey);
+                if (existingReplyInDb) {
+                    // Reply exists in database: do NOT allow reclamation or duplicate sending
+                    if (existingReplyInDb.deliveryStatus === 'SENT' || existingReplyInDb.emailSent) {
+                        return res.status(200).json({
+                            success: true,
+                            duplicate: true,
+                            message: 'This reply was already processed and accepted by SMTP.',
+                            data: inquiry,
+                        });
+                    }
+                    if (existingReplyInDb.deliveryStatus === 'DELIVERY_UNKNOWN') {
+                        return res.status(409).json({
+                            success: false,
+                            code: 'DELIVERY_STATUS_UNCERTAIN',
+                            message: 'Email delivery status is uncertain. Please reconcile delivery before retrying.',
+                            data: inquiry,
+                        });
+                    }
+                    return res.status(409).json({
+                        success: false,
+                        code: 'REPLY_IN_PROGRESS',
+                        message: 'This reply is currently being transmitted to the SMTP server.',
+                        data: inquiry,
+                    });
+                }
+                // Protection: Prevent lease expiry from allowing another worker to reclaim a claim already transitioning to SENDING
+                if (claimState === 'SENDING') {
+                    return res.status(409).json({
+                        success: false,
+                        code: 'REPLY_IN_PROGRESS',
+                        message: 'This reply is currently transitioning to SENDING or being transmitted.',
+                        data: inquiry,
+                    });
+                }
+                // If NO reply was ever persisted in the database and claim is not in SENDING, check if claim lease has expired
+                const leaseExpiresAt = existingExpiry ? new Date(existingExpiry).getTime() : 0;
+                const isExpired = leaseExpiresAt > 0 && Date.now() > leaseExpiresAt;
+                if (isExpired) {
+                    // Safe abandoned claim recovery: process crashed after claim creation but before SENDING transition.
+                    // Safely reclaim the lease for this retry via atomic conditional update and unique ownership token / fencing version.
+                    const newOwnerToken = crypto_1.default.randomBytes(12).toString('hex');
+                    const newVersion = (parsed?.v || 1) + 1;
+                    const newExpiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+                    const newDetails = JSON.stringify({
+                        k: idempotencyKey,
+                        h: payloadHash,
+                        exp: newExpiry,
+                        st: 'RECLAIMED',
+                        o: newOwnerToken,
+                        v: newVersion,
+                    });
+                    let reclaimSucceeded = false;
+                    try {
+                        if (typeof client_1.prisma?.$executeRaw === 'function') {
+                            const prevReason = existingClaim?.reason || '';
+                            const affected = await client_1.prisma.$executeRaw `
+                UPDATE auditlogs
+                SET admin_email = ${callerEmail},
+                    reason = ${newOwnerToken},
+                    details = ${newDetails},
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ${claimAuditId}
+                  AND (reason = ${prevReason} OR reason IS NULL)
+              `;
+                            reclaimSucceeded = affected === 1;
+                        }
+                        else if (client_1.prisma?.auditLog?.update) {
+                            await client_1.prisma.auditLog.update({
+                                where: { id: claimAuditId },
+                                data: {
+                                    adminEmail: callerEmail,
+                                    reason: newOwnerToken,
+                                    details: newDetails,
+                                },
+                            });
+                            reclaimSucceeded = true;
+                        }
+                    }
+                    catch (reclaimErr) {
+                        reclaimSucceeded = false;
+                    }
+                    if (reclaimSucceeded) {
+                        claimCreated = true;
+                        currentOwnerToken = newOwnerToken;
+                        fencingVersion = newVersion;
+                    }
+                    else {
+                        return res.status(409).json({
+                            success: false,
+                            code: 'REPLY_IN_PROGRESS',
+                            message: 'This reply has already been claimed by another active process or server.',
+                        });
+                    }
+                }
+                else {
+                    return res.status(409).json({
+                        success: false,
+                        code: 'REPLY_IN_PROGRESS',
+                        message: 'This reply has already been claimed by another active process or server.',
+                    });
+                }
+            }
+            else {
+                // Non-duplicate database failure: return appropriate server error rather than treating as duplicate key conflict
+                console.error('[SupportReply] Database error during claim creation:', claimErr);
+                return res.status(500).json({
+                    success: false,
+                    code: 'DATABASE_ERROR',
+                    message: 'Failed to record support reply claim due to a database error: ' + (claimErr?.message || 'Database error'),
+                });
+            }
+        }
+        // Fencing check 1: confirm worker still holds active lease ownership before persisting SENDING
+        const ownsBeforePersist = await checkClaimOwnership(currentOwnerToken);
+        if (!ownsBeforePersist) {
+            console.warn(`[SupportReply] Worker lost claim ownership for ${claimAuditId} before persistence. Aborting.`);
+            return res.status(409).json({
+                success: false,
+                code: 'CLAIM_OWNERSHIP_LOST',
+                message: 'Claim lease expired and ownership was acquired by another process.',
+                data: inquiry,
+            });
+        }
+        // Transition claim state to SENDING in AuditLog to protect against concurrent lease-expiry reclamation during persistence
+        try {
+            if (client_1.prisma?.auditLog?.update) {
+                await client_1.prisma.auditLog.update({
+                    where: { id: claimAuditId },
+                    data: {
+                        details: JSON.stringify({
+                            k: idempotencyKey,
+                            h: payloadHash,
+                            exp: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+                            st: 'SENDING',
+                            o: currentOwnerToken,
+                            v: fencingVersion,
+                        }),
+                    },
+                });
+            }
+        }
+        catch (transErr) {
+            // Non-fatal if auditLog update is unavailable
+        }
+        // 3. Persist queued reply in inquiry BEFORE attempting SMTP delivery
+        const replyId = 'rep_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+        const newReply = {
+            replyId,
+            idempotencyKey,
+            payloadHash,
             replyText: cleanReplyText,
             sentBy: callerId,
             sentByEmail: callerEmail,
             sentAt: new Date(),
-            emailSent,
-            emailError,
-        });
+            deliveryStatus: 'SENDING',
+            emailSent: false,
+        };
+        replies.push(newReply);
         inquiry.adminReplies = replies;
+        inquiry.replies = replies;
         if (newStatus && ['RESOLVED', 'CLOSED', 'IN_PROGRESS', 'WAITING_FOR_USER'].includes(newStatus)) {
             inquiry.status = newStatus;
             if (newStatus === 'RESOLVED') {
                 inquiry.resolvedAt = new Date();
             }
         }
-        await inquiry.save();
+        // RULE 1: Persist the queued reply record BEFORE attempting SMTP delivery.
+        // Never delete a claim merely because a verification query failed; release only after confirming the SENDING reply was NOT committed.
+        try {
+            await inquiry.save();
+        }
+        catch (queueErr) {
+            let isCommitted = false;
+            let verifyQuerySucceeded = false;
+            try {
+                if (client_1.prisma?.contactInquiry?.findUnique) {
+                    const dbInq = await client_1.prisma.contactInquiry.findUnique({ where: { id } });
+                    const dbReplies = Array.isArray(dbInq?.replies) ? dbInq.replies : [];
+                    isCommitted = dbReplies.some((r) => r.replyId === replyId);
+                    verifyQuerySucceeded = true;
+                }
+            }
+            catch (checkErr) {
+                verifyQuerySucceeded = false;
+            }
+            // Safe release: only delete if query verified that the record was definitively not committed.
+            if (verifyQuerySucceeded && !isCommitted && claimCreated && client_1.prisma?.auditLog?.delete) {
+                try {
+                    await client_1.prisma.auditLog.delete({ where: { id: claimAuditId } });
+                }
+                catch (releaseErr) {
+                    // Non-fatal
+                }
+            }
+            throw queueErr;
+        }
+        // Fencing check 2: confirm worker still holds active lease ownership immediately before SMTP transmission
+        const ownsBeforeSmtp = await checkClaimOwnership(currentOwnerToken);
+        if (!ownsBeforeSmtp) {
+            console.warn(`[SupportReply] Worker lost claim ownership for ${claimAuditId} before SMTP transmission. Aborting email send.`);
+            return res.status(409).json({
+                success: false,
+                code: 'CLAIM_OWNERSHIP_LOST',
+                message: 'Claim lease expired and ownership was acquired by another process before SMTP transmission.',
+                data: inquiry,
+            });
+        }
+        // RULE 2: Transmit email via SMTP only after durable persistence and active ownership are confirmed
+        let emailSent = false;
+        let emailAccepted = false;
+        let smtpMessageId;
+        let deliveryError;
+        newReply.deliveryStatus = 'SENDING';
+        try {
+            const emailResult = await (0, emailService_1.sendMail)({
+                to: inquiry.email,
+                subject: emailSubject,
+                text: `Dear ${inquiry.name},\n\n${cleanReplyText}\n\nBest regards,\nWonderful Jodi Support Team`,
+                html: `<p>Dear ${inquiry.name},</p><p>${cleanReplyText.replace(/\n/g, '<br/>')}</p><p>Best regards,<br/><strong>Wonderful Jodi Support Team</strong></p>`,
+            });
+            if (emailResult.success) {
+                emailSent = true;
+                emailAccepted = true;
+                smtpMessageId = emailResult.messageId;
+                newReply.deliveryStatus = 'SENT';
+                newReply.emailSent = true;
+                newReply.smtpMessageId = emailResult.messageId;
+            }
+            else {
+                const classified = classifySmtpOutcome(emailResult);
+                deliveryError = classified.message;
+                newReply.deliveryStatus = classified.isUncertain ? 'DELIVERY_UNKNOWN' : 'FAILED';
+                newReply.emailSent = false;
+                newReply.deliveryError = deliveryError;
+                newReply.emailError = deliveryError;
+            }
+        }
+        catch (mailErr) {
+            const classified = classifySmtpOutcome(mailErr);
+            deliveryError = classified.message;
+            newReply.deliveryStatus = classified.isUncertain ? 'DELIVERY_UNKNOWN' : 'FAILED';
+            newReply.emailSent = false;
+            newReply.deliveryError = deliveryError;
+            newReply.emailError = deliveryError;
+        }
+        // RULE 3: Update durable delivery state in database
+        const persistedReplies = Array.isArray(inquiry.adminReplies)
+            ? inquiry.adminReplies
+            : Array.isArray(inquiry.replies)
+                ? inquiry.replies
+                : replies;
+        const target = persistedReplies.find((r) => r.replyId === replyId) || newReply;
+        target.deliveryStatus = newReply.deliveryStatus;
+        target.emailSent = newReply.emailSent;
+        target.smtpMessageId = newReply.smtpMessageId;
+        target.deliveryError = newReply.deliveryError;
+        target.emailError = newReply.emailError;
+        inquiry.adminReplies = persistedReplies;
+        inquiry.replies = persistedReplies;
+        try {
+            await inquiry.save();
+        }
+        catch (persistErr) {
+            if (emailAccepted) {
+                newReply.deliveryStatus = 'DELIVERY_UNKNOWN';
+                return res.status(500).json({
+                    success: false,
+                    code: 'EMAIL_ACCEPTED_PERSISTENCE_FAILED',
+                    message: 'Email was accepted by SMTP server, but updating inquiry delivery record failed.',
+                    email: {
+                        status: 'SENT',
+                        smtpMessageId,
+                    },
+                    persistence: {
+                        status: 'FAILED',
+                        replyId: newReply.replyId,
+                        error: persistErr?.message || 'Database persistence error',
+                    },
+                    data: inquiry,
+                });
+            }
+            throw persistErr;
+        }
         await recordSuperAdminAudit({
             adminUser: callerId,
             adminEmail: callerEmail,
             action: 'INQUIRY_REPLIED',
             targetModel: 'ContactInquiry',
             targetId: id,
-            details: JSON.stringify({ emailSent, emailError, status: inquiry.status }),
+            details: JSON.stringify({
+                replyId: newReply.replyId,
+                deliveryStatus: newReply.deliveryStatus,
+                smtpMessageId,
+                deliveryError,
+                status: inquiry.status,
+            }),
             ipAddress: req.ip,
         });
         res.json({
-            success: true,
+            success: emailSent,
             message: emailSent
-                ? 'Reply sent and email delivered successfully.'
-                : `Reply saved, but email could not be sent: ${emailError || 'Email delivery issue'}`,
+                ? 'Reply saved and email accepted by SMTP for delivery.'
+                : `Reply saved, but email delivery ${newReply.deliveryStatus === 'DELIVERY_UNKNOWN' ? 'outcome is uncertain' : 'failed'}: ${deliveryError || 'SMTP error'}`,
             data: inquiry,
         });
     }
     catch (error) {
         next(error);
     }
+    finally {
+        if (activeIdempKey) {
+            exports.inFlightReplies.delete(activeIdempKey);
+        }
+    }
 }
 async function retrySupportInquiryEmail(req, res, next) {
+    let activeRetryKey = null;
+    let retryClaimId = null;
     try {
         const { id } = req.params;
+        const { replyId } = req.body || {};
         const callerId = req.user?.userId;
         const callerEmail = req.user?.email || 'support@wonderfuljodi.com';
         const inquiry = await ContactInquiry_1.ContactInquiry.findById(id);
         if (!inquiry) {
             return res.status(404).json({ success: false, message: 'Inquiry not found' });
         }
-        const replies = Array.isArray(inquiry.adminReplies) ? inquiry.adminReplies : [];
-        const lastReply = replies[replies.length - 1];
-        if (!lastReply) {
+        const rawReplies = inquiry.adminReplies || inquiry.replies;
+        const replies = Array.isArray(rawReplies) ? rawReplies : [];
+        const targetReply = replyId
+            ? replies.find((r) => r.replyId === replyId)
+            : replies[replies.length - 1];
+        if (!targetReply) {
             return res.status(400).json({ success: false, message: 'No reply found to retry' });
         }
+        // DELIVERY RULES:
+        // Never automatically resend a reply in SENT, SENDING, or DELIVERY_UNKNOWN state.
+        if (targetReply.deliveryStatus === 'SENT' || targetReply.emailSent) {
+            return res.status(400).json({
+                success: false,
+                message: 'This email has already been accepted by SMTP for delivery. Resend disallowed to prevent duplicate emails.',
+            });
+        }
+        if (targetReply.deliveryStatus === 'SENDING') {
+            const sentTime = new Date(targetReply.sentAt || 0).getTime();
+            const elapsedMinutes = (Date.now() - sentTime) / (60 * 1000);
+            const allowForceReconcile = req.body?.reconcileAction === 'FORCE_RETRY' && elapsedMinutes >= 5;
+            if (!allowForceReconcile) {
+                return res.status(409).json({
+                    success: false,
+                    code: 'SENDING_IN_PROGRESS',
+                    message: elapsedMinutes >= 5
+                        ? 'This reply has been in SENDING state for over 5 minutes. Verify your SMTP server logs to confirm the message was not delivered, then retry with { reconcileAction: "FORCE_RETRY" }.'
+                        : 'This email is currently being transmitted to the SMTP server.',
+                    details: {
+                        replyId: targetReply.replyId,
+                        sentAt: targetReply.sentAt,
+                        elapsedMinutes: Math.round(elapsedMinutes),
+                        recoveryPath: 'Pass { reconcileAction: "FORCE_RETRY" } after verifying mail logs.',
+                    },
+                });
+            }
+        }
+        if (targetReply.deliveryStatus === 'DELIVERY_UNKNOWN') {
+            const allowForceReconcile = req.body?.reconcileAction === 'FORCE_RETRY';
+            if (!allowForceReconcile) {
+                return res.status(409).json({
+                    success: false,
+                    code: 'DELIVERY_STATUS_UNCERTAIN',
+                    message: 'Delivery state is uncertain. Please reconcile with mail logs before re-sending to avoid duplicate messages. If confirmed not delivered, retry with { reconcileAction: "FORCE_RETRY" }.',
+                    details: {
+                        replyId: targetReply.replyId,
+                        smtpMessageId: targetReply.smtpMessageId,
+                        recoveryPath: 'Pass { reconcileAction: "FORCE_RETRY" } after verifying mail logs.',
+                    },
+                });
+            }
+        }
+        // 1. Durable operation identifier for the retry
+        const retryOpKey = `retry:${targetReply.replyId}`;
+        if (exports.inFlightReplies.has(retryOpKey)) {
+            return res.status(409).json({
+                success: false,
+                code: 'RETRY_IN_PROGRESS',
+                message: 'A retry for this reply is already currently in progress.',
+            });
+        }
+        exports.inFlightReplies.add(retryOpKey);
+        activeRetryKey = retryOpKey;
+        // 2. Database-backed retry claim to protect across concurrent workers
+        retryClaimId = 'c_' + crypto_1.default.createHash('sha256').update(retryOpKey).digest('hex').substring(0, 22);
+        try {
+            if (client_1.prisma?.auditLog?.create) {
+                await client_1.prisma.auditLog.create({
+                    data: {
+                        id: retryClaimId,
+                        adminEmail: callerEmail,
+                        action: 'INQUIRY_RETRY_CLAIM',
+                        targetModel: 'ContactInquiry',
+                        targetId: id,
+                        details: JSON.stringify({
+                            r: targetReply.replyId,
+                            exp: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+                            st: 'CLAIMED',
+                        }),
+                    },
+                });
+            }
+        }
+        catch (claimErr) {
+            if (claimErr?.code === 'P2002' ||
+                claimErr?.message?.includes('Unique constraint') ||
+                claimErr?.message?.includes('Duplicate entry')) {
+                return res.status(409).json({
+                    success: false,
+                    code: 'RETRY_IN_PROGRESS',
+                    message: 'Another worker is already currently executing a retry for this reply.',
+                });
+            }
+            return res.status(500).json({
+                success: false,
+                code: 'DATABASE_ERROR',
+                message: 'Failed to record retry claim: ' + (claimErr?.message || 'Database error'),
+            });
+        }
+        // 3. Persist SENDING state before sending
+        targetReply.deliveryStatus = 'SENDING';
+        targetReply.sentAt = new Date();
+        inquiry.adminReplies = replies;
+        inquiry.replies = replies;
+        await inquiry.save();
         let emailSent = false;
-        let emailError;
+        let emailAccepted = false;
+        let smtpMessageId;
+        let deliveryError;
         try {
             const emailResult = await (0, emailService_1.sendMail)({
                 to: inquiry.email,
                 subject: `Re: Your Inquiry ${inquiry.inquiryId || id} - Wonderful Jodi Support`,
-                text: `Dear ${inquiry.name},\n\n${lastReply.replyText}\n\nBest regards,\nWonderful Jodi Support Team`,
-                html: `<p>Dear ${inquiry.name},</p><p>${lastReply.replyText.replace(/\n/g, '<br/>')}</p><p>Best regards,<br/><strong>Wonderful Jodi Support Team</strong></p>`,
+                text: `Dear ${inquiry.name},\n\n${targetReply.replyText}\n\nBest regards,\nWonderful Jodi Support Team`,
+                html: `<p>Dear ${inquiry.name},</p><p>${targetReply.replyText.replace(/\n/g, '<br/>')}</p><p>Best regards,<br/><strong>Wonderful Jodi Support Team</strong></p>`,
             });
-            emailSent = emailResult.success;
-            if (!emailResult.success) {
-                emailError = emailResult.messageId || 'Email delivery failed';
+            if (emailResult.success) {
+                emailSent = true;
+                emailAccepted = true;
+                smtpMessageId = emailResult.messageId;
+                targetReply.deliveryStatus = 'SENT';
+                targetReply.emailSent = true;
+                targetReply.smtpMessageId = emailResult.messageId;
+                targetReply.deliveryError = undefined;
+                targetReply.emailError = undefined;
+            }
+            else {
+                const classified = classifySmtpOutcome(emailResult);
+                deliveryError = classified.message;
+                targetReply.deliveryStatus = classified.isUncertain ? 'DELIVERY_UNKNOWN' : 'FAILED';
+                targetReply.emailSent = false;
+                targetReply.deliveryError = deliveryError;
+                targetReply.emailError = deliveryError;
             }
         }
         catch (mailErr) {
-            emailSent = false;
-            emailError = mailErr?.message || 'SMTP delivery error';
+            const classified = classifySmtpOutcome(mailErr);
+            deliveryError = classified.message;
+            targetReply.deliveryStatus = classified.isUncertain ? 'DELIVERY_UNKNOWN' : 'FAILED';
+            targetReply.emailSent = false;
+            targetReply.deliveryError = deliveryError;
+            targetReply.emailError = deliveryError;
         }
-        lastReply.emailSent = emailSent;
-        lastReply.emailError = emailError;
         inquiry.adminReplies = replies;
-        await inquiry.save();
+        try {
+            await inquiry.save();
+        }
+        catch (persistErr) {
+            if (emailAccepted) {
+                targetReply.deliveryStatus = 'DELIVERY_UNKNOWN';
+                return res.status(500).json({
+                    success: false,
+                    code: 'EMAIL_ACCEPTED_PERSISTENCE_FAILED',
+                    message: 'Email was accepted by SMTP server on retry, but updating inquiry delivery record failed.',
+                    email: {
+                        status: 'SENT',
+                        smtpMessageId,
+                    },
+                    persistence: {
+                        status: 'FAILED',
+                        replyId: targetReply.replyId,
+                        error: persistErr?.message || 'Database persistence error',
+                    },
+                    data: inquiry,
+                });
+            }
+            throw persistErr;
+        }
+        // Clean up retry claim upon completion
+        if (retryClaimId && client_1.prisma?.auditLog?.delete) {
+            try {
+                await client_1.prisma.auditLog.delete({ where: { id: retryClaimId } });
+            }
+            catch (e) {
+                // Non-fatal
+            }
+        }
         await recordSuperAdminAudit({
             adminUser: callerId,
             adminEmail: callerEmail,
             action: 'INQUIRY_EMAIL_RETRY',
             targetModel: 'ContactInquiry',
             targetId: id,
-            details: JSON.stringify({ emailSent, emailError }),
+            details: JSON.stringify({
+                replyId: targetReply.replyId,
+                deliveryStatus: targetReply.deliveryStatus,
+                smtpMessageId,
+                deliveryError,
+            }),
             ipAddress: req.ip,
         });
         res.json({
             success: emailSent,
             message: emailSent
-                ? 'Email delivered successfully on retry.'
-                : `Email retry failed: ${emailError || 'SMTP error'}`,
+                ? 'Email accepted by SMTP on retry.'
+                : `Email retry ${targetReply.deliveryStatus === 'DELIVERY_UNKNOWN' ? 'outcome is uncertain' : 'failed'}: ${deliveryError || 'SMTP error'}`,
             data: inquiry,
         });
     }
     catch (error) {
         next(error);
+    }
+    finally {
+        if (activeRetryKey) {
+            exports.inFlightReplies.delete(activeRetryKey);
+        }
     }
 }
 //# sourceMappingURL=superAdminController.js.map

@@ -657,7 +657,7 @@ export default function UserNotificationsPage() {
                               {notif.metadata?.profileId && (
                                 <Link
                                   href={`/profile/${notif.metadata.profileId}`}
-                                  onClick={(e) => e.stopPropagation()}
+                                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                   className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-rose-200 text-[#E51F3E] bg-rose-50/60 hover:bg-rose-100 text-xs font-bold transition"
                                 >
                                   <span>View Profile</span>
@@ -720,7 +720,7 @@ export default function UserNotificationsPage() {
 
                               <Link
                                 href="/profile#device-sessions"
-                                onClick={(e) => e.stopPropagation()}
+                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                 className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-[#E51F3E] hover:underline px-2 py-1"
                               >
                                 <span>Manage Sessions</span>
@@ -740,7 +740,7 @@ export default function UserNotificationsPage() {
                       {isProfileViewLocked ? (
                         <button
                           type="button"
-                          onClick={(e) => {
+                          onClick={(e: React.MouseEvent) => {
                             e.stopPropagation();
                             router.push('/membership?feature=profile-viewers');
                           }}
@@ -752,7 +752,7 @@ export default function UserNotificationsPage() {
                       ) : isProfileView && notif.metadata?.visitorProfileId ? (
                         <Link
                           href={`/profile/${notif.metadata.visitorProfileId}`}
-                          onClick={(e) => e.stopPropagation()}
+                          onClick={(e: React.MouseEvent) => e.stopPropagation()}
                           className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#E51F3E] text-xs font-bold transition shadow-2xs border border-rose-200/70"
                         >
                           <span>View Profile</span>

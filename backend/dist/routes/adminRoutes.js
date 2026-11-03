@@ -141,6 +141,7 @@ router.get('/admins', adminController_1.getAdmins);
 router.get('/admins/:id', adminController_1.getAdminById);
 router.post('/admins', adminController_1.createAdmin);
 router.put('/admins/:id', adminController_1.updateAdmin);
+router.patch('/admins/:id', adminController_1.updateAdmin);
 router.delete('/admins/:id', adminController_1.deleteAdmin);
 // 11. Platform Settings & Maintenance Mode
 router.get('/settings', adminController_1.getSettings);

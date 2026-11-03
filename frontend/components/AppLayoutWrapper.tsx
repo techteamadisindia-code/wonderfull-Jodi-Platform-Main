@@ -10,38 +10,65 @@ import { Footer } from './Footer';
 
 function LayoutContent({ children }: { children: React.ReactNode }) {
   const { maintenance } = useMaintenance();
-  const pathname = usePathname();
+  const pathname = usePathname() || '';
 
-  // Check route types
-  const isAdminRoute = pathname?.startsWith('/admin');
-  const isAuthRoute = [
+  // 1. Identify Route Types
+  const isAdminRoute = pathname.startsWith('/admin');
+  const isAdminAuthRoute = [
+    '/admin/login',
+    '/admin/forgot-password',
+    '/admin/reset-password',
+  ].some((r) => pathname === r || pathname.startsWith(`${r}/`));
+
+  const isPublicAuthRoute = [
     '/login',
     '/forgot-password',
     '/reset-password',
     '/register',
-  ].some((route) => pathname === route || pathname?.startsWith(`${route}/`));
+  ].some((r) => pathname === r || pathname.startsWith(`${r}/`));
 
-  // If maintenance mode is ON and visitor is not accessing admin panel or auth pages, show maintenance page
-  if (maintenance?.enabled && !isAdminRoute) {
-    return <MaintenancePage />;
-  }
+  const isMaintenanceActive = Boolean(maintenance?.enabled);
+  const isBannerActive = Boolean(maintenance?.banner);
 
-  // Admin routes: Render admin content directly (handled by AdminSidebar/AdminHeader)
+  // 2. ADMIN ROUTES
   if (isAdminRoute) {
+    // Admin auth & recovery routes are ALWAYS accessible so administrators can log in or recover
+    if (isAdminAuthRoute) {
+      return <>{children}</>;
+    }
+
+    // For other admin routes:
+    // When full maintenance mode is active:
+    // Backend maintenanceMiddleware authoritatively gates APIs. If allowAdminAccess === false,
+    // ordinary admins receive HTTP 503 while the Primary Super Admin retains full recovery access.
     return <>{children}</>;
   }
 
-  // Standalone Authentication routes: Render clean full-viewport auth screen without public Header/Footer
-  if (isAuthRoute) {
-    return <div className="min-h-screen min-h-[100dvh] flex flex-col">{children}</div>;
+  // 3. FULL MAINTENANCE MODE (PUBLIC VISITOR VIEW)
+  if (isMaintenanceActive) {
+    // During full maintenance mode, all public visitors (including public auth routes)
+    // receive the full-screen MaintenancePage. The announcement banner is NOT rendered separately.
+    return <MaintenancePage />;
   }
 
-  // Public Website Layout: Includes MaintenanceBanner, Navbar, Main Content, and Footer
+  // 4. PUBLIC AUTH ROUTES (NORMAL & BANNER-ONLY MODE)
+  if (isPublicAuthRoute) {
+    return (
+      <div className="min-h-screen min-h-[100dvh] flex flex-col">
+        {isBannerActive && <MaintenanceBanner />}
+        {children}
+      </div>
+    );
+  }
+
+  // 5. PUBLIC WEBSITE (NORMAL & BANNER-ONLY MODE)
+  // When isBannerActive === true: renders MaintenanceBanner + Navbar + page content + Footer
+  // When isBannerActive === false: MaintenanceBanner returns null, rendering Navbar + page content + Footer
   return (
     <>
       <MaintenanceBanner />
       <Navbar />
-      <div className="flex-1 flex flex-col">{children}</div>
+      <main className="flex-1 flex flex-col">{children}</main>
       <Footer />
     </>
   );

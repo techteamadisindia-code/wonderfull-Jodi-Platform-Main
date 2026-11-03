@@ -276,103 +276,244 @@ async function getContactRequests(req, res, next) {
         next(error);
     }
 }
+const inFlightContactAccepts = new Set();
 /**
  * 3. PATCH /api/contact-requests/:id/accept
- * Recipient accepts contact request -> Unlocks contact details & deducts 1 credit from requester
+ * Recipient accepts contact request -> Unlocks contact details & deducts 1 credit from requester atomically
  */
 async function acceptContactRequest(req, res, next) {
+    const { id } = req.params;
+    if (!id || !prismaBridge_1.default.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ success: false, message: 'Invalid request ID' });
+    }
+    const userId = req.user?.userId;
+    if (!userId) {
+        return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+    // Fast in-process concurrency guard
+    if (inFlightContactAccepts.has(id)) {
+        return res.status(409).json({
+            success: false,
+            message: 'Contact request acceptance is currently in progress.',
+        });
+    }
+    inFlightContactAccepts.add(id);
     try {
-        const userId = req.user?.userId;
-        if (!userId) {
-            return res.status(401).json({ success: false, message: 'Authentication required' });
-        }
-        const { id } = req.params;
-        if (!prismaBridge_1.default.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ success: false, message: 'Invalid request ID' });
-        }
-        const contactRequest = await ContactRequest_1.ContactRequest.findById(id);
-        if (!contactRequest) {
-            return res.status(404).json({ success: false, message: 'Contact request not found' });
-        }
-        // Security: Only recipient can accept
-        const recipientId = String(contactRequest.recipient?._id ||
-            contactRequest.recipient?.id ||
-            contactRequest.recipient ||
-            contactRequest.recipientId ||
-            '');
-        if (!recipientId || recipientId !== String(userId)) {
-            return res.status(403).json({
+        // Distributed database-level ACID transaction via prisma.$transaction
+        if (typeof client_1.prisma?.$transaction !== 'function') {
+            return res.status(500).json({
                 success: false,
-                message: 'You are not authorized to accept this contact request.',
+                code: 'TRANSACTION_UNAVAILABLE',
+                message: 'Database does not support interactive transactions required for contact acceptance.',
             });
         }
-        if (contactRequest.status === 'ACCEPTED') {
+        const txResult = await client_1.prisma.$transaction(async (tx) => {
+            // Require transaction-scoped delegates; fail safely if any are missing
+            if (!tx?.contactRequest?.findUnique || !tx?.subscription?.findFirst || !tx?.contactAccessLog?.create) {
+                const delegateErr = new Error('Database transaction delegates are missing required models for contact acceptance.');
+                delegateErr.statusCode = 500;
+                delegateErr.code = 'TRANSACTION_DELEGATES_UNAVAILABLE';
+                throw delegateErr;
+            }
+            // 1. Fetch fresh contact request row inside transaction using transaction delegate only
+            const cr = await tx.contactRequest.findUnique({ where: { id } });
+            if (!cr) {
+                const notFoundErr = new Error('Contact request not found');
+                notFoundErr.statusCode = 404;
+                throw notFoundErr;
+            }
+            // Security: Only recipient can accept
+            const crRecipientId = String(cr.recipientId || cr.recipient?._id || cr.recipient?.id || cr.recipient || '');
+            if (!crRecipientId || crRecipientId !== String(userId)) {
+                const forbiddenErr = new Error('You are not authorized to accept this contact request.');
+                forbiddenErr.statusCode = 403;
+                throw forbiddenErr;
+            }
+            // If already accepted, return existing accepted record without double-deduction
+            if (cr.status === 'ACCEPTED') {
+                return {
+                    alreadyAccepted: true,
+                    contactRequest: cr,
+                    requesterId: String(cr.requesterId || cr.requester?._id || cr.requester || ''),
+                };
+            }
+            if (cr.status === 'DECLINED' || cr.status === 'CANCELLED') {
+                const invalidStatusErr = new Error(`Cannot accept a contact request with status ${cr.status}.`);
+                invalidStatusErr.statusCode = 400;
+                throw invalidStatusErr;
+            }
+            const requesterId = String(cr.requesterId || cr.requester?._id || cr.requester || '');
+            // 2. Credit check and atomic deduction if not already deducted
+            let isUnlimited = false;
+            if (!cr.contactCreditDeducted) {
+                const requesterSub = await tx.subscription.findFirst({
+                    where: {
+                        userId: requesterId,
+                        status: 'ACTIVE',
+                    },
+                    orderBy: { createdAt: 'desc' },
+                });
+                if (!requesterSub) {
+                    const noSubErr = new Error('The requester does not have an active subscription.');
+                    noSubErr.statusCode = 403;
+                    noSubErr.code = 'NO_ACTIVE_SUBSCRIPTION';
+                    throw noSubErr;
+                }
+                const planSlug = (requesterSub.planId || requesterSub.plan || requesterSub.planName || '').toLowerCase();
+                isUnlimited =
+                    requesterSub.contactRequestsRemaining === -1 ||
+                        planSlug.includes('concierge') ||
+                        planSlug === 'vvip' ||
+                        requesterSub.plan === 'VVIP';
+                if (!isUnlimited) {
+                    if ((requesterSub.contactRequestsRemaining ?? 0) <= 0) {
+                        const noCreditErr = new Error('The requester has exhausted their contact request credits.');
+                        noCreditErr.statusCode = 403;
+                        noCreditErr.code = 'NO_CREDITS_REMAINING';
+                        throw noCreditErr;
+                    }
+                    const subId = String(requesterSub.id || requesterSub._id);
+                    let deductionSucceeded = false;
+                    // Conditional database update to prevent concurrency race conditions:
+                    // Parameterized query locks subscription row and decrements ONLY IF contactRequestsRemaining > 0 at execution time.
+                    if (typeof tx.$executeRaw === 'function') {
+                        const affectedRows = await tx.$executeRaw `UPDATE subscriptions SET contactRequestsRemaining = contactRequestsRemaining - 1, contactRequestsUsed = COALESCE(contactRequestsUsed, 0) + 1, updatedAt = CURRENT_TIMESTAMP WHERE _id = ${subId} AND contactRequestsRemaining > 0 AND status = 'ACTIVE'`;
+                        deductionSucceeded = affectedRows === 1;
+                    }
+                    else if (tx.subscription?.updateMany) {
+                        const updateResult = await tx.subscription.updateMany({
+                            where: {
+                                id: subId,
+                                status: 'ACTIVE',
+                                contactRequestsRemaining: { gt: 0 },
+                            },
+                            data: {
+                                contactRequestsRemaining: { decrement: 1 },
+                                contactRequestsUsed: { increment: 1 },
+                            },
+                        });
+                        deductionSucceeded = updateResult.count === 1;
+                    }
+                    else {
+                        const txClientErr = new Error('Database transaction client does not support atomic credit deduction.');
+                        txClientErr.statusCode = 500;
+                        txClientErr.code = 'TRANSACTION_EXECUTION_UNAVAILABLE';
+                        throw txClientErr;
+                    }
+                    if (!deductionSucceeded) {
+                        const noCreditErr = new Error('The requester has exhausted their contact request credits.');
+                        noCreditErr.statusCode = 403;
+                        noCreditErr.code = 'NO_CREDITS_REMAINING';
+                        throw noCreditErr;
+                    }
+                    // Record deduction audit log inside transaction using transaction delegate only
+                    await tx.contactAccessLog.create({
+                        data: {
+                            id: (0, client_1.generateObjectId)(),
+                            userId: requesterId,
+                            profileOwnerId: String(userId),
+                            contactRequestId: String(cr.id || cr._id),
+                            action: 'CREDIT_DEDUCTED',
+                            creditsUsed: 1,
+                            ipAddress: req.ip || '127.0.0.1',
+                        },
+                    });
+                }
+            }
+            // 3. Mark contact request accepted and unlocked inside transaction
+            let updatedCr = null;
+            const unlockDate = cr.contactUnlockedAt ? new Date(cr.contactUnlockedAt) : new Date();
+            const unlockIso = unlockDate.toISOString();
+            if (typeof tx.$executeRaw === 'function') {
+                // Parameterized write:
+                // COALESCE(contactUnlockedAt, ${unlockIso}) ensures first unlock timestamp is preserved and never overwritten.
+                // Requires affectedRows === 1 so that if the record does not exist or was already modified, transaction rolls back.
+                const crAffected = await tx.$executeRaw `UPDATE contactrequests SET status = 'ACCEPTED', contactCreditDeducted = 1, contactUnlockedAt = COALESCE(contactUnlockedAt, ${unlockIso}) WHERE _id = ${id} AND status = 'PENDING'`;
+                if (crAffected !== 1) {
+                    const updateErr = new Error('Failed to accept contact request: record not found or already modified.');
+                    updateErr.statusCode = 409;
+                    throw updateErr;
+                }
+                updatedCr = await tx.contactRequest.findUnique({ where: { id } });
+            }
+            if (!updatedCr) {
+                if (tx.contactRequest?.update) {
+                    updatedCr = await tx.contactRequest.update({
+                        where: { id },
+                        data: {
+                            status: 'ACCEPTED',
+                            contactCreditDeducted: true,
+                        },
+                    });
+                    if (updatedCr) {
+                        updatedCr.contactUnlockedAt = cr.contactUnlockedAt || unlockDate;
+                    }
+                }
+                else {
+                    const txCrErr = new Error('Database transaction client cannot update contact request.');
+                    txCrErr.statusCode = 500;
+                    throw txCrErr;
+                }
+            }
+            // 4. Record acceptance access log inside transaction using transaction delegate only
+            await tx.contactAccessLog.create({
+                data: {
+                    id: (0, client_1.generateObjectId)(),
+                    userId: String(userId),
+                    profileOwnerId: requesterId,
+                    contactRequestId: String(cr.id || cr._id),
+                    action: 'REQUEST_ACCEPTED',
+                    creditsUsed: 0,
+                    ipAddress: req.ip || '127.0.0.1',
+                },
+            });
+            return {
+                alreadyAccepted: false,
+                contactRequest: updatedCr,
+                requesterId,
+            };
+        });
+        if (txResult.alreadyAccepted) {
             return res.json({
                 success: true,
                 message: 'Contact request is already accepted.',
-                data: contactRequest,
+                data: txResult.contactRequest,
             });
         }
-        // Mark accepted
-        contactRequest.status = 'ACCEPTED';
-        contactRequest.contactUnlockedAt = new Date();
-        // Deduct 1 credit from requester atomically (if not already deducted)
-        let creditDeducted = false;
-        if (!contactRequest.contactCreditDeducted) {
-            const requesterSub = await Subscription_1.Subscription.findOne({
-                user: contactRequest.requester,
-                status: 'ACTIVE',
-            }).sort({ createdAt: -1 });
-            if (requesterSub) {
-                const planSlug = (requesterSub.planId || requesterSub.plan || '').toLowerCase();
-                const isUnlimited = planSlug.includes('concierge') || planSlug === 'vvip';
-                if (!isUnlimited) {
-                    requesterSub.contactRequestsRemaining = Math.max(0, (requesterSub.contactRequestsRemaining || 0) - 1);
-                    requesterSub.contactRequestsUsed = (requesterSub.contactRequestsUsed || 0) + 1;
-                    await requesterSub.save();
-                    creditDeducted = true;
-                }
-                // Log deduction
-                await ContactAccessLog_1.ContactAccessLog.create({
-                    user: contactRequest.requester,
-                    profileOwner: userId,
-                    contactRequest: contactRequest._id,
-                    action: 'CREDIT_DEDUCTED',
-                    creditsUsed: isUnlimited ? 0 : 1,
-                    ipAddress: req.ip || '127.0.0.1',
-                }).catch(() => { });
-            }
-            contactRequest.contactCreditDeducted = true;
+        // Notify requester (outside transaction so notification errors don't roll back the transaction)
+        try {
+            const recipientProfile = await Profile_1.Profile.findOne({ user: userId });
+            const recipientName = recipientProfile?.displayName || 'The candidate';
+            await Notification_1.Notification.create({
+                user: txResult.requesterId,
+                type: 'INTEREST',
+                title: 'Contact Request Accepted',
+                message: `Dr. ${recipientName} has accepted your contact request! You can now view their verified phone and contact details.`,
+                referenceId: id,
+                read: false,
+            });
         }
-        await contactRequest.save();
-        // Log acceptance
-        await ContactAccessLog_1.ContactAccessLog.create({
-            user: userId,
-            profileOwner: contactRequest.requester,
-            contactRequest: contactRequest._id,
-            action: 'REQUEST_ACCEPTED',
-            creditsUsed: 0,
-            ipAddress: req.ip || '127.0.0.1',
-        }).catch(() => { });
-        // Notify requester
-        const recipientProfile = await Profile_1.Profile.findOne({ user: userId });
-        const recipientName = recipientProfile?.displayName || 'The candidate';
-        await Notification_1.Notification.create({
-            user: contactRequest.requester,
-            type: 'INTEREST',
-            title: 'Contact Request Accepted',
-            message: `Dr. ${recipientName} has accepted your contact request! You can now view their verified phone and contact details.`,
-            referenceId: contactRequest._id,
-            read: false,
-        }).catch(() => { });
+        catch (notifErr) {
+            console.error('[ContactRequest] Non-critical notification error on acceptance:', notifErr);
+        }
         res.json({
             success: true,
             message: 'Contact request accepted. Contact details are now accessible to both members.',
-            data: contactRequest,
+            data: txResult.contactRequest,
         });
     }
     catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({
+                success: false,
+                code: error.code,
+                message: error.message,
+            });
+        }
         next(error);
+    }
+    finally {
+        inFlightContactAccepts.delete(id);
     }
 }
 /**

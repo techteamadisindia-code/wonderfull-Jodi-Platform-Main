@@ -10,6 +10,7 @@ const Profile_1 = require("../models/Profile");
 const User_1 = require("../models/User");
 const Block_1 = require("../models/Block");
 const securityUtils_1 = require("../utils/securityUtils");
+const permissionUtils_1 = require("../utils/permissionUtils");
 const profileController_1 = require("./profileController");
 async function searchProfiles(req, res, next) {
     try {
@@ -22,7 +23,8 @@ async function searchProfiles(req, res, next) {
         const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : cookieToken;
         if (token) {
             try {
-                const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026');
+                const secret = (0, permissionUtils_1.getSafeJwtSecret)();
+                const decoded = secret ? jsonwebtoken_1.default.verify(token, secret) : null;
                 if (decoded?.userId || decoded?.id) {
                     currentUserId = decoded.userId || decoded.id;
                     try {

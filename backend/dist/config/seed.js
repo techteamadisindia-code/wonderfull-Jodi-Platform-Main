@@ -37,6 +37,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ensureAdminUserExists = ensureAdminUserExists;
+exports.ensurePlatformSettingsExist = ensurePlatformSettingsExist;
+exports.initializeMasterDataExplicitly = initializeMasterDataExplicitly;
 exports.seedInitialData = seedInitialData;
 exports.seedMembershipPlansIfEmpty = seedMembershipPlansIfEmpty;
 const bcrypt_1 = __importDefault(require("bcrypt"));
@@ -46,12 +48,23 @@ const Registration_1 = require("../models/Registration");
 const masterDataImporter_1 = require("../services/masterDataImporter");
 const MembershipPlan_1 = require("../models/MembershipPlan");
 const Admin_1 = require("../models/Admin");
+const Setting_1 = require("../models/Setting");
 async function ensureAdminUserExists() {
     try {
-        const adminEmail = 'admin@wonderfuljodi.com';
+        const adminEmail = process.env.ADMIN_EMAIL || 'admin@wonderfuljodi.com';
         let admin = await User_1.User.findOne({ email: adminEmail });
-        const hashedPassword = await bcrypt_1.default.hash('Password123!', 12);
         if (!admin) {
+            const initialPassword = process.env.ADMIN_INITIAL_PASSWORD;
+            if (!initialPassword) {
+                console.warn(`⚠️ Administrator account does not exist (${adminEmail}) and ADMIN_INITIAL_PASSWORD is not configured. ` +
+                    `Refusing to initialize administrator with a hardcoded default password. Set ADMIN_INITIAL_PASSWORD in your secure environment to bootstrap the account.`);
+                return;
+            }
+            if (initialPassword.length < 12) {
+                console.warn(`⚠️ ADMIN_INITIAL_PASSWORD is too short (minimum 12 characters required for initial administrator bootstrap). Refusing to initialize account.`);
+                return;
+            }
+            const hashedPassword = await bcrypt_1.default.hash(initialPassword, 12);
             admin = await User_1.User.create({
                 fullName: 'System Administrator',
                 email: adminEmail,
@@ -63,17 +76,12 @@ async function ensureAdminUserExists() {
                 isActive: true,
                 status: 'Active',
             });
-            console.log('✅ Created default admin user: admin@wonderfuljodi.com / Password123!');
+            console.log(`✅ Initialized administrator account: ${adminEmail}`);
         }
         else {
-            admin.role = 'admin';
-            admin.isActive = true;
-            admin.status = 'Active';
-            admin.password = hashedPassword;
-            admin.verified = true;
-            admin.verificationStatus = 'VERIFIED';
-            await admin.save();
-            console.log('✅ Verified/Updated default admin user: admin@wonderfuljodi.com');
+            // PRESERVE EXISTING ADMINISTRATOR:
+            // NEVER reset password, never alter status, verificationStatus, or authentication state.
+            console.log(`✅ Verified existing administrator account: ${adminEmail}`);
         }
         const adminRecord = await Admin_1.Admin.findOne({ user: admin._id });
         if (!adminRecord) {
@@ -87,14 +95,108 @@ async function ensureAdminUserExists() {
         console.error('Failed to ensure default admin user exists:', err);
     }
 }
+/**
+ * Ensures platform default settings exist in an idempotent, non-destructive manner.
+ *
+ * CRITICAL SAFETY RULES:
+ * 1. If settings already exist, operational flags (maintenanceMode, allowNewRegistrations,
+ *    requireEmailVerification, requireManualProfileApproval, razorpayLiveMode, allowAdminAccess)
+ *    are NEVER modified or reset to defaults.
+ * 2. Only missing non-operational baseline metadata (siteName, contact info, limits) is filled in if null/undefined.
+ * 3. If no settings document exists at all, creates an initial baseline record.
+ */
+async function ensurePlatformSettingsExist() {
+    try {
+        const existing = await Setting_1.Setting.findOne({});
+        if (existing) {
+            // PRESERVE OPERATIONAL SETTINGS:
+            // NEVER overwrite maintenanceMode, allowNewRegistrations, requireEmailVerification,
+            // requireManualProfileApproval, razorpayLiveMode, or allowAdminAccess.
+            let hasMissingFields = false;
+            const nonOperationalDefaults = {
+                siteName: 'Wonderful Jodi',
+                supportEmail: 'support@wonderfuljodi.com',
+                supportPhone: '+91 096075 59547',
+                tollFreeNumber: '+91 096075 59547',
+                officeAddress: 'A303, Gera Imperium Gateway, Nashik Phata, PCMC, Pune, Maharashtra 411034',
+                currency: 'INR',
+                minAgeMale: 21,
+                minAgeFemale: 18,
+                maxPhotoUploadLimit: 6,
+            };
+            for (const [key, defaultVal] of Object.entries(nonOperationalDefaults)) {
+                if (existing[key] === undefined || existing[key] === null) {
+                    existing[key] = defaultVal;
+                    hasMissingFields = true;
+                }
+            }
+            if (hasMissingFields && typeof existing.save === 'function') {
+                await existing.save();
+                console.log('✅ Backfilled missing non-operational platform settings without altering operational values');
+            }
+            else {
+                console.log('✅ Verified existing platform settings (operational settings preserved)');
+            }
+            return;
+        }
+        // No settings exist at all: create initial baseline
+        await Setting_1.Setting.create({
+            siteName: 'Wonderful Jodi',
+            supportEmail: 'support@wonderfuljodi.com',
+            supportPhone: '+91 096075 59547',
+            tollFreeNumber: '+91 096075 59547',
+            officeAddress: 'A303, Gera Imperium Gateway, Nashik Phata, PCMC, Pune, Maharashtra 411034',
+            maintenanceMode: false,
+            allowNewRegistrations: true,
+            requireEmailVerification: false,
+            requireManualProfileApproval: true,
+            currency: 'INR',
+            razorpayLiveMode: false,
+            minAgeMale: 21,
+            minAgeFemale: 18,
+            maxPhotoUploadLimit: 6,
+        });
+        console.log('✅ Initialized default platform settings');
+    }
+    catch (err) {
+        console.error('Failed to ensure default platform settings exist:', err);
+    }
+}
+/**
+ * Explicit, independently reviewed master-data and membership plan initialization.
+ * Dedicated for explicit administrative / deployment execution.
+ * NEVER executed implicitly through the demo-seeding path in production.
+ */
+async function initializeMasterDataExplicitly() {
+    console.log('[MasterData] Explicit master-data initialization initiated...');
+    await (0, masterDataImporter_1.seedMasterDataIfEmpty)();
+    await seedMembershipPlansIfEmpty();
+}
 async function seedInitialData() {
     try {
+        const isProduction = process.env.NODE_ENV === 'production';
+        // STRICT PRODUCTION GUARD:
+        // In production mode, demo seeding is NEVER permitted under any circumstances.
+        // Even if ALLOW_DEMO_SEED is set to 'true', it is strictly ignored and blocked (fail-closed).
+        // The demo-seeding entry point must check the environment before executing operations
+        // that it is not authorized to perform in production. Master-data seeding is separated
+        // and must never be implicitly triggered through the demo-seeding path.
+        if (isProduction) {
+            console.log('🔒 Production mode: Demo users, demo profiles, sample transactions, and implicit master-data seeding are strictly disabled (fail-closed, no override permitted).');
+            // In production, ensure essential operational baselines (admin & non-destructive settings) are safe:
+            await ensureAdminUserExists();
+            await ensurePlatformSettingsExist();
+            return;
+        }
+        // NON-PRODUCTION DEMO INITIALIZATION:
         // Ensure all location & community master data is seeded and up to date
         await (0, masterDataImporter_1.seedMasterDataIfEmpty)();
         // Ensure all dynamic membership plans are seeded
         await seedMembershipPlansIfEmpty();
-        // Ensure default admin user always exists and is up to date
+        // Ensure default admin user always exists and is up to date (preserves existing admin credentials)
         await ensureAdminUserExists();
+        // Ensure default settings exist without resetting existing operational values
+        await ensurePlatformSettingsExist();
         const userCount = await User_1.User.countDocuments();
         let usersList = [];
         let createdUsers = [];
@@ -566,87 +668,85 @@ async function seedInitialData() {
             }
         }
         else {
-            usersList = await User_1.User.find();
+            // If existing users exist, do not fetch them to attach fake transactions
+            console.log('Existing users detected. Demo enrichment and fake transaction seeding skipped to protect accounts.');
+            return;
         }
-        const allUsers = usersList.length > 0 ? usersList : createdUsers;
-        const adminUser = allUsers.find((u) => u.role === 'admin');
-        const normalUsers = allUsers.filter((u) => u.role === 'user');
+        // At this point, createdUsers contains only the newly seeded demo users.
+        // Fake transactions, demo enrichment, and verifications MUST ONLY attach to newly created demo users.
+        if (createdUsers.length === 0) {
+            return;
+        }
+        const adminUser = createdUsers.find((u) => u.role === 'admin');
+        const normalUsers = createdUsers.filter((u) => u.role === 'user');
         // Enrich demo Priya Sharma profile with doctor, horoscope, and lifestyle data
-        const priyaUser = allUsers.find((u) => u.email === 'priya.sharma@example.com');
-        if (priyaUser) {
-            await Profile_1.Profile.findOneAndUpdate({ user: priyaUser._id }, {
-                $set: {
-                    medicalCollege: 'AIIMS New Delhi',
-                    medicalUniversity: 'All India Institute of Medical Sciences',
-                    graduationYear: '2019',
-                    additionalQualification: 'Fellowship in Dermatosurgery, 2021',
-                    medicalCouncil: 'Karnataka Medical Council / MCI',
-                    registrationState: 'Karnataka',
-                    registrationYear: '2019',
-                    medicalRegistrationNumber: 'KMC-2019-74892',
-                    medicalExperience: '6+ Years Experience',
-                    currentHospital: 'Apollo Hospitals, Bengaluru',
-                    currentRole: 'Senior Consultant Dermatologist',
-                    workType: 'Full-Time Consultant',
-                    currentlyPracticing: true,
-                    nativePlace: 'Jaipur, Rajasthan',
-                    familyStatus: 'Upper Middle Class',
-                    familyValues: 'Moderate',
-                    familyLocation: 'Bengaluru / Jaipur',
-                    fatherOccupation: 'Senior Administrative Officer (Retd.)',
-                    motherOccupation: 'College Professor',
-                    siblings: '1 Younger Brother (Radiologist)',
-                    profileManagedBy: 'Self',
-                    horoscope: {
-                        timeOfBirth: '07:45 AM',
-                        placeOfBirth: 'Jaipur, Rajasthan',
-                        rashi: 'Tula (Libra)',
-                        nakshatra: 'Chitra',
-                        lagna: 'Vrishabha (Taurus)',
-                        manglik: 'Non-Manglik',
-                        gotra: 'Kashyap',
-                        horoscopeDocument: '',
+        // SAFETY: Only executed in non-production environments AND only if Priya was just created in this run.
+        // In production or if Priya pre-existed, this block is strictly skipped.
+        if (!isProduction) {
+            const priyaUser = createdUsers.find((u) => u.email === 'priya.sharma@example.com');
+            if (priyaUser) {
+                await Profile_1.Profile.findOneAndUpdate({ user: priyaUser._id }, {
+                    $set: {
+                        medicalCollege: 'AIIMS New Delhi',
+                        medicalUniversity: 'All India Institute of Medical Sciences',
+                        graduationYear: '2019',
+                        additionalQualification: 'Fellowship in Dermatosurgery, 2021',
+                        medicalCouncil: 'Karnataka Medical Council / MCI',
+                        registrationState: 'Karnataka',
+                        registrationYear: '2019',
+                        medicalRegistrationNumber: 'KMC-2019-74892',
+                        medicalExperience: '6+ Years Experience',
+                        currentHospital: 'Apollo Hospitals, Bengaluru',
+                        currentRole: 'Senior Consultant Dermatologist',
+                        workType: 'Full-Time Consultant',
+                        currentlyPracticing: true,
+                        nativePlace: 'Jaipur, Rajasthan',
+                        familyStatus: 'Upper Middle Class',
+                        familyValues: 'Moderate',
+                        familyLocation: 'Bengaluru / Jaipur',
+                        fatherOccupation: 'Senior Administrative Officer (Retd.)',
+                        motherOccupation: 'College Professor',
+                        siblings: '1 Younger Brother (Radiologist)',
+                        profileManagedBy: 'Self',
+                        horoscope: {
+                            timeOfBirth: '07:45 AM',
+                            placeOfBirth: 'Jaipur, Rajasthan',
+                            rashi: 'Tula (Libra)',
+                            nakshatra: 'Chitra',
+                            lagna: 'Vrishabha (Taurus)',
+                            manglik: 'Non-Manglik',
+                            gotra: 'Kashyap',
+                            horoscopeDocument: '',
+                        },
+                        lifestyleInterests: {
+                            diet: 'Vegetarian',
+                            smoking: 'Non-Smoker',
+                            alcohol: 'Non-Drinker',
+                            exercise: 'Yoga & Morning Walks',
+                            hobbies: ['Classical Music', 'Traveling', 'Photography', 'Reading'],
+                            travel: ['Hill Stations', 'Historic Temples'],
+                            music: ['Indian Classical', 'Sufi', 'Acoustic'],
+                            reading: ['Medical Literature', 'Philosophy'],
+                            sports: ['Badminton', 'Swimming'],
+                            languages: ['English', 'Hindi', 'Marathi'],
+                            pets: 'Cat Lover',
+                            otherInterests: 'Art & Cultural Festivals',
+                        },
                     },
-                    lifestyleInterests: {
-                        diet: 'Vegetarian',
-                        smoking: 'Non-Smoker',
-                        alcohol: 'Non-Drinker',
-                        exercise: 'Yoga & Morning Walks',
-                        hobbies: ['Classical Music', 'Traveling', 'Photography', 'Reading'],
-                        travel: ['Hill Stations', 'Historic Temples'],
-                        music: ['Indian Classical', 'Sufi', 'Acoustic'],
-                        reading: ['Medical Literature', 'Philosophy'],
-                        sports: ['Badminton', 'Swimming'],
-                        languages: ['English', 'Hindi', 'Marathi'],
-                        pets: 'Cat Lover',
-                        otherInterests: 'Art & Cultural Festivals',
-                    },
-                },
-            });
-        }
+                });
+            }
+        } // end !isProduction block for Priya Sharma enrichment
         // 1. Seed Admin Document
         const { Admin } = await Promise.resolve().then(() => __importStar(require('../models/Admin')));
         if (adminUser) {
-            await Admin.findOneAndUpdate({ user: adminUser._id }, { permissions: ['all', 'users', 'profiles', 'verifications', 'memberships', 'payments', 'reports', 'settings', 'admins'] }, { upsert: true, new: true });
+            const existingAdmin = await Admin.findOne({ user: adminUser._id });
+            if (!existingAdmin) {
+                await Admin.create({
+                    user: adminUser._id,
+                    permissions: ['all', 'users', 'profiles', 'verifications', 'memberships', 'payments', 'reports', 'settings', 'admins'],
+                });
+            }
         }
-        // 2. Seed Default Settings
-        const { Setting } = await Promise.resolve().then(() => __importStar(require('../models/Setting')));
-        await Setting.findOneAndUpdate({}, {
-            siteName: 'Wonderful Jodi',
-            supportEmail: 'support@wonderfuljodi.com',
-            supportPhone: '+91 096075 59547',
-            tollFreeNumber: '+91 096075 59547',
-            officeAddress: 'A303, Gera Imperium Gateway, Nashik Phata, PCMC, Pune, Maharashtra 411034',
-            maintenanceMode: false,
-            allowNewRegistrations: true,
-            requireEmailVerification: false,
-            requireManualProfileApproval: true,
-            currency: 'INR',
-            razorpayLiveMode: false,
-            minAgeMale: 21,
-            minAgeFemale: 18,
-            maxPhotoUploadLimit: 6,
-        }, { upsert: true, new: true });
         // 3. Seed Verifications
         const { Verification } = await Promise.resolve().then(() => __importStar(require('../models/Verification')));
         if (normalUsers.length >= 4 && (await Verification.countDocuments()) === 0) {
@@ -1187,11 +1287,7 @@ async function seedInitialData() {
             ];
             await Registration_1.Registration.insertMany(demoRegistrations, { ordered: false });
         }
-        console.log(`Successfully verified and seeded ${allUsers.length} users, profiles, subscriptions, verifications, daily visits, and platform settings!`);
-        console.log('Demo Login Credentials:');
-        console.log('  User:  priya.sharma@example.com / Password123!');
-        console.log('  User:  rohan.mehta@example.com  / Password123!');
-        console.log('  Admin: admin@wonderfuljodi.com  / Password123!');
+        console.log(`Successfully verified and seeded ${createdUsers.length} users, profiles, subscriptions, verifications, daily visits, and platform settings.`);
     }
     catch (error) {
         console.error('Error during database seed:', error);

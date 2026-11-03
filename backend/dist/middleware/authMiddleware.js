@@ -54,8 +54,12 @@ async function requireAuth(req, res, next) {
     if (!token) {
         return res.status(401).json({ success: false, message: 'Authentication required' });
     }
+    const secret = (0, permissionUtils_1.getSafeJwtSecret)();
+    if (!secret) {
+        console.error('[AuthMiddleware] CRITICAL: JWT_SECRET environment variable is missing in production. Failing closed.');
+        return res.status(500).json({ success: false, message: 'Authentication service configuration error' });
+    }
     try {
-        const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
         const payload = jsonwebtoken_1.default.verify(token, secret);
         req.user = payload;
         // Check account status if userId exists to prevent deactivated/deleted users from accessing routes
@@ -186,8 +190,11 @@ function optionalAuth(req, res, next) {
     if (!token) {
         return next();
     }
+    const secret = (0, permissionUtils_1.getSafeJwtSecret)();
+    if (!secret) {
+        return next();
+    }
     try {
-        const secret = process.env.JWT_SECRET ?? 'supersecret_wonderfuljodi_dev_key_2026';
         const payload = jsonwebtoken_1.default.verify(token, secret);
         req.user = payload;
     }

@@ -12,6 +12,7 @@ import {
   ExcelSheetData,
 } from '../services/dataExportService';
 import { escapeRegex, isValidObjectId } from '../utils/securityUtils';
+import { normalizeGender, getGenderQueryVariants, formatGenderDisplay } from '../utils/genderUtils';
 
 /**
  * Parse and validate MAX_EXPORT_ROWS from environment.
@@ -358,7 +359,7 @@ export function buildActiveCandidateRows(
       String(u._id),
       p.candidateId || 'Not recorded',
       p.displayName || u.fullName || 'Not recorded',
-      p.gender || u.gender || 'Not recorded',
+      formatGenderDisplay(p.gender || u.gender),
       canViewPrivateContact ? (u.email || 'Not recorded') : maskEmail(u.email),
       canViewPrivateContact ? (u.mobile || 'Not recorded') : maskMobile(u.mobile),
       formatDate(p.dob),
@@ -434,7 +435,7 @@ export function buildIncompleteRegistrationRows(
       : maskMobile(rawMobile);
 
     const genderDisplay =
-      r.gender || basic.gender || (linkedUser && linkedUser.gender) || 'Not recorded';
+      formatGenderDisplay(r.gender || basic.gender || (linkedUser && linkedUser.gender));
 
     const accountStatusDisplay = linkedUser
       ? (linkedUser.isActive ? 'Active User' : 'Inactive User')
@@ -629,18 +630,19 @@ export async function exportCandidateData(req: AuthRequest, res: Response, next:
 
       // Gender filter: check Profile records (Profile holds authoritative gender)
       if (gender && gender !== 'all') {
+        const targetGender = normalizeGender(String(gender));
         if (gender === 'not_recorded' || gender === 'Not recorded') {
           const profilesWithGender = await Profile.find({ gender: { $exists: true, $ne: null } }).select('user gender').lean();
           const recordedIds = Array.from(new Set(
             profilesWithGender
-              .filter((p: any) => p.gender && String(p.gender).trim() !== '' && String(p.gender).toLowerCase() !== 'not recorded')
+              .filter((p: any) => normalizeGender(p.gender))
               .map((p: any) => String(p.user))
               .filter(Boolean)
           ));
           userQuery._id = { $nin: recordedIds };
         } else {
-          const safeGenderRegex = new RegExp(`^${escapeRegex(String(gender))}$`, 'i');
-          const profilesWithGender = await Profile.find({ gender: safeGenderRegex }).select('user').lean();
+          const queryVariants = getGenderQueryVariants(targetGender || String(gender));
+          const profilesWithGender = await Profile.find({ gender: { $in: queryVariants } }).select('user').lean();
           const genderUserIds = Array.from(new Set(
             profilesWithGender.map((p: any) => String(p.user)).filter(Boolean)
           ));

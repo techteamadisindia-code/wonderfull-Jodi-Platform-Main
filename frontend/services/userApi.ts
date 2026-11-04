@@ -13,7 +13,7 @@ export interface UserItem {
   role: 'user' | 'admin';
   verified: boolean;
   verificationStatus: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
-  registrationStatus?: 'Complete' | 'Incomplete' | 'Pending';
+  registrationStatus?: 'Complete' | 'Completed' | 'In Progress' | 'Incomplete' | 'Pending';
   registrationId?: string | null;
   isActive: boolean;
   membershipPlan?: string;

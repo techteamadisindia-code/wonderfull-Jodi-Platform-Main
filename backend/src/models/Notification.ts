@@ -11,6 +11,8 @@ export interface INotification extends Document {
   read: boolean;
   readAt?: Date;
   metadata?: Record<string, any>;
+  idempotencyKey?: string;
+  idempotency_key?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,6 +46,7 @@ const notificationSchema = new Schema<INotification>(
     read: { type: Boolean, default: false, index: true },
     readAt: { type: Date },
     metadata: { type: Schema.Types.Mixed },
+    idempotencyKey: { type: String, unique: true, sparse: true },
   },
   { timestamps: true }
 );
@@ -52,4 +55,4 @@ const notificationSchema = new Schema<INotification>(
 notificationSchema.index({ user: 1, read: 1, createdAt: -1 });
 notificationSchema.index({ user: 1, createdAt: -1 });
 
-export const Notification = createPrismaModelAdapter<INotification>('notification', {"user":"userId","recipient":"userId","broadcast":"broadcastId"});
+export const Notification = createPrismaModelAdapter<INotification>('notification', {"user":"userId","recipient":"userId","broadcast":"broadcastId","idempotencyKey":"idempotencyKey","idempotency_key":"idempotencyKey"});

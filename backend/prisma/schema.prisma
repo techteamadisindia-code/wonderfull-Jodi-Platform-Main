@@ -435,9 +435,10 @@ model Notification {
   link        String?   @db.VarChar(500)
   read        Boolean   @default(false)
   readAt      DateTime? @map("readAt")
-  metadata    Json?
-  createdAt   DateTime  @default(now()) @map("createdAt")
-  updatedAt   DateTime  @updatedAt @map("updatedAt")
+  metadata       Json?
+  idempotencyKey String?   @unique @map("idempotency_key") @db.VarChar(200)
+  createdAt      DateTime  @default(now()) @map("createdAt")
+  updatedAt      DateTime  @updatedAt @map("updatedAt")
 
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   broadcast Broadcast? @relation(fields: [broadcastId], references: [id], onDelete: SetNull)

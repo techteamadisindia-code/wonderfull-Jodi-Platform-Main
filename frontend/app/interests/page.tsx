@@ -38,6 +38,7 @@ import {
 import { fetchMySubscription, UserSubscriptionDetails } from '../../services/membershipApi';
 import { getAuthToken } from '../../lib/api';
 import { DoctorAvatar } from '../../components/DoctorAvatar';
+import { useInterestSocket } from '../../hooks/useInterestSocket';
 
 function getAge(dob?: string | Date) {
   if (!dob) return 28;
@@ -138,6 +139,30 @@ function InterestsContent() {
   useEffect(() => {
     loadAllInterests();
   }, [loadAllInterests]);
+
+  // 3. Real-time Socket.IO: listen for interestRestored events
+  //    When the other member's client receives a push, update their list immediately.
+  useInterestSocket({
+    onInterestRestored: (payload) => {
+      const interestId = payload?.interest?._id;
+      if (!interestId) return;
+
+      // For the person who clicked "Undo Decline" (receiver/decliner):
+      // Their pessimistic update already ran — this event confirms the server round-trip.
+      // For the original sender (counterpart): update sentList item to PENDING.
+      setSentList((prev) =>
+        prev.map((item) =>
+          item._id === interestId
+            ? { ...item, status: 'PENDING' as const, canUndoDecline: false }
+            : item
+        )
+      );
+
+      // Also remove from rejectedList in case this client was the decliner and the
+      // pessimistic update hasn't fired yet (e.g. slow connection).
+      setRejectedList((prev) => prev.filter((item) => item._id !== interestId));
+    },
+  });
 
   // Handle Accept
   const handleAccept = async (interestId: string) => {

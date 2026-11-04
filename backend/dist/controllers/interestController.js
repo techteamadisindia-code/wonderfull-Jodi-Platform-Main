@@ -388,6 +388,16 @@ async function findNotificationByInterest(targetUserId, notificationType, intere
         return null;
     const cleanUserId = String(targetUserId).trim();
     const targetIdStr = String(interestId).trim();
+    const idempotencyKey = `${notificationType}:${cleanUserId}:${targetIdStr}`;
+    // 0. Fast O(1) indexed check by cross-instance idempotency key
+    try {
+        if (typeof Notification_1.Notification.findOne === 'function') {
+            const byKey = await Notification_1.Notification.findOne({ idempotencyKey });
+            if (byKey)
+                return byKey;
+        }
+    }
+    catch (_) { }
     // 1. Try findOne with safe scalar fields (user, type)
     try {
         if (typeof Notification_1.Notification.findOne === 'function') {
@@ -1096,7 +1106,8 @@ async function undoDeclineInterest(req, res, next) {
             catch (cleanErr) {
                 console.warn('[InterestController] Could not update rejection notifications:', cleanErr);
             }
-            // 11. Create notification for sender with duplicate prevention guard
+            // 11. Create notification for sender with cross-instance duplicate prevention guard
+            const idempotencyKey = `INTEREST_RESTORED:${interestSenderId}:${String(interest._id)}`;
             let restoreNotification = await findNotificationByInterest(interestSenderId, 'INTEREST_RESTORED', String(interest._id));
             if (!restoreNotification) {
                 const recipientProfile = await Profile_1.Profile.findOne({ user: userId });
@@ -1115,6 +1126,7 @@ async function undoDeclineInterest(req, res, next) {
                         actionUrl: '/interests?tab=sent',
                         link: '/interests?tab=sent',
                         read: false,
+                        idempotencyKey,
                         metadata: {
                             interestId: String(interest._id),
                             recipientUserId: userId,
@@ -1126,7 +1138,47 @@ async function undoDeclineInterest(req, res, next) {
                     });
                 }
                 catch (notifErr) {
-                    console.error('[InterestController] Failed to create restore notification (will be repaired on retry):', notifErr);
+                    // Cross-instance race condition resolution:
+                    // If another Node.js process created the notification simultaneously, a unique constraint
+                    // violation occurs (MySQL 1062, ER_DUP_ENTRY, Prisma P2002). Idempotently fetch the existing one.
+                    const isDuplicate = notifErr?.code === 1062 ||
+                        notifErr?.code === 'ER_DUP_ENTRY' ||
+                        notifErr?.code === 'P2002' ||
+                        String(notifErr?.message || '').includes('Duplicate entry') ||
+                        String(notifErr?.message || '').includes('Unique constraint');
+                    if (isDuplicate) {
+                        restoreNotification = await findNotificationByInterest(interestSenderId, 'INTEREST_RESTORED', String(interest._id));
+                    }
+                    else if (String(notifErr?.message || '').includes('Unknown column') ||
+                        String(notifErr?.message || '').includes('idempotency_key')) {
+                        // Zero-DDL fallback: if database column has not yet been migrated in production,
+                        // retry creation without idempotencyKey to prevent request interruption.
+                        try {
+                            restoreNotification = await Notification_1.Notification.create({
+                                user: interestSenderId,
+                                type: 'INTEREST_RESTORED',
+                                title: 'Interest reconsidered',
+                                message: `${recipientName} has reconsidered and restored your interest request.`,
+                                actionUrl: '/interests?tab=sent',
+                                link: '/interests?tab=sent',
+                                read: false,
+                                metadata: {
+                                    interestId: String(interest._id),
+                                    recipientUserId: userId,
+                                    recipientName,
+                                    recipientPhoto,
+                                    recipientProfileId,
+                                    type: 'INTEREST_RESTORED',
+                                },
+                            });
+                        }
+                        catch (fallbackErr) {
+                            console.error('[InterestController] Fallback notification creation failed:', fallbackErr);
+                        }
+                    }
+                    else {
+                        console.error('[InterestController] Failed to create restore notification (will be repaired on retry):', notifErr);
+                    }
                 }
             }
             // 12. Real-time Socket.IO emission
@@ -1603,19 +1655,58 @@ async function getReceivedInterests(req, res, next) {
                 console.warn('[InterestController] Error looking up attribution/withdrawn metadata:', e);
             }
         }
+        // 3. Batch block query: determine which senders are blocked (in either direction).
+        //    One batched query covers all rejected senders — no N+1.
+        let blockedSenderIds = new Set();
+        const rejectedSenderIds = interests
+            .filter((i) => i.status === 'REJECTED' || i.status === 'DECLINED')
+            .map((i) => extractEntityId(i.sender, i.senderId))
+            .filter(Boolean);
+        if (rejectedSenderIds.length > 0) {
+            try {
+                const blockRecords = await Block_1.Block.find({
+                    $or: [
+                        { blocker: userId, blockedUser: { $in: rejectedSenderIds } },
+                        { blocker: { $in: rejectedSenderIds }, blockedUser: userId },
+                    ],
+                }).select('blocker blockedUser').lean();
+                if (Array.isArray(blockRecords)) {
+                    blockRecords.forEach((b) => {
+                        const blockerId = extractEntityId(b.blocker);
+                        const blockedUser = extractEntityId(b.blockedUser);
+                        // Add the other party's ID (the sender, relative to the authenticated user)
+                        if (blockerId === String(userId)) {
+                            if (blockedUser)
+                                blockedSenderIds.add(blockedUser);
+                        }
+                        else {
+                            if (blockerId)
+                                blockedSenderIds.add(blockerId);
+                        }
+                    });
+                }
+            }
+            catch (blockErr) {
+                console.warn('[InterestController] Non-fatal: Could not query block records for eligibility check:', blockErr);
+            }
+        }
         const enriched = interests.map((i) => {
             const sId = extractEntityId(i.sender, i.senderId);
             const isRejected = i.status === 'REJECTED' || i.status === 'DECLINED';
             const isWithdrawn = isRejected && withdrawnInterestIdSet.has(String(i._id));
             const hasAttribution = isRejected && authoritativelyDeclinedIdSet.has(String(i._id));
-            // Only enable undo when NOT withdrawn AND authoritatively proven to be declined by the authenticated user
-            const canUndoDecline = isRejected && !isWithdrawn && hasAttribution;
+            // Block check: suppress Undo Decline when either party has blocked the other.
+            // Keeps list endpoint consistent with the action endpoint's block enforcement.
+            const isBlocked = isRejected && sId ? blockedSenderIds.has(sId) : false;
+            // Only enable undo when NOT withdrawn, NOT blocked, AND authoritatively proven to be declined by the authenticated user
+            const canUndoDecline = isRejected && !isWithdrawn && hasAttribution && !isBlocked;
             return {
                 ...i,
                 senderProfile: sId ? profileMap.get(sId) || null : null,
                 canUndoDecline,
                 declinedByMe: canUndoDecline,
                 isWithdrawn,
+                isBlocked,
             };
         });
         res.json({ success: true, data: enriched });

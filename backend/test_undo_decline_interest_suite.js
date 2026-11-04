@@ -126,6 +126,7 @@ async function runSuite() {
   const originalProfileFindOne = Profile.findOne;
   const originalProfileFind = Profile.find;
   const originalBlockFindOne = Block.findOne;
+  const originalBlockFind = Block.find;
   const originalNotificationCreate = Notification.create;
   const originalNotificationFindOne = Notification.findOne;
   const originalNotificationFind = Notification.find;
@@ -376,9 +377,12 @@ async function runSuite() {
       });
       // Mock existing notification to verify no duplicate is created
       Notification.findOne = async () => ({ _id: 'existing-restore-notif', type: 'INTEREST_RESTORED', metadata: { interestId } });
-      Notification.find = () => ({
+      Notification.find = (q) => ({
         sort: () => ({
-          limit: async () => [{ metadata: { interestId, recipientUserId: receiverId } }],
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
         }),
       });
       let notifCreated = false;
@@ -402,9 +406,12 @@ async function runSuite() {
         status: 'ACCEPTED',
         declinedBy: receiverId,
       });
-      Notification.find = () => ({
+      Notification.find = (q) => ({
         sort: () => ({
-          limit: async () => [{ metadata: { interestId, recipientUserId: receiverId } }],
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
         }),
       });
       const req = { user: { userId: receiverId }, params: { id: interestId } };
@@ -422,9 +429,12 @@ async function runSuite() {
         status: 'CANCELLED',
         declinedBy: receiverId,
       });
-      Notification.find = () => ({
+      Notification.find = (q) => ({
         sort: () => ({
-          limit: async () => [{ metadata: { interestId, recipientUserId: receiverId } }],
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
         }),
       });
       const req = { user: { userId: receiverId }, params: { id: interestId } };
@@ -445,9 +455,12 @@ async function runSuite() {
         status: 'REJECTED',
         declinedBy: receiverId,
       });
-      Notification.find = () => ({
+      Notification.find = (q) => ({
         sort: () => ({
-          limit: async () => [{ metadata: { interestId, recipientUserId: receiverId } }],
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
         }),
       });
       Conversation.findOne = async (q) => {
@@ -541,9 +554,12 @@ async function runSuite() {
         status: 'REJECTED',
         declinedBy: receiverId,
       });
-      Notification.find = () => ({
+      Notification.find = (q) => ({
         sort: () => ({
-          limit: async () => [{ metadata: { interestId, recipientUserId: receiverId } }],
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
         }),
       });
       Conversation.findOne = async () => null;
@@ -565,9 +581,12 @@ async function runSuite() {
         status: 'REJECTED',
         declinedBy: receiverId,
       });
-      Notification.find = () => ({
+      Notification.find = (q) => ({
         sort: () => ({
-          limit: async () => [{ metadata: { interestId, recipientUserId: receiverId } }],
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
         }),
       });
       Conversation.findOne = async () => null;
@@ -592,9 +611,12 @@ async function runSuite() {
         status: 'REJECTED',
         declinedBy: receiverId,
       });
-      Notification.find = () => ({
+      Notification.find = (q) => ({
         sort: () => ({
-          limit: async () => [{ metadata: { interestId, recipientUserId: receiverId } }],
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
         }),
       });
       Conversation.findOne = async () => null;
@@ -620,9 +642,12 @@ async function runSuite() {
         status: 'REJECTED',
         declinedBy: receiverId,
       });
-      Notification.find = () => ({
+      Notification.find = (q) => ({
         sort: () => ({
-          limit: async () => [{ metadata: { interestId, recipientUserId: receiverId } }],
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
         }),
       });
       Conversation.findOne = async () => null;
@@ -770,9 +795,12 @@ async function runSuite() {
       Interest.updateOne = async () => ({ modifiedCount: 1 });
       Conversation.findOne = async () => null;
       Notification.findOne = async () => null;
-      Notification.find = () => ({
+      Notification.find = (q) => ({
         sort: () => ({
-          limit: async () => [{ metadata: { interestId, recipientUserId: receiverId } }],
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
         }),
       });
       Block.findOne = async () => null;
@@ -1198,6 +1226,254 @@ async function runSuite() {
       assert.strictEqual(resAdmin.statusCode, 403);
     });
 
+    // 12. Group 12: Block Eligibility & UI Consistency (Phase 1)
+    console.log('\n--- Group 12: Block Eligibility & UI Consistency (Phase 1) ---');
+
+    await test('getReceivedInterests: No block exists -> canUndoDecline is true, isBlocked is false', async () => {
+      Interest.find = () => ({
+        populate: () => ({
+          sort: () => ({
+            lean: async () => [
+              {
+                _id: 'interest-unblocked',
+                sender: senderId,
+                receiver: receiverId,
+                status: 'REJECTED',
+                declinedBy: receiverId,
+              },
+            ],
+          }),
+        }),
+      });
+      Profile.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Conversation.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Notification.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Block.find = () => ({ select: () => ({ lean: async () => [] }) });
+
+      const req = { user: { userId: receiverId }, query: {} };
+      const res = createMockRes();
+      await getReceivedInterests(req, res, () => {});
+
+      assert.strictEqual(res.statusCode, 200);
+      const item = res.body.data[0];
+      assert.strictEqual(item.isBlocked, false);
+      assert.strictEqual(item.canUndoDecline, true);
+    });
+
+    await test('getReceivedInterests: Receiver blocked sender -> canUndoDecline is false, isBlocked is true', async () => {
+      Interest.find = () => ({
+        populate: () => ({
+          sort: () => ({
+            lean: async () => [
+              {
+                _id: 'interest-blocked-by-me',
+                sender: senderId,
+                receiver: receiverId,
+                status: 'REJECTED',
+                declinedBy: receiverId,
+              },
+            ],
+          }),
+        }),
+      });
+      Profile.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Conversation.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Notification.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Block.find = () => ({
+        select: () => ({
+          lean: async () => [{ blocker: receiverId, blockedUser: senderId }],
+        }),
+      });
+
+      const req = { user: { userId: receiverId }, query: {} };
+      const res = createMockRes();
+      await getReceivedInterests(req, res, () => {});
+
+      assert.strictEqual(res.statusCode, 200);
+      const item = res.body.data[0];
+      assert.strictEqual(item.isBlocked, true, 'isBlocked must be true');
+      assert.strictEqual(item.canUndoDecline, false, 'canUndoDecline must be suppressed when blocked');
+    });
+
+    await test('getReceivedInterests: Sender blocked receiver -> canUndoDecline is false, isBlocked is true', async () => {
+      Interest.find = () => ({
+        populate: () => ({
+          sort: () => ({
+            lean: async () => [
+              {
+                _id: 'interest-blocked-by-them',
+                sender: senderId,
+                receiver: receiverId,
+                status: 'REJECTED',
+                declinedBy: receiverId,
+              },
+            ],
+          }),
+        }),
+      });
+      Profile.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Conversation.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Notification.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Block.find = () => ({
+        select: () => ({
+          lean: async () => [{ blocker: senderId, blockedUser: receiverId }],
+        }),
+      });
+
+      const req = { user: { userId: receiverId }, query: {} };
+      const res = createMockRes();
+      await getReceivedInterests(req, res, () => {});
+
+      assert.strictEqual(res.statusCode, 200);
+      const item = res.body.data[0];
+      assert.strictEqual(item.isBlocked, true, 'isBlocked must be true when counterpart blocked user');
+      assert.strictEqual(item.canUndoDecline, false, 'canUndoDecline must be suppressed');
+    });
+
+    // 13. Group 13: Cross-Instance Notification Idempotency (Phase 3)
+    console.log('\n--- Group 13: Cross-Instance Notification Idempotency (Phase 3) ---');
+
+    await test('undoDeclineInterest creates notification with correct cross-instance idempotencyKey', async () => {
+      let createdNotifPayload = null;
+      Interest.findById = async () => ({
+        _id: interestId,
+        sender: senderId,
+        receiver: receiverId,
+        status: 'REJECTED',
+        declinedBy: receiverId,
+        save: async function () {},
+      });
+      Interest.updateOne = async () => ({ modifiedCount: 1 });
+      Conversation.findOne = async () => null;
+      Notification.findOne = async () => null;
+      Notification.find = (q) => ({
+        sort: () => ({
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
+        }),
+      });
+      Block.findOne = async () => null;
+      User.findById = async (id) => ({ _id: id, fullName: 'Dr Candidate', isDeleted: false, status: 'ACTIVE' });
+      Profile.findOne = async () => null;
+      Notification.updateMany = async () => ({ modifiedCount: 1 });
+      Notification.create = async (payload) => {
+        createdNotifPayload = payload;
+        return { _id: 'notif-idemp-1', ...payload };
+      };
+
+      const req = { user: { userId: receiverId }, params: { id: interestId } };
+      const res = createMockRes();
+      await undoDeclineInterest(req, res, () => {});
+
+      assert.strictEqual(res.statusCode, 200);
+      assert.ok(createdNotifPayload, 'Notification should be created');
+      const expectedKey = `INTEREST_RESTORED:${senderId}:${interestId}`;
+      assert.strictEqual(createdNotifPayload.idempotencyKey, expectedKey, 'idempotencyKey must follow strict cross-instance format');
+    });
+
+    await test('undoDeclineInterest gracefully resolves duplicate entry from concurrent instance (code 1062 / P2002)', async () => {
+      const existingNotification = {
+        _id: 'notif-from-other-worker',
+        user: senderId,
+        type: 'INTEREST_RESTORED',
+        metadata: { interestId, recipientUserId: receiverId },
+      };
+
+      Interest.findById = async () => ({
+        _id: interestId,
+        sender: senderId,
+        receiver: receiverId,
+        status: 'REJECTED',
+        declinedBy: receiverId,
+        save: async function () {},
+      });
+      Interest.updateOne = async () => ({ modifiedCount: 1 });
+      Conversation.findOne = async () => null;
+      let initialCheck = true;
+      Notification.findOne = async (q) => {
+        if (initialCheck) {
+          initialCheck = false;
+          return null;
+        }
+        return existingNotification;
+      };
+      Notification.find = (q) => ({
+        sort: () => ({
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
+        }),
+      });
+      Block.findOne = async () => null;
+      User.findById = async (id) => ({ _id: id, fullName: 'Dr Candidate', isDeleted: false, status: 'ACTIVE' });
+      Profile.findOne = async () => null;
+      Notification.updateMany = async () => ({ modifiedCount: 1 });
+
+      Notification.create = async () => {
+        const dupErr = new Error("Duplicate entry 'INTEREST_RESTORED:...' for key 'idx_notifications_idempotency_key'");
+        dupErr.code = 1062;
+        throw dupErr;
+      };
+
+      const req = { user: { userId: receiverId }, params: { id: interestId } };
+      const res = createMockRes();
+      await undoDeclineInterest(req, res, () => {});
+
+      assert.strictEqual(res.statusCode, 200, 'Duplicate notification error must be resolved idempotently');
+      assert.strictEqual(res.body.success, true);
+      assert.strictEqual(res.body.data.status, 'PENDING');
+    });
+
+    await test('undoDeclineInterest zero-DDL fallback: retries creation if database column is unknown', async () => {
+      let fallbackPayload = null;
+      Interest.findById = async () => ({
+        _id: interestId,
+        sender: senderId,
+        receiver: receiverId,
+        status: 'REJECTED',
+        declinedBy: receiverId,
+        save: async function () {},
+      });
+      Interest.updateOne = async () => ({ modifiedCount: 1 });
+      Conversation.findOne = async () => null;
+      Notification.findOne = async () => null;
+      Notification.find = (q) => ({
+        sort: () => ({
+          limit: async () => {
+            if (q?.type === 'INTEREST_RESTORED') return [];
+            return [{ type: 'INTEREST_REJECTED', metadata: { interestId, recipientUserId: receiverId } }];
+          },
+        }),
+      });
+      Block.findOne = async () => null;
+      User.findById = async (id) => ({ _id: id, fullName: 'Dr Candidate', isDeleted: false, status: 'ACTIVE' });
+      Profile.findOne = async () => null;
+      Notification.updateMany = async () => ({ modifiedCount: 1 });
+
+      let attempts = 0;
+      Notification.create = async (payload) => {
+        attempts++;
+        if (attempts === 1) {
+          const err = new Error("Unknown column 'idempotency_key' in 'field list'");
+          err.code = 1054;
+          throw err;
+        }
+        fallbackPayload = payload;
+        return { _id: 'notif-fallback-success', ...payload };
+      };
+
+      const req = { user: { userId: receiverId }, params: { id: interestId } };
+      const res = createMockRes();
+      await undoDeclineInterest(req, res, () => {});
+
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(attempts, 2, 'Should retry without idempotency_key upon unknown column error');
+      assert.strictEqual(fallbackPayload.idempotencyKey, undefined, 'Fallback creation must not pass unknown column');
+    });
+
   } finally {
     // Restore originals
     Interest.findById = originalInterestFindById;
@@ -1207,6 +1483,7 @@ async function runSuite() {
     Profile.findOne = originalProfileFindOne;
     Profile.find = originalProfileFind;
     Block.findOne = originalBlockFindOne;
+    Block.find = originalBlockFind;
     Notification.create = originalNotificationCreate;
     Notification.findOne = originalNotificationFindOne;
     Notification.find = originalNotificationFind;

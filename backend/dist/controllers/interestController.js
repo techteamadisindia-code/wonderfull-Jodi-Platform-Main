@@ -1547,7 +1547,7 @@ async function getReceivedInterests(req, res, next) {
                 }
                 const withdrawnNotifs = await Notification_1.Notification.find({
                     type: 'INTEREST_WITHDRAWN',
-                }).select('metadata').lean();
+                }).select('metadata type').lean();
                 if (Array.isArray(withdrawnNotifs)) {
                     withdrawnNotifs.forEach((n) => {
                         if (n?.type !== 'INTEREST_WITHDRAWN')
@@ -1570,7 +1570,7 @@ async function getReceivedInterests(req, res, next) {
                 // 2. Authoritative decline attribution: verify authenticated user personally declined the request
                 const declineNotifs = await Notification_1.Notification.find({
                     type: { $in: ['INTEREST_REJECTED', 'INTEREST_DECLINED'] },
-                }).select('metadata').lean();
+                }).select('metadata type').lean();
                 if (Array.isArray(declineNotifs)) {
                     declineNotifs.forEach((n) => {
                         if (n?.type && n.type !== 'INTEREST_REJECTED' && n.type !== 'INTEREST_DECLINED')

@@ -17,6 +17,9 @@ router.patch('/:id/decline', (0, validationMiddleware_1.validateObjectIdParam)('
 router.patch('/:id/reject', (0, validationMiddleware_1.validateObjectIdParam)('id'), interestController_1.rejectInterest);
 router.patch('/:id/withdraw', (0, validationMiddleware_1.validateObjectIdParam)('id'), interestController_1.withdrawInterest);
 router.post('/:id/withdraw', (0, validationMiddleware_1.validateObjectIdParam)('id'), interestController_1.withdrawInterest);
+router.patch('/:id/undo-decline', (0, validationMiddleware_1.validateObjectIdParam)('id'), interestController_1.undoDeclineInterest);
+router.post('/:id/undo-decline', (0, validationMiddleware_1.validateObjectIdParam)('id'), interestController_1.undoDeclineInterest);
+router.patch('/:id/restore', (0, validationMiddleware_1.validateObjectIdParam)('id'), interestController_1.undoDeclineInterest);
 router.put('/:id', (0, validationMiddleware_1.validateObjectIdParam)('id'), interestController_1.updateInterest);
 exports.default = router;
 //# sourceMappingURL=interestRoutes.js.map

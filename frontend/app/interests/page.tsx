@@ -23,6 +23,7 @@ import {
   Loader2,
   X,
   UserMinus,
+  RotateCcw,
 } from 'lucide-react';
 import {
   fetchReceivedInterests,
@@ -31,6 +32,7 @@ import {
   acceptInterest,
   rejectInterest,
   withdrawInterest,
+  undoDeclineInterest,
   InterestItem,
 } from '../../services/interestApi';
 import { fetchMySubscription, UserSubscriptionDetails } from '../../services/membershipApi';
@@ -75,6 +77,10 @@ function InterestsContent() {
   // Withdraw Confirmation Modal State
   const [withdrawTarget, setWithdrawTarget] = useState<InterestItem | null>(null);
   const [withdrawLoading, setWithdrawLoading] = useState(false);
+
+  // Undo Decline Modal State
+  const [undoTarget, setUndoTarget] = useState<InterestItem | null>(null);
+  const [undoLoading, setUndoLoading] = useState(false);
 
   // 1. Check Auth & Load Membership
   useEffect(() => {
@@ -171,6 +177,48 @@ function InterestsContent() {
       });
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  // Handle Undo Decline
+  const handleUndoDeclineConfirm = async () => {
+    if (!undoTarget || undoLoading) return;
+    setUndoLoading(true);
+    setFeedback(null);
+    try {
+      await undoDeclineInterest(undoTarget._id);
+
+      // Update UI state immediately without requiring manual page reload:
+      // 1. Remove from rejectedList
+      setRejectedList((prev) => prev.filter((item) => item._id !== undoTarget._id));
+
+      // 2. Add to receivedList with status 'PENDING'
+      const updatedItem: InterestItem = {
+        ...undoTarget,
+        status: 'PENDING',
+        canUndoDecline: false,
+        updatedAt: new Date().toISOString(),
+      };
+      setReceivedList((prev) => [updatedItem, ...prev]);
+
+      setFeedback({
+        text: 'Interest request restored to your received requests.',
+        type: 'success',
+      });
+      setUndoTarget(null);
+      loadAllInterests();
+    } catch (err: any) {
+      console.error('Error restoring interest request:', err);
+      const msg =
+        err.response?.data?.message ||
+        err.message ||
+        'Failed to restore interest request. Please try again.';
+      setFeedback({
+        text: msg,
+        type: 'error',
+      });
+    } finally {
+      setUndoLoading(false);
     }
   };
 
@@ -830,6 +878,18 @@ function InterestsContent() {
                             <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-[10.5px] font-bold">
                               Declined
                             </span>
+                            {interest.canUndoDecline && (
+                              <button
+                                type="button"
+                                disabled={undoLoading && undoTarget?._id === interest._id}
+                                onClick={() => setUndoTarget(interest)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 hover:border-rose-300 text-xs font-bold text-slate-700 hover:text-rose-600 hover:bg-rose-50/50 transition cursor-pointer disabled:opacity-50"
+                                title="Undo decline and restore to received"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>Undo Decline</span>
+                              </button>
+                            )}
                             {profileId && (
                               <Link
                                 href={`/profile/${profileId}`}
@@ -902,6 +962,59 @@ function InterestsContent() {
                   <Crown className="w-3.5 h-3.5" />
                   <span>Upgrade Membership</span>
                 </Link>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Undo Decline Confirmation Modal */}
+        {undoTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl border border-rose-100 space-y-5 text-center relative animate-scale-up">
+              <button
+                type="button"
+                disabled={undoLoading}
+                onClick={() => setUndoTarget(null)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 cursor-pointer disabled:opacity-40"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 border border-rose-200 flex items-center justify-center mx-auto shadow-sm">
+                <RotateCcw className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="font-serif text-xl font-bold text-slate-900">
+                  Restore Interest Request?
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  Restore this interest request? It will move back to your Received requests. The request will not be accepted automatically.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={undoLoading}
+                  onClick={() => setUndoTarget(null)}
+                  className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50 transition cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={undoLoading}
+                  onClick={handleUndoDeclineConfirm}
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[#E51F3E] via-[#E21838] to-[#CC1432] text-white text-xs font-bold shadow-md shadow-red-600/25 hover:shadow-lg transition text-center inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {undoLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-4 h-4" />
+                  )}
+                  <span>Restore Request</span>
+                </button>
               </div>
             </div>
           </div>

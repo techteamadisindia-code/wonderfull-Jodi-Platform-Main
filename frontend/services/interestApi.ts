@@ -37,6 +37,9 @@ export interface InterestItem {
   senderProfile?: InterestProfilePreview;
   receiverProfile?: InterestProfilePreview;
   isSender?: boolean;
+  canUndoDecline?: boolean;
+  declinedByMe?: boolean;
+  isWithdrawn?: boolean;
   otherUser?: any;
   otherProfile?: InterestProfilePreview;
   createdAt: string;
@@ -97,6 +100,13 @@ export async function rejectInterest(interestId: string): Promise<InterestItem> 
 
 export async function declineInterest(interestId: string): Promise<InterestItem> {
   return rejectInterest(interestId);
+}
+
+export async function undoDeclineInterest(interestId: string): Promise<InterestItem> {
+  const response = await apiClient.patch<{ success: boolean; message: string; data: InterestItem }>(
+    `/interests/${interestId}/undo-decline`
+  );
+  return response.data.data;
 }
 
 export async function withdrawInterest(interestId: string): Promise<InterestItem> {

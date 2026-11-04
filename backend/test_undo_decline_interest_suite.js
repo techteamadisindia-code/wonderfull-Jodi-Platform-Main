@@ -913,6 +913,291 @@ async function runSuite() {
       assert.strictEqual(res.body.data[0].declinedByMe, false);
     });
 
+    // 11. Scenarios A - F: Targeted Notification Projection & Comprehensive Matrix
+    console.log('\n--- Group 11: Notification Projection & Comprehensive Matrix (Scenarios A - F) ---');
+
+    await test('Scenario A: getReceivedInterests projects "metadata type" and recognizes withdrawal notifications without conversations', async () => {
+      let projectionWithdrawal = null;
+      let projectionDecline = null;
+
+      Interest.find = () => ({
+        populate: () => ({
+          sort: () => ({
+            lean: async () => [
+              {
+                _id: 'interest-notif-withdrawn',
+                sender: senderId,
+                receiver: receiverId,
+                status: 'REJECTED',
+              },
+              {
+                _id: 'interest-attributed-decline',
+                sender: senderId,
+                receiver: receiverId,
+                status: 'REJECTED',
+              },
+            ],
+          }),
+        }),
+      });
+      Profile.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Conversation.find = () => ({ select: () => ({ lean: async () => [] }) }); // No conversation
+
+      Notification.find = (query) => {
+        const isWithdrawal = query && query.type === 'INTEREST_WITHDRAWN';
+        return {
+          select: (fields) => {
+            if (isWithdrawal) {
+              projectionWithdrawal = fields;
+            } else {
+              projectionDecline = fields;
+            }
+            return {
+              lean: async () => {
+                if (isWithdrawal) {
+                  return [
+                    {
+                      type: 'INTEREST_WITHDRAWN',
+                      metadata: { interestId: 'interest-notif-withdrawn', withdrawnByUserId: senderId },
+                    },
+                  ];
+                }
+                return [
+                  {
+                    type: 'INTEREST_REJECTED',
+                    metadata: { interestId: 'interest-attributed-decline', recipientUserId: receiverId },
+                  },
+                ];
+              },
+            };
+          },
+        };
+      };
+
+      const req = { user: { userId: receiverId }, query: {} };
+      const res = createMockRes();
+      await getReceivedInterests(req, res, () => {});
+
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(projectionWithdrawal, 'metadata type', 'Withdrawal notification query must project metadata type');
+      assert.strictEqual(projectionDecline, 'metadata type', 'Decline notification query must project metadata type');
+
+      const withdrawnItem = res.body.data.find((i) => i._id === 'interest-notif-withdrawn');
+      const genuineItem = res.body.data.find((i) => i._id === 'interest-attributed-decline');
+
+      assert.strictEqual(withdrawnItem.isWithdrawn, true);
+      assert.strictEqual(withdrawnItem.canUndoDecline, false);
+      assert.strictEqual(genuineItem.isWithdrawn, false);
+      assert.strictEqual(genuineItem.canUndoDecline, true);
+    });
+
+    await test('Scenario B: undoDeclineInterest prevents restoring withdrawn requests or archived conversations', async () => {
+      // 1. Withdrawn request via notification
+      Interest.findById = async () => ({
+        _id: interestId,
+        sender: senderId,
+        receiver: receiverId,
+        status: 'REJECTED',
+        declinedBy: receiverId,
+      });
+      Conversation.findOne = async () => null;
+      Notification.find = () => ({
+        sort: () => ({
+          limit: async () => [
+            {
+              type: 'INTEREST_WITHDRAWN',
+              metadata: { interestId, withdrawnByUserId: senderId },
+            },
+          ],
+        }),
+      });
+
+      const req1 = { user: { userId: receiverId }, params: { id: interestId } };
+      const res1 = createMockRes();
+      await undoDeclineInterest(req1, res1, () => {});
+      assert.strictEqual(res1.statusCode, 400);
+      assert.ok(res1.body.message.includes('withdrawn'));
+
+      // 2. Archived conversation
+      Interest.findById = async () => ({
+        _id: interestId,
+        sender: senderId,
+        receiver: receiverId,
+        status: 'REJECTED',
+        declinedBy: receiverId,
+      });
+      Notification.find = () => ({
+        sort: () => ({
+          limit: async () => [],
+        }),
+      });
+      Conversation.findOne = async () => ({ _id: 'conv-archived', status: 'ARCHIVED' });
+
+      const req2 = { user: { userId: receiverId }, params: { id: interestId } };
+      const res2 = createMockRes();
+      await undoDeclineInterest(req2, res2, () => {});
+      assert.strictEqual(res2.statusCode, 400);
+      assert.ok(res2.body.message.includes('withdrawn'));
+    });
+
+    await test('Scenario C: Genuine personal decline restores request to PENDING and is not auto-accepted', async () => {
+      Interest.findById = async () => ({
+        _id: interestId,
+        sender: senderId,
+        receiver: receiverId,
+        status: 'REJECTED',
+        declinedBy: receiverId,
+        save: async function () {},
+      });
+      Interest.updateOne = async () => ({ modifiedCount: 1 });
+      Conversation.findOne = async () => null;
+      Notification.findOne = async () => null;
+      Notification.find = () => ({
+        sort: () => ({
+          limit: async () => [
+            {
+              type: 'INTEREST_REJECTED',
+              metadata: { interestId, recipientUserId: receiverId },
+            },
+          ],
+        }),
+      });
+      Block.findOne = async () => null;
+      User.findById = async (id) => ({ _id: id, fullName: 'Dr Candidate', isDeleted: false, status: 'ACTIVE' });
+      Profile.findOne = async () => null;
+      Notification.updateMany = async () => ({ modifiedCount: 1 });
+      Notification.create = async (p) => ({ _id: 'notif-restored', ...p });
+
+      const req = { user: { userId: receiverId }, params: { id: interestId } };
+      const res = createMockRes();
+      await undoDeclineInterest(req, res, () => {});
+
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(res.body.success, true);
+      assert.strictEqual(res.body.data.status, 'PENDING');
+      assert.notStrictEqual(res.body.data.status, 'ACCEPTED', 'Request must return to PENDING, never ACCEPTED');
+    });
+
+    await test('Scenario D: Missing or invalid decline attribution returns canUndoDecline: false and fails closed (HTTP 403)', async () => {
+      // getReceivedInterests sets canUndoDecline: false
+      Interest.find = () => ({
+        populate: () => ({
+          sort: () => ({
+            lean: async () => [
+              {
+                _id: 'interest-unattributed',
+                sender: senderId,
+                receiver: receiverId,
+                status: 'REJECTED',
+              },
+            ],
+          }),
+        }),
+      });
+      Profile.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Conversation.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Notification.find = () => ({ select: () => ({ lean: async () => [] }) }); // No decline notification
+
+      const reqList = { user: { userId: receiverId }, query: {} };
+      const resList = createMockRes();
+      await getReceivedInterests(reqList, resList, () => {});
+
+      assert.strictEqual(resList.statusCode, 200);
+      assert.strictEqual(resList.body.data[0].canUndoDecline, false);
+
+      // undoDeclineInterest fails closed
+      Interest.findById = async () => ({
+        _id: '507f191e810c19729de860ef',
+        sender: senderId,
+        receiver: receiverId,
+        status: 'REJECTED',
+      });
+      const reqAction = { user: { userId: receiverId }, params: { id: '507f191e810c19729de860ef' } };
+      const resAction = createMockRes();
+      await undoDeclineInterest(reqAction, resAction, () => {});
+
+      assert.strictEqual(resAction.statusCode, 403);
+      assert.ok(resAction.body.message.includes('Cannot verify that you personally declined'));
+    });
+
+    await test('Scenario E: Mixed notifications: withdrawal takes precedence over decline attribution', async () => {
+      Interest.find = () => ({
+        populate: () => ({
+          sort: () => ({
+            lean: async () => [
+              {
+                _id: 'interest-both-notifs',
+                sender: senderId,
+                receiver: receiverId,
+                status: 'REJECTED',
+              },
+            ],
+          }),
+        }),
+      });
+      Profile.find = () => ({ select: () => ({ lean: async () => [] }) });
+      Conversation.find = () => ({ select: () => ({ lean: async () => [] }) });
+
+      Notification.find = (query) => {
+        const isWithdrawal = query && query.type === 'INTEREST_WITHDRAWN';
+        return {
+          select: () => ({
+            lean: async () => {
+              if (isWithdrawal) {
+                return [
+                  {
+                    type: 'INTEREST_WITHDRAWN',
+                    metadata: { interestId: 'interest-both-notifs', withdrawnByUserId: receiverId },
+                  },
+                ];
+              }
+              return [
+                {
+                  type: 'INTEREST_REJECTED',
+                  metadata: { interestId: 'interest-both-notifs', recipientUserId: receiverId },
+                },
+              ];
+            },
+          }),
+        };
+      };
+
+      const req = { user: { userId: receiverId }, query: {} };
+      const res = createMockRes();
+      await getReceivedInterests(req, res, () => {});
+
+      const item = res.body.data[0];
+      assert.strictEqual(item.isWithdrawn, true, 'Withdrawal must be detected');
+      assert.strictEqual(item.canUndoDecline, false, 'Withdrawal must override decline attribution');
+    });
+
+    await test('Scenario F: Authorization: sender, third-party, and admin bypass attempts strictly fail with HTTP 403', async () => {
+      Interest.findById = async () => ({
+        _id: interestId,
+        sender: senderId,
+        receiver: receiverId,
+        status: 'REJECTED',
+      });
+
+      // 1. Sender attempts to undo
+      const reqSender = { user: { userId: senderId }, params: { id: interestId } };
+      const resSender = createMockRes();
+      await undoDeclineInterest(reqSender, resSender, () => {});
+      assert.strictEqual(resSender.statusCode, 403);
+
+      // 2. Third party attempts to undo
+      const reqThird = { user: { userId: '507f191e810c19729de860ee' }, params: { id: interestId } };
+      const resThird = createMockRes();
+      await undoDeclineInterest(reqThird, resThird, () => {});
+      assert.strictEqual(resThird.statusCode, 403);
+
+      // 3. Admin attempts to bypass member endpoint
+      const reqAdmin = { user: { userId: '507f191e810c19729de860ee', role: 'admin' }, params: { id: interestId } };
+      const resAdmin = createMockRes();
+      await undoDeclineInterest(reqAdmin, resAdmin, () => {});
+      assert.strictEqual(resAdmin.statusCode, 403);
+    });
+
   } finally {
     // Restore originals
     Interest.findById = originalInterestFindById;

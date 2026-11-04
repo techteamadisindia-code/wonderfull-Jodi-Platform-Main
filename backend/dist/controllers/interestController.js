@@ -7,6 +7,8 @@ exports.checkInterestStatus = checkInterestStatus;
 exports.findNotificationByInterest = findNotificationByInterest;
 exports.acceptInterest = acceptInterest;
 exports.declineInterest = declineInterest;
+exports.verifyDeclineAttribution = verifyDeclineAttribution;
+exports.undoDeclineInterest = undoDeclineInterest;
 exports.withdrawInterest = withdrawInterest;
 exports.updateInterest = updateInterest;
 exports.getSentInterests = getSentInterests;
@@ -28,7 +30,7 @@ const createInterestSchema = zod_1.z.object({
     targetUserId: zod_1.z.string().optional(),
 });
 const updateInterestSchema = zod_1.z.object({
-    status: zod_1.z.enum(['ACCEPTED', 'DECLINED', 'REJECTED', 'CANCELLED', 'WITHDRAWN']),
+    status: zod_1.z.enum(['ACCEPTED', 'DECLINED', 'REJECTED', 'CANCELLED', 'WITHDRAWN', 'PENDING']),
 });
 // Mutex coordinator to serialize concurrent state transitions on the same interest
 const inFlightInterestTransitions = new Map();
@@ -745,6 +747,7 @@ async function declineInterest(req, res, next) {
             });
         }
         interest.status = 'REJECTED';
+        interest.declinedBy = userId;
         await interest.save();
         // Fetch recipient info
         const recipientUser = await User_1.User.findById(userId);
@@ -763,6 +766,7 @@ async function declineInterest(req, res, next) {
             metadata: {
                 interestId: interest._id,
                 recipientUserId: userId,
+                declinedByUserId: userId,
                 type: 'INTEREST_REJECTED',
             },
         });
@@ -786,6 +790,384 @@ async function declineInterest(req, res, next) {
     }
 }
 exports.rejectInterest = declineInterest;
+/**
+ * Authoritatively verifies that the authenticated user personally performed the decline on this interest request.
+ * Inspects both decline notification metadata and persisted interest attribution.
+ * FAILS CLOSED if attribution is missing, inconclusive, or if another actor (e.g. administrator) declined it.
+ */
+async function verifyDeclineAttribution(interestId, userId, senderUserId) {
+    if (!interestId || !userId)
+        return false;
+    const cleanInterestId = String(interestId).trim();
+    const cleanUserId = String(userId).trim();
+    try {
+        // 1. Inspect decline notifications sent to sender
+        let candidates = [];
+        if (senderUserId) {
+            try {
+                candidates = await Notification_1.Notification.find({
+                    user: senderUserId,
+                    type: { $in: ['INTEREST_REJECTED', 'INTEREST_DECLINED'] },
+                }).sort({ createdAt: -1 }).limit(100);
+            }
+            catch (_) { }
+        }
+        if (!candidates || candidates.length === 0) {
+            try {
+                candidates = await Notification_1.Notification.find({
+                    type: { $in: ['INTEREST_REJECTED', 'INTEREST_DECLINED'] },
+                }).sort({ createdAt: -1 }).limit(100);
+            }
+            catch (_) { }
+        }
+        if (Array.isArray(candidates)) {
+            for (const notif of candidates) {
+                if (notif?.type && notif.type !== 'INTEREST_REJECTED' && notif.type !== 'INTEREST_DECLINED') {
+                    continue;
+                }
+                let meta = notif?.metadata;
+                if (!meta)
+                    continue;
+                if (typeof meta === 'string') {
+                    try {
+                        meta = JSON.parse(meta);
+                    }
+                    catch {
+                        continue;
+                    }
+                }
+                const notifInterestId = String(meta?.interestId || meta?.interest || '').trim();
+                if (notifInterestId === cleanInterestId) {
+                    const actor = String(meta?.declinedByUserId || meta?.recipientUserId || '').trim();
+                    if (actor) {
+                        // Authoritative decline record found: return true if actor matches cleanUserId, false otherwise
+                        return actor === cleanUserId;
+                    }
+                }
+            }
+        }
+        // 2. Check if interest model itself carries explicit persisted decline attribution
+        const interest = await Interest_1.Interest.findById(cleanInterestId);
+        if (interest) {
+            const explicitDeclinedBy = interest.declinedBy || interest.declinedByUserId;
+            if (explicitDeclinedBy) {
+                return String(explicitDeclinedBy).trim() === cleanUserId;
+            }
+        }
+        // 3. Historical or un-attributed record without reliable decline attribution -> FAIL CLOSED
+        return false;
+    }
+    catch (err) {
+        console.warn('[InterestController] Error verifying decline attribution, failing closed:', err);
+        return false;
+    }
+}
+/**
+ * Undo decline / restore interest request back to PENDING
+ */
+async function undoDeclineInterest(req, res, next) {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+        const { id } = req.params;
+        if (!(0, securityUtils_1.isValidObjectId)(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid interest ID' });
+        }
+        const lockKey = `undo-decline:${String(id)}`;
+        while (inFlightInterestTransitions.has(lockKey)) {
+            await inFlightInterestTransitions.get(lockKey);
+        }
+        let releaseLock;
+        const lockPromise = new Promise((resolve) => {
+            releaseLock = resolve;
+        });
+        inFlightInterestTransitions.set(lockKey, lockPromise);
+        try {
+            const interest = await Interest_1.Interest.findById(id);
+            if (!interest) {
+                return res.status(404).json({ success: false, message: 'Interest not found' });
+            }
+            const interestReceiverId = extractEntityId(interest.receiver, interest.receiverId);
+            const interestSenderId = extractEntityId(interest.sender, interest.senderId);
+            if (!interestReceiverId || !interestSenderId) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Interest record has missing sender or receiver details',
+                });
+            }
+            // Check authorization:
+            // 1. If current user is the original sender, they cannot undo the other member's rejection
+            if (interestSenderId === userId && interestReceiverId !== userId) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'You cannot reverse a decision made by the other member',
+                });
+            }
+            // 2. Only the recipient who personally declined this interest can restore it.
+            // Administrator bypass is strictly removed from this member-facing endpoint.
+            if (interestReceiverId !== userId) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Only the recipient who personally declined this interest can restore it',
+                });
+            }
+            // 3. Authoritative decline attribution: verify authenticated member personally declined the request.
+            const hasAuthoritativeDecline = await verifyDeclineAttribution(String(interest._id), userId, interestSenderId);
+            if (!hasAuthoritativeDecline) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Cannot verify that you personally declined this request, or the request was declined by an administrator. Restoration denied.',
+                });
+            }
+            // 4. Idempotency & self-healing notification repair on retry
+            if (interest.status === 'PENDING') {
+                let existingNotification = await findNotificationByInterest(interestSenderId, 'INTEREST_RESTORED', String(interest._id));
+                if (!existingNotification) {
+                    const recipientProfile = await Profile_1.Profile.findOne({ user: userId });
+                    const receiverUser = await User_1.User.findById(userId);
+                    const isNameVisible = recipientProfile?.privacySettings?.nameVisibility !== 'hidden';
+                    const recipientName = (isNameVisible && (recipientProfile?.displayName || receiverUser?.fullName))
+                        ? (recipientProfile?.displayName || receiverUser?.fullName)
+                        : 'Your match';
+                    const recipientPhoto = recipientProfile?.primaryPhoto || recipientProfile?.photos?.[0] || '';
+                    const recipientProfileId = recipientProfile ? String(recipientProfile._id) : '';
+                    try {
+                        existingNotification = await Notification_1.Notification.create({
+                            user: interestSenderId,
+                            type: 'INTEREST_RESTORED',
+                            title: 'Interest reconsidered',
+                            message: `${recipientName} has reconsidered and restored your interest request.`,
+                            actionUrl: '/interests?tab=sent',
+                            link: '/interests?tab=sent',
+                            read: false,
+                            metadata: {
+                                interestId: String(interest._id),
+                                recipientUserId: userId,
+                                recipientName,
+                                recipientPhoto,
+                                recipientProfileId,
+                                type: 'INTEREST_RESTORED',
+                            },
+                        });
+                    }
+                    catch (repairErr) {
+                        console.warn('[InterestController] Error repairing notification on retry:', repairErr);
+                    }
+                }
+                return res.json({
+                    success: true,
+                    message: 'Interest request is already pending',
+                    data: interest,
+                });
+            }
+            // 5. Status eligibility
+            if (interest.status !== 'REJECTED' && interest.status !== 'DECLINED') {
+                return res.status(400).json({
+                    success: false,
+                    message: `Cannot restore interest request with status: ${interest.status}`,
+                });
+            }
+            // 6. Withdrawn connection protection:
+            // Identify withdrawals using the exact interest ID and withdrawal notification metadata.
+            // Do NOT treat an unrelated conversation between the same two users as proof of withdrawal.
+            const linkedConv = await Conversation_1.Conversation.findOne({ interest: interest._id });
+            if (linkedConv) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot undo decline for a withdrawn connection',
+                });
+            }
+            let hasWithdrawnNotif = false;
+            try {
+                const withdrawnNotifs = await Notification_1.Notification.find({
+                    type: 'INTEREST_WITHDRAWN',
+                }).sort({ createdAt: -1 }).limit(100);
+                if (Array.isArray(withdrawnNotifs)) {
+                    for (const n of withdrawnNotifs) {
+                        if (n?.type !== 'INTEREST_WITHDRAWN') {
+                            continue;
+                        }
+                        let meta = n?.metadata;
+                        if (meta) {
+                            if (typeof meta === 'string') {
+                                try {
+                                    meta = JSON.parse(meta);
+                                }
+                                catch { }
+                            }
+                            const nInterestId = String(meta?.interestId || meta?.interest || '').trim();
+                            if (nInterestId === String(interest._id).trim()) {
+                                hasWithdrawnNotif = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (withdrawnQueryErr) {
+                console.warn('[InterestController] Error querying withdrawal notifications:', withdrawnQueryErr);
+            }
+            if (hasWithdrawnNotif) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot undo decline for a withdrawn connection',
+                });
+            }
+            // 7. Active block enforcement
+            const blockRelationship = await Block_1.Block.findOne({
+                $or: [
+                    { blocker: userId, blocked: interestSenderId },
+                    { blocker: interestSenderId, blocked: userId },
+                ],
+            });
+            if (blockRelationship) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Cannot restore interest request with a blocked member',
+                });
+            }
+            // 8. Account status enforcement
+            const senderUser = await User_1.User.findById(interestSenderId);
+            if (!senderUser || senderUser.isDeleted || senderUser.status === 'SUSPENDED' || senderUser.status === 'BLOCKED') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot restore interest: the sender account is inactive or no longer available',
+                });
+            }
+            const receiverUser = await User_1.User.findById(userId);
+            if (!receiverUser || receiverUser.isDeleted || receiverUser.status === 'SUSPENDED' || receiverUser.status === 'BLOCKED') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Your account is not eligible to restore interest requests',
+                });
+            }
+            // 9. Atomic conditional database update:
+            // Validates interest ID, authenticated receiver ID, and eligible status in the filter
+            let updateResult = null;
+            if (typeof Interest_1.Interest.updateOne === 'function') {
+                try {
+                    updateResult = await Interest_1.Interest.updateOne({
+                        _id: interest._id,
+                        receiver: userId,
+                        status: { $in: ['REJECTED', 'DECLINED'] },
+                    }, {
+                        $set: {
+                            status: 'PENDING',
+                            updatedAt: new Date(),
+                        },
+                    });
+                }
+                catch (dbErr) {
+                    console.error('[InterestController] Error during atomic conditional update:', dbErr);
+                    throw dbErr;
+                }
+            }
+            if (updateResult && updateResult.modifiedCount === 0) {
+                const current = await Interest_1.Interest.findById(id);
+                if (current?.status === 'PENDING') {
+                    return res.json({
+                        success: true,
+                        message: 'Interest request is already pending',
+                        data: current,
+                    });
+                }
+                return res.status(409).json({
+                    success: false,
+                    message: `Interest request status was modified concurrently (current status: ${current?.status || 'unknown'})`,
+                });
+            }
+            interest.status = 'PENDING';
+            interest.updatedAt = new Date();
+            if (!updateResult && typeof interest.save === 'function') {
+                await interest.save();
+            }
+            // 10. Mark previous rejection notification as read
+            try {
+                if (typeof Notification_1.Notification.updateMany === 'function') {
+                    await Notification_1.Notification.updateMany({
+                        user: interestSenderId,
+                        'metadata.interestId': String(interest._id),
+                        type: 'INTEREST_REJECTED',
+                    }, { $set: { read: true } });
+                }
+            }
+            catch (cleanErr) {
+                console.warn('[InterestController] Could not update rejection notifications:', cleanErr);
+            }
+            // 11. Create notification for sender with duplicate prevention guard
+            let restoreNotification = await findNotificationByInterest(interestSenderId, 'INTEREST_RESTORED', String(interest._id));
+            if (!restoreNotification) {
+                const recipientProfile = await Profile_1.Profile.findOne({ user: userId });
+                const isNameVisible = recipientProfile?.privacySettings?.nameVisibility !== 'hidden';
+                const recipientName = (isNameVisible && (recipientProfile?.displayName || receiverUser.fullName))
+                    ? (recipientProfile?.displayName || receiverUser.fullName)
+                    : 'Your match';
+                const recipientPhoto = recipientProfile?.primaryPhoto || recipientProfile?.photos?.[0] || '';
+                const recipientProfileId = recipientProfile ? String(recipientProfile._id) : '';
+                try {
+                    restoreNotification = await Notification_1.Notification.create({
+                        user: interestSenderId,
+                        type: 'INTEREST_RESTORED',
+                        title: 'Interest reconsidered',
+                        message: `${recipientName} has reconsidered and restored your interest request.`,
+                        actionUrl: '/interests?tab=sent',
+                        link: '/interests?tab=sent',
+                        read: false,
+                        metadata: {
+                            interestId: String(interest._id),
+                            recipientUserId: userId,
+                            recipientName,
+                            recipientPhoto,
+                            recipientProfileId,
+                            type: 'INTEREST_RESTORED',
+                        },
+                    });
+                }
+                catch (notifErr) {
+                    console.error('[InterestController] Failed to create restore notification (will be repaired on retry):', notifErr);
+                }
+            }
+            // 12. Real-time Socket.IO emission
+            const io = req.app?.get('io');
+            if (io) {
+                try {
+                    if (restoreNotification) {
+                        io.to(`user:${interestSenderId}`).emit('newNotification', {
+                            notification: restoreNotification,
+                            unreadCountDelta: 1,
+                        });
+                    }
+                    io.to(`user:${interestSenderId}`).emit('interestRestored', {
+                        interest,
+                        restoredBy: userId,
+                    });
+                    io.to(`user:${userId}`).emit('interestRestored', {
+                        interest,
+                        restoredBy: userId,
+                    });
+                }
+                catch (socketErr) {
+                    console.warn('[InterestController] Non-fatal: Socket.IO emission failed:', socketErr);
+                }
+            }
+            return res.json({
+                success: true,
+                message: 'Interest request restored to your received requests',
+                data: interest,
+            });
+        }
+        finally {
+            inFlightInterestTransitions.delete(lockKey);
+            if (typeof releaseLock === 'function')
+                releaseLock();
+        }
+    }
+    catch (error) {
+        next(error);
+    }
+}
 /**
  * Withdraw an accepted connection (transitions from ACCEPTED to REJECTED)
  */
@@ -1048,6 +1430,9 @@ async function updateInterest(req, res, next) {
         if (status === 'WITHDRAWN') {
             return withdrawInterest(req, res, next);
         }
+        if (status === 'PENDING') {
+            return undoDeclineInterest(req, res, next);
+        }
         if (status === 'CANCELLED') {
             const userId = req.user?.userId;
             const { id } = req.params;
@@ -1104,6 +1489,8 @@ async function getSentInterests(req, res, next) {
             return {
                 ...i,
                 receiverProfile: rId ? profileMap.get(rId) || null : null,
+                canUndoDecline: false,
+                declinedByMe: false,
             };
         });
         res.json({ success: true, data: enriched });
@@ -1140,11 +1527,95 @@ async function getReceivedInterests(req, res, next) {
             .select('user displayName profession specialization degree education city state primaryPhoto photos age dob gender')
             .lean();
         const profileMap = new Map(profiles.map((p) => [String(p.user), p]));
+        const rejectedInterestIds = interests
+            .filter((i) => i.status === 'REJECTED' || i.status === 'DECLINED')
+            .map((i) => i._id);
+        let withdrawnInterestIdSet = new Set();
+        let authoritativelyDeclinedIdSet = new Set();
+        if (rejectedInterestIds.length > 0) {
+            try {
+                const idStrings = rejectedInterestIds.map(String);
+                // 1. Identify withdrawn connections by exact interest ID in Conversation or withdrawal notifications
+                const withdrawnConvs = await Conversation_1.Conversation.find({
+                    interest: { $in: rejectedInterestIds },
+                }).select('interest').lean();
+                if (Array.isArray(withdrawnConvs)) {
+                    withdrawnConvs.forEach((c) => {
+                        if (c?.interest)
+                            withdrawnInterestIdSet.add(String(c.interest));
+                    });
+                }
+                const withdrawnNotifs = await Notification_1.Notification.find({
+                    type: 'INTEREST_WITHDRAWN',
+                }).select('metadata').lean();
+                if (Array.isArray(withdrawnNotifs)) {
+                    withdrawnNotifs.forEach((n) => {
+                        if (n?.type !== 'INTEREST_WITHDRAWN')
+                            return;
+                        let meta = n?.metadata;
+                        if (meta) {
+                            if (typeof meta === 'string') {
+                                try {
+                                    meta = JSON.parse(meta);
+                                }
+                                catch { }
+                            }
+                            const nId = String(meta?.interestId || meta?.interest || '').trim();
+                            if (nId && idStrings.includes(nId)) {
+                                withdrawnInterestIdSet.add(nId);
+                            }
+                        }
+                    });
+                }
+                // 2. Authoritative decline attribution: verify authenticated user personally declined the request
+                const declineNotifs = await Notification_1.Notification.find({
+                    type: { $in: ['INTEREST_REJECTED', 'INTEREST_DECLINED'] },
+                }).select('metadata').lean();
+                if (Array.isArray(declineNotifs)) {
+                    declineNotifs.forEach((n) => {
+                        if (n?.type && n.type !== 'INTEREST_REJECTED' && n.type !== 'INTEREST_DECLINED')
+                            return;
+                        let meta = n?.metadata;
+                        if (meta) {
+                            if (typeof meta === 'string') {
+                                try {
+                                    meta = JSON.parse(meta);
+                                }
+                                catch { }
+                            }
+                            const nId = String(meta?.interestId || meta?.interest || '').trim();
+                            const actor = String(meta?.declinedByUserId || meta?.recipientUserId || '').trim();
+                            if (nId && idStrings.includes(nId) && actor === String(userId)) {
+                                authoritativelyDeclinedIdSet.add(nId);
+                            }
+                        }
+                    });
+                }
+                // Also check if any interest document carries explicit declinedBy matching userId
+                interests.forEach((item) => {
+                    const explicitDeclinedBy = item.declinedBy || item.declinedByUserId;
+                    if (explicitDeclinedBy && String(explicitDeclinedBy).trim() === String(userId)) {
+                        authoritativelyDeclinedIdSet.add(String(item._id));
+                    }
+                });
+            }
+            catch (e) {
+                console.warn('[InterestController] Error looking up attribution/withdrawn metadata:', e);
+            }
+        }
         const enriched = interests.map((i) => {
             const sId = extractEntityId(i.sender, i.senderId);
+            const isRejected = i.status === 'REJECTED' || i.status === 'DECLINED';
+            const isWithdrawn = isRejected && withdrawnInterestIdSet.has(String(i._id));
+            const hasAttribution = isRejected && authoritativelyDeclinedIdSet.has(String(i._id));
+            // Only enable undo when NOT withdrawn AND authoritatively proven to be declined by the authenticated user
+            const canUndoDecline = isRejected && !isWithdrawn && hasAttribution;
             return {
                 ...i,
                 senderProfile: sId ? profileMap.get(sId) || null : null,
+                canUndoDecline,
+                declinedByMe: canUndoDecline,
+                isWithdrawn,
             };
         });
         res.json({ success: true, data: enriched });

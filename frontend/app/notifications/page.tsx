@@ -25,6 +25,7 @@ import {
   Trash2,
   Lock,
   Eye,
+  RotateCcw,
 } from 'lucide-react';
 import {
   fetchUserNotifications,
@@ -260,6 +261,8 @@ export default function UserNotificationsPage() {
         return <MessageSquare className="w-4 h-4 text-emerald-600" />;
       case 'INTEREST_DECLINED':
         return <Info className="w-4 h-4 text-slate-500" />;
+      case 'INTEREST_RESTORED':
+        return <RotateCcw className="w-4 h-4 text-emerald-600" />;
       case 'PROMOTION':
       case 'OFFER':
         return <Sparkles className="w-4 h-4 text-emerald-600" />;
@@ -287,6 +290,8 @@ export default function UserNotificationsPage() {
         return 'bg-emerald-50 text-emerald-700 border-emerald-200';
       case 'INTEREST_DECLINED':
         return 'bg-slate-100 text-slate-700 border-slate-200';
+      case 'INTEREST_RESTORED':
+        return 'bg-emerald-50 text-emerald-700 border-emerald-200';
       case 'PROMOTION':
       case 'OFFER':
         return 'bg-emerald-50 text-emerald-700 border-emerald-200';

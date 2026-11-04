@@ -143,6 +143,7 @@ const visitTrackingService_1 = require("../services/visitTrackingService");
 const complianceDetector_1 = require("../services/complianceDetector");
 const profileController_1 = require("./profileController");
 const client_1 = require("../db/client");
+const genderUtils_1 = require("../utils/genderUtils");
 const adminLifecycleGuard_1 = require("../utils/adminLifecycleGuard");
 // Helper for audit logging
 async function logAdminAction(adminEmail, action, details, targetModel, targetId, extraParams) {
@@ -557,72 +558,108 @@ async function getUsers(req, res, next) {
         else if (status === 'inactive') {
             query.isActive = false;
         }
-        // Gender filter support (Profile holds authoritative gender)
-        let genderUserIds = null;
-        let genderUserIdsNin = null;
-        if (gender && gender !== 'all') {
-            if (gender === 'not_recorded' || gender === 'Not recorded') {
-                const profilesWithGender = await Profile_1.Profile.find({ gender: { $exists: true, $ne: null } }).select('user gender').lean();
-                const recordedSet = new Set(profilesWithGender
-                    .filter((p) => p.gender && String(p.gender).trim() !== '' && String(p.gender).toLowerCase() !== 'not recorded')
-                    .map((p) => String(p.user))
-                    .filter(Boolean));
-                genderUserIdsNin = Array.from(recordedSet);
-            }
-            else {
-                const safeGenderRegex = new RegExp(`^${(0, securityUtils_1.escapeRegex)(String(gender))}$`, 'i');
-                const profilesWithGender = await Profile_1.Profile.find({ gender: safeGenderRegex }).select('user').lean();
-                const genderSet = new Set(profilesWithGender.map((p) => String(p.user)).filter(Boolean));
-                genderUserIds = Array.from(genderSet);
-            }
-        }
-        // Registration status filter support
-        let regStatusUserIdsIn = null;
-        let regStatusUserIdsNin = null;
-        if (registrationStatus && registrationStatus !== 'all') {
-            const [completedProfiles, completedRegs] = await Promise.all([
-                Profile_1.Profile.distinct('user'),
-                Registration_1.Registration.distinct('user', { status: 'COMPLETED', isDeleted: false }),
+        // Gender & Registration Status filter support
+        let filterUserIdsIn = null;
+        if ((gender && gender !== 'all') || (registrationStatus && registrationStatus !== 'all')) {
+            const [allProfiles, allRegs, allUsersBasic] = await Promise.all([
+                Profile_1.Profile.find({}).select('user candidateId displayName gender').lean(),
+                Registration_1.Registration.find({}).select('user email mobile gender status isDeleted stepData').sort({ isDeleted: 1, updatedAt: -1 }).lean(),
+                User_1.User.find({}).select('_id email mobile').lean(),
             ]);
-            const completedUserSet = new Set([
-                ...completedProfiles.map((id) => String(id)),
-                ...completedRegs.filter(Boolean).map((id) => String(id)),
-            ]);
-            if (registrationStatus === 'complete') {
-                regStatusUserIdsIn = Array.from(completedUserSet);
+            const profileMap = new Map();
+            for (const p of allProfiles) {
+                const uid = (0, genderUtils_1.extractDocUserId)(p.user);
+                if (uid)
+                    profileMap.set(uid, p);
             }
-            else if (registrationStatus === 'incomplete') {
-                const activeDrafts = await Registration_1.Registration.distinct('user', {
-                    status: { $in: ['STARTED', 'IN_PROGRESS', 'ABANDONED'] },
-                    isDeleted: false,
-                });
-                regStatusUserIdsIn = activeDrafts.filter((id) => !completedUserSet.has(String(id))).map(String);
+            const regByUser = new Map();
+            const regByEmail = new Map();
+            const regByMobile = new Map();
+            for (const r of allRegs) {
+                const uid = (0, genderUtils_1.extractDocUserId)(r.user);
+                if (uid && !regByUser.has(uid))
+                    regByUser.set(uid, r);
+                if (r.email) {
+                    const em = String(r.email).toLowerCase().trim();
+                    if (!regByEmail.has(em))
+                        regByEmail.set(em, r);
+                }
+                if (r.mobile) {
+                    const mb = String(r.mobile).replace(/\D/g, '');
+                    if (!regByMobile.has(mb))
+                        regByMobile.set(mb, r);
+                }
             }
-            else if (registrationStatus === 'pending') {
-                const allRegisteredOrDrafted = await Promise.all([
-                    Profile_1.Profile.distinct('user'),
-                    Registration_1.Registration.distinct('user', { isDeleted: false }),
-                ]);
-                const anyActivitySet = new Set([
-                    ...allRegisteredOrDrafted[0].map(String),
-                    ...allRegisteredOrDrafted[1].filter(Boolean).map(String),
-                ]);
-                regStatusUserIdsNin = Array.from(anyActivitySet);
+            const matchingUserIds = new Set();
+            const targetGender = gender && gender !== 'all'
+                ? gender === 'not_recorded' || gender === 'Not recorded'
+                    ? 'not_recorded'
+                    : (0, genderUtils_1.normalizeGender)(String(gender))
+                : null;
+            const targetRegStatus = registrationStatus && registrationStatus !== 'all'
+                ? String(registrationStatus).toLowerCase().replace(/[-\s]/g, '_')
+                : null;
+            for (const u of allUsersBasic) {
+                const uid = String(u._id);
+                const cleanEmail = (u.email || '').toLowerCase().trim();
+                const cleanMobile = (u.mobile || '').replace(/\D/g, '');
+                const p = profileMap.get(uid);
+                const r = regByUser.get(uid) ||
+                    (cleanEmail ? regByEmail.get(cleanEmail) : null) ||
+                    (cleanMobile ? regByMobile.get(cleanMobile) : null);
+                // Check gender filter
+                if (targetGender !== null) {
+                    let rawGender = p?.gender;
+                    if (!rawGender || !(0, genderUtils_1.normalizeGender)(rawGender)) {
+                        rawGender =
+                            r?.gender ||
+                                r?.stepData?.basicInfo?.gender ||
+                                r?.stepData?.personalInfo?.gender ||
+                                r?.stepData?.rawFormData?.gender ||
+                                u.gender ||
+                                null;
+                    }
+                    const resolvedGender = (0, genderUtils_1.normalizeGender)(rawGender);
+                    if (targetGender === 'not_recorded') {
+                        if (resolvedGender !== null)
+                            continue;
+                    }
+                    else if (resolvedGender !== targetGender) {
+                        continue;
+                    }
+                }
+                // Check registration status filter
+                if (targetRegStatus !== null) {
+                    const status = (0, genderUtils_1.calculateUserRegistrationStatus)(p, r);
+                    const normStatus = status.toLowerCase().replace(/[-\s]/g, '_');
+                    if (targetRegStatus === 'complete' || targetRegStatus === 'completed') {
+                        if (status !== 'Complete')
+                            continue;
+                    }
+                    else if (targetRegStatus === 'in_progress') {
+                        if (status !== 'In Progress')
+                            continue;
+                    }
+                    else if (targetRegStatus === 'incomplete') {
+                        if (status !== 'Incomplete')
+                            continue;
+                    }
+                    else if (targetRegStatus === 'pending') {
+                        if (status !== 'Pending')
+                            continue;
+                    }
+                    else if (normStatus !== targetRegStatus) {
+                        continue;
+                    }
+                }
+                matchingUserIds.add(uid);
             }
+            filterUserIdsIn = Array.from(matchingUserIds);
         }
         // Combine ID-based filters
         const idFilters = [];
-        if (genderUserIds !== null) {
-            idFilters.push({ _id: { $in: genderUserIds } });
-        }
-        if (genderUserIdsNin !== null) {
-            idFilters.push({ _id: { $nin: genderUserIdsNin } });
-        }
-        if (regStatusUserIdsIn !== null) {
-            idFilters.push({ _id: { $in: regStatusUserIdsIn } });
-        }
-        if (regStatusUserIdsNin !== null) {
-            idFilters.push({ _id: { $nin: regStatusUserIdsNin } });
+        if (filterUserIdsIn !== null) {
+            idFilters.push({ _id: { $in: filterUserIdsIn } });
         }
         if (search) {
             const searchStr = String(search).trim();
@@ -659,20 +696,50 @@ async function getUsers(req, res, next) {
         ]);
         const userIds = rawUsers.map((u) => u._id);
         // Batch fetch associated profiles, active memberships, and registrations
+        const userEmails = rawUsers.map((u) => (u.email || '').toLowerCase().trim()).filter(Boolean);
+        const userMobiles = rawUsers.map((u) => (u.mobile || '').replace(/\D/g, '')).filter(Boolean);
         const [profiles, subscriptions, registrations] = await Promise.all([
             Profile_1.Profile.find({ user: { $in: userIds } })
-                .select('_id user candidateId displayName gender primaryPhoto photos verificationStatus lastActiveAt')
+                .select('_id user candidateId displayName gender primaryPhoto photos verificationStatus lastActiveAt dob city state education degree profession medicalRegistrationNumber')
                 .lean(),
             Subscription_1.Subscription.find({ user: { $in: userIds }, status: 'ACTIVE' })
                 .select('user plan')
                 .lean(),
-            Registration_1.Registration.find({ user: { $in: userIds }, isDeleted: false })
-                .select('user registrationId status currentStep completionPercentage')
+            Registration_1.Registration.find({
+                $or: [
+                    { user: { $in: userIds } },
+                    ...(userEmails.length > 0 ? [{ email: { $in: userEmails } }] : []),
+                    ...(userMobiles.length > 0 ? [{ mobile: { $in: userMobiles } }] : []),
+                ],
+            })
+                .select('user email mobile registrationId status currentStep totalSteps completionPercentage gender stepData isDeleted updatedAt lastActiveAt')
+                .sort({ isDeleted: 1, updatedAt: -1 })
                 .lean(),
         ]);
-        const profileMap = new Map(profiles.map((p) => [String(p.user), p]));
-        const subscriptionMap = new Map(subscriptions.map((s) => [String(s.user), s]));
-        const registrationMap = new Map(registrations.map((r) => [String(r.user), r]));
+        const profileMap = new Map(profiles.map((p) => [(0, genderUtils_1.extractDocUserId)(p.user), p]));
+        const subscriptionMap = new Map(subscriptions.map((s) => [(0, genderUtils_1.extractDocUserId)(s.user), s]));
+        // Multi-key registration lookup (by userId, email, and mobile)
+        const regByUserMap = new Map();
+        const regByEmailMap = new Map();
+        const regByMobileMap = new Map();
+        for (const r of registrations) {
+            const rUid = (0, genderUtils_1.extractDocUserId)(r.user);
+            if (rUid && !regByUserMap.has(rUid)) {
+                regByUserMap.set(rUid, r);
+            }
+            if (r.email) {
+                const em = String(r.email).toLowerCase().trim();
+                if (!regByEmailMap.has(em)) {
+                    regByEmailMap.set(em, r);
+                }
+            }
+            if (r.mobile) {
+                const mb = String(r.mobile).replace(/\D/g, '');
+                if (!regByMobileMap.has(mb)) {
+                    regByMobileMap.set(mb, r);
+                }
+            }
+        }
         const callerId = req.user?.userId || req.user?._id || req.user?.id;
         const callerAdmin = await Admin_1.Admin.findOne({ user: callerId });
         const callerPerms = callerAdmin?.permissions || [];
@@ -681,21 +748,28 @@ async function getUsers(req, res, next) {
         const users = rawUsers.map((u) => {
             const p = profileMap.get(String(u._id));
             const s = subscriptionMap.get(String(u._id));
-            const r = registrationMap.get(String(u._id));
+            const cleanEmail = (u.email || '').toLowerCase().trim();
+            const cleanMobile = (u.mobile || '').replace(/\D/g, '');
+            const r = regByUserMap.get(String(u._id)) ||
+                (cleanEmail ? regByEmailMap.get(cleanEmail) : null) ||
+                (cleanMobile ? regByMobileMap.get(cleanMobile) : null);
+            // Determine authoritative normalized gender: Profile > Registration > StepData
+            let rawGender = p?.gender;
+            if (!rawGender || !(0, genderUtils_1.normalizeGender)(rawGender)) {
+                rawGender =
+                    r?.gender ||
+                        r?.stepData?.basicInfo?.gender ||
+                        r?.stepData?.personalInfo?.gender ||
+                        r?.stepData?.rawFormData?.gender ||
+                        u.gender ||
+                        null;
+            }
+            const gender = (0, genderUtils_1.normalizeGender)(rawGender);
             // Determine real registration status
-            let regStatus = 'Pending';
-            if (p || r?.status === 'COMPLETED') {
-                regStatus = 'Complete';
-            }
-            else if (r?.status === 'STARTED' || r?.status === 'IN_PROGRESS' || r?.status === 'ABANDONED') {
-                regStatus = 'Incomplete';
-            }
-            else {
-                regStatus = 'Pending';
-            }
+            const regStatus = (0, genderUtils_1.calculateUserRegistrationStatus)(p, r);
             const userObj = {
                 ...u,
-                gender: p?.gender || u.gender || null,
+                gender,
                 registrationStatus: regStatus,
                 registrationId: r?.registrationId || null,
                 candidateId: p?.candidateId || null,
@@ -737,10 +811,21 @@ async function getUserById(req, res, next) {
         if (!user) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
-        const profile = await Profile_1.Profile.findOne({ user: user._id });
-        const subscription = await Subscription_1.Subscription.findOne({ user: user._id }).sort({ createdAt: -1 });
-        const verifications = await Verification_1.Verification.find({ user: user._id }).sort({ createdAt: -1 });
-        const payments = await Payment_1.Payment.find({ user: user._id }).sort({ createdAt: -1 });
+        const cleanEmail = (user.email || '').toLowerCase().trim();
+        const cleanMobile = (user.mobile || '').replace(/\D/g, '');
+        const [profile, subscription, verifications, payments, registration] = await Promise.all([
+            Profile_1.Profile.findOne({ user: user._id }),
+            Subscription_1.Subscription.findOne({ user: user._id }).sort({ createdAt: -1 }),
+            Verification_1.Verification.find({ user: user._id }).sort({ createdAt: -1 }),
+            Payment_1.Payment.find({ user: user._id }).sort({ createdAt: -1 }),
+            Registration_1.Registration.findOne({
+                $or: [
+                    { user: user._id },
+                    ...(cleanEmail ? [{ email: cleanEmail }] : []),
+                    ...(cleanMobile ? [{ mobile: cleanMobile }] : []),
+                ],
+            }).sort({ isDeleted: 1, updatedAt: -1 }),
+        ]);
         const callerId = req.user?.userId || req.user?._id || req.user?.id;
         const callerAdmin = await Admin_1.Admin.findOne({ user: callerId });
         const callerPerms = callerAdmin?.permissions || [];
@@ -749,6 +834,27 @@ async function getUserById(req, res, next) {
         const canEditPrivate = isSuperAdmin || callerPerms.includes('privateInfo.edit');
         const userObj = user ? (typeof user.toObject === 'function' ? user.toObject() : { ...user }) : null;
         const profileObj = profile ? (typeof profile.toObject === 'function' ? profile.toObject() : { ...profile }) : null;
+        let rawGender = profileObj?.gender;
+        if (!rawGender || !(0, genderUtils_1.normalizeGender)(rawGender)) {
+            rawGender =
+                registration?.gender ||
+                    registration?.stepData?.basicInfo?.gender ||
+                    registration?.stepData?.personalInfo?.gender ||
+                    registration?.stepData?.rawFormData?.gender ||
+                    userObj?.gender ||
+                    null;
+        }
+        const resolvedGender = (0, genderUtils_1.normalizeGender)(rawGender);
+        const regStatus = (0, genderUtils_1.calculateUserRegistrationStatus)(profileObj, registration);
+        if (userObj) {
+            userObj.gender = resolvedGender;
+            userObj.registrationStatus = regStatus;
+            userObj.registrationId = registration?.registrationId || null;
+            userObj.candidateId = profileObj?.candidateId || null;
+        }
+        if (profileObj) {
+            profileObj.gender = (0, genderUtils_1.normalizeGender)(profileObj.gender) || profileObj.gender;
+        }
         if (!canViewPrivate) {
             if (userObj) {
                 userObj.email = userObj.email ? maskEmail(userObj.email) : undefined;
@@ -5986,4 +6092,3 @@ async function getAuditLogs(req, res, next) {
         next(error);
     }
 }
-//# sourceMappingURL=adminController.js.map

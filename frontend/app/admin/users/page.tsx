@@ -417,6 +417,7 @@ function AdminUsersContent() {
             >
               <option value="all">All Registrations</option>
               <option value="complete">Complete Registrations</option>
+              <option value="in_progress">In Progress Registrations</option>
               <option value="incomplete">Incomplete Registrations</option>
               <option value="pending">Pending Registrations</option>
             </select>
@@ -644,11 +645,24 @@ function AdminUsersContent() {
 
                       {/* Registration Status Column */}
                       <td className="py-3.5 px-4">
-                        {user.registrationStatus === 'Complete' ? (
+                        {user.registrationStatus === 'Complete' || user.registrationStatus === 'Completed' ? (
                           <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 font-semibold text-[10px]">
                             <CheckCircle className="w-3 h-3 text-emerald-600" />
                             <span>Complete</span>
                           </span>
+                        ) : user.registrationStatus === 'In Progress' ? (
+                          <Link
+                            href={
+                              user.registrationId
+                                ? `/admin/unregistered-candidates?search=${encodeURIComponent(user.registrationId)}`
+                                : `/admin/unregistered-candidates?search=${encodeURIComponent(user.email || user.fullName)}`
+                            }
+                            className="inline-flex items-center gap-1 text-sky-700 bg-sky-50 hover:bg-sky-100 px-2.5 py-0.5 rounded-full border border-sky-200 font-semibold text-[10px] transition"
+                            title="Navigate to In-Progress Registration Draft"
+                          >
+                            <Clock className="w-3 h-3 text-sky-600" />
+                            <span>In Progress</span>
+                          </Link>
                         ) : user.registrationStatus === 'Pending' ? (
                           <span className="inline-flex items-center gap-1 text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200 font-semibold text-[10px]">
                             <Clock className="w-3 h-3 text-blue-600" />
@@ -962,7 +976,7 @@ function AdminUsersContent() {
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
                   <span className="text-[10px] uppercase font-bold text-slate-400">Registration</span>
                   <p className="font-bold text-slate-900 mt-0.5">
-                    {selectedUserDetail.user.registrationStatus || 'Complete'}
+                    {selectedUserDetail.user.registrationStatus || 'Pending'}
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">

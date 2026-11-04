@@ -19,6 +19,7 @@ const Admin_1 = require("../models/Admin");
 const AuditLog_1 = require("../models/AuditLog");
 const dataExportService_1 = require("../services/dataExportService");
 const securityUtils_1 = require("../utils/securityUtils");
+const genderUtils_1 = require("../utils/genderUtils");
 /**
  * Parse and validate MAX_EXPORT_ROWS from environment.
  *
@@ -321,7 +322,7 @@ function buildActiveCandidateRows(users, profileMap, subscriptionMap, canViewPri
             String(u._id),
             p.candidateId || 'Not recorded',
             p.displayName || u.fullName || 'Not recorded',
-            p.gender || u.gender || 'Not recorded',
+            (0, genderUtils_1.formatGenderDisplay)(p.gender || u.gender),
             canViewPrivateContact ? (u.email || 'Not recorded') : maskEmail(u.email),
             canViewPrivateContact ? (u.mobile || 'Not recorded') : maskMobile(u.mobile),
             formatDate(p.dob),
@@ -387,7 +388,7 @@ function buildIncompleteRegistrationRows(registrations, userMap, canViewPrivateC
         const mobileDisplay = canViewPrivateContact
             ? (rawMobile || 'Not recorded')
             : maskMobile(rawMobile);
-        const genderDisplay = r.gender || basic.gender || (linkedUser && linkedUser.gender) || 'Not recorded';
+        const genderDisplay = (0, genderUtils_1.formatGenderDisplay)(r.gender || basic.gender || (linkedUser && linkedUser.gender));
         const accountStatusDisplay = linkedUser
             ? (linkedUser.isActive ? 'Active User' : 'Inactive User')
             : 'Draft - No User Account';
@@ -554,17 +555,18 @@ async function exportCandidateData(req, res, next) {
             }
             // Gender filter: check Profile records (Profile holds authoritative gender)
             if (gender && gender !== 'all') {
+                const targetGender = (0, genderUtils_1.normalizeGender)(String(gender));
                 if (gender === 'not_recorded' || gender === 'Not recorded') {
                     const profilesWithGender = await Profile_1.Profile.find({ gender: { $exists: true, $ne: null } }).select('user gender').lean();
                     const recordedIds = Array.from(new Set(profilesWithGender
-                        .filter((p) => p.gender && String(p.gender).trim() !== '' && String(p.gender).toLowerCase() !== 'not recorded')
+                        .filter((p) => (0, genderUtils_1.normalizeGender)(p.gender))
                         .map((p) => String(p.user))
                         .filter(Boolean)));
                     userQuery._id = { $nin: recordedIds };
                 }
                 else {
-                    const safeGenderRegex = new RegExp(`^${(0, securityUtils_1.escapeRegex)(String(gender))}$`, 'i');
-                    const profilesWithGender = await Profile_1.Profile.find({ gender: safeGenderRegex }).select('user').lean();
+                    const queryVariants = (0, genderUtils_1.getGenderQueryVariants)(targetGender || String(gender));
+                    const profilesWithGender = await Profile_1.Profile.find({ gender: { $in: queryVariants } }).select('user').lean();
                     const genderUserIds = Array.from(new Set(profilesWithGender.map((p) => String(p.user)).filter(Boolean)));
                     userQuery._id = { $in: genderUserIds };
                 }
@@ -782,4 +784,3 @@ async function exportCandidateData(req, res, next) {
         next(error);
     }
 }
-//# sourceMappingURL=adminExportController.js.map
